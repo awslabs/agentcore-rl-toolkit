@@ -1,0 +1,20 @@
+# Virtual environments
+.venv/
+.venv-*/
+
+# Python cache
+__pycache__/
+.ruff_cache/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+
+# Claude Code configuration
+.claude/
+
+.bedrock_agentcore.yaml

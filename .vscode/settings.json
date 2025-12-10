@@ -1,0 +1,15 @@
+{
+  "files.exclude": {
+    "**/*.egg-info": true,
+    "**/__pycache__": true,
+    "**/dist": true,
+    "**/build": true,
+  },
+  "search.exclude": {
+    "**/*.egg-info": true,
+    "**/__pycache__": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.venv": true
+  }
+}
