@@ -7,7 +7,21 @@ name = "agentcore-rl-toolkit"
 version = "0.1.0"
 description = "Toolkit for Seamlessly Enabling RL Training with Bedrock AgentCore."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    {name = "Amazon Web Services - Labs", email = "opensource@amazon.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
 dependencies = [
     "bedrock-agentcore>=1.0.3",
     "bedrock-agentcore-starter-toolkit<=0.2.0",
@@ -21,6 +35,9 @@ dev = [
     "mypy>=1.0",
     "pre-commit>=3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
 [tool.ruff]
 line-length = 120
