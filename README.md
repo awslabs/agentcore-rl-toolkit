@@ -60,7 +60,7 @@ uv venv --python 3.13
 source .venv/bin/activate
 
 # Install with development dependencies
-uv pip install -e ".[dev]"
+uv sync --frozen --extra dev
 
 # Install pre-commit hooks
 pre-commit install

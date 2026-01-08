@@ -4,6 +4,25 @@ from agentcore_rl_toolkit import RewardFunction
 
 
 class GSM8KReward(RewardFunction):
+    def __call__(
+        self,
+        response_text="",
+        ground_truth="",
+        method="strict",
+        format_score=0.0,
+        score=1.0,
+        **kwargs,
+    ):
+        answer = self.extract_solution(solution_str=response_text, method=method)
+        if answer is None:
+            reward = 0
+        else:
+            if answer == ground_truth:
+                reward = score
+            else:
+                reward = format_score
+        return reward
+
     @staticmethod
     def extract_solution(solution_str, method="strict"):
         """
@@ -40,22 +59,3 @@ class GSM8KReward(RewardFunction):
                     if final_answer not in invalid_str:
                         break
         return final_answer
-
-    def __call__(
-        self,
-        response_text="",
-        ground_truth="",
-        method="strict",
-        format_score=0.0,
-        score=1.0,
-        **kwargs,
-    ):
-        answer = self.extract_solution(solution_str=response_text, method=method)
-        if answer is None:
-            reward = 0
-        else:
-            if answer == ground_truth:
-                reward = score
-            else:
-                reward = format_score
-        return reward

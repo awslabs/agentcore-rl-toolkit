@@ -243,5 +243,10 @@ class AgentCoreRLApp(BedrockAgentCoreApp, ABC):
             asyncio.create_task(rollout_background_task(payload, context))
             return {"status": "processing"}
 
+        # Remove __wrapped__ so inspect.signature() sees the wrapper's actual signature
+        # (payload, context) instead of the user function's signature. This ensures
+        # BedrockAgentCoreApp._takes_context() correctly passes context to this wrapper.
+        del rollout_entrypoint_wrapper.__wrapped__
+
         # Register using existing BedrockAgentCoreApp entrypoint infrastructure
         return self.entrypoint(rollout_entrypoint_wrapper)

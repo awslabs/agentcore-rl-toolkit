@@ -13,7 +13,7 @@ class RolloutCollector:
             from strands.experimental.hooks import BeforeModelInvocationEvent
             from strands.hooks import AfterInvocationEvent
         except ImportError:
-            raise ImportError("Strands not installed. Install with: uv pip install strands-agents[openai]") from None
+            raise ImportError("Strands not installed. Install with: " "uv pip install strands-agents[openai]") from None
 
         registry.add_callback(BeforeModelInvocationEvent, self.collect_messages)
         registry.add_callback(AfterInvocationEvent, self.prepare_rollout)

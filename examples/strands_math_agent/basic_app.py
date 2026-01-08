@@ -31,6 +31,7 @@ async def invoke_agent(payload):
     print("User input:", user_input)
 
     response = await agent.invoke_async(user_input)
+
     return response.message["content"][0]["text"]
 
 
