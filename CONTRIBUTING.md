@@ -41,7 +41,6 @@ uv sync --frozen --extra dev
 pre-commit install
 ```
 
-
 ## Contributing via Pull Requests
 Contributions via pull requests are much appreciated. Before sending us a pull request, please ensure that:
 

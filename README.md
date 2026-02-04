@@ -47,7 +47,7 @@ While session routing is valuable for multi-turn production agents, RL rollouts 
 
 ### Starting Point: A Deployment-Ready Agent
 
-This section shows what a deployment-ready ACR agent looks like—use it as a reference if you're new to ACR, or skip ahead if you already have a production agent. The agent must conform to [ACR's HTTP contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html) (endpoints like `/invocations`, `/ping`), but [`BedrockAgentCoreApp`](https://github.com/aws/bedrock-agentcore-sdk-python) handles this for you.
+This section shows what a deployment-ready ACR agent looks like—use it as a reference if you're new to ACR, or skip ahead if you already have a production agent. The agent must conform to [ACR's HTTP contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html) (endpoints like `/invocations`, `/ping`), but [`BedrockAgentCoreApp`](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html) handles this for you.
 
 For Strands agents, see the [Deploy to Bedrock AgentCore guide](https://strandsagents.com/latest/documentation/docs/user-guide/deploy/deploy_to_bedrock_agentcore/python/). For other frameworks, see the [ACR Getting Started documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-getting-started.html).
 
@@ -76,15 +76,16 @@ if __name__ == "__main__":
 Starting from a deployment-ready agent like above, here are the changes needed for RL training (see [`rl_app.py`](examples/strands_math_agent/rl_app.py) for full example):
 ```python
 from agentcore_rl_toolkit import StrandsAgentCoreRLApp, StrandsRolloutCollector
+from strands import Agent
 
 app = StrandsAgentCoreRLApp()
 model = app.create_openai_compatible_model()
 rollout_collector = StrandsRolloutCollector()
-agent = Agent(model=model, tools=[calculator], system_prompt="...", hooks=[rollout_collector])
-reward_fn = GSM8KReward()
+agent = Agent(model=model, system_prompt="...", hooks=[rollout_collector])
+reward_fn = GSM8KReward() # user-defined reward function
 
 @app.rollout_entrypoint
-async def invoke_agent(payload, context):
+async def invoke_agent(payload):
     response = await agent.invoke_async(payload.get("prompt"))
     rollout_data = rollout_collector.get_rollout_data()
     rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=payload.get("answer"))
@@ -160,7 +161,7 @@ agentcore configure --entrypoint examples/strands_math_agent/rl_app.py \
   --deployment-type container --disable-memory --non-interactive
 ```
 
-You can further customize these files if needed. Pre-generated Dockerfiles for all examples are provided in `.bedrock_agentcore/`. Once you have a Dockerfile, build and push your agent image to ECR:
+You can further customize these files if needed. Pre-generated Dockerfiles for all examples are provided in `.bedrock_agentcore/`. Once you have a Dockerfile, follow these steps to build and push your agent image to ECR.
 
 ### Setup Credentials and Environment Variables
 
