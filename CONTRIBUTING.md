@@ -20,6 +20,27 @@ reported the issue. Please try to include as much information as you can. Detail
 * Anything unusual about your environment or deployment
 
 
+## Development Setup
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Install uv if you haven't already, follow the installation [guide](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer).
+
+If you're developing or contributing to the `agentcore-rl-toolkit` package itself:
+
+```bash
+# Enter the repository
+cd agentcore-rl-toolkit
+
+# Create and activate uv environment
+uv venv --python 3.13
+source .venv/bin/activate
+
+# Install with development dependencies
+uv sync --frozen --extra dev
+
+# Install pre-commit hooks
+pre-commit install
+```
+
 ## Contributing via Pull Requests
 Contributions via pull requests are much appreciated. Before sending us a pull request, please ensure that:
 
