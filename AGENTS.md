@@ -35,7 +35,7 @@ uv run pytest tests/
 
 # Build and push Docker image to ECR (current approach, may change)
 ./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=.bedrock_agentcore/examples_strands_math_agent_rl_app/Dockerfile \
+  --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
   --tag=latest
 
 # Run example locally
@@ -52,7 +52,6 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/batch_runner.py` | `BatchRunner` for parallel evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
-| `examples/strands_migration_agent/` | Code migration agent with evaluation example |
 
 ---
 
@@ -73,23 +72,15 @@ agentcore-rl-toolkit/
 │           └── rollout_collector.py # StrandsRolloutCollector
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
+│   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
 │   │   ├── basic_app.py            # Production agent
 │   │   ├── rl_app.py               # RL-adapted agent
 │   │   ├── reward.py               # GSM8KReward implementation
 │   │   └── pyproject.toml          # Example-specific dependencies
-│   └── strands_migration_agent/    # Code migration example
-│       ├── basic_app.py
-│       ├── rl_app.py
-│       ├── evaluate.py             # BatchRunner usage example
-│       └── ...
 ├── tests/
 │   └── test_rollout_entrypoint.py
 ├── scripts/
 │   └── build_docker_image_and_push_to_ecr.sh
-├── .bedrock_agentcore/             # Generated Dockerfiles per agent
-│   ├── examples_strands_math_agent_rl_app/Dockerfile
-│   └── examples_strands_migration_agent_rl_app/Dockerfile
-├── .bedrock_agentcore.yaml         # Agent configurations
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -292,17 +283,15 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
 - We prioritize container (ECR image) deployment for operational simplicity
 
 **Current workflow:**
-1. Dockerfiles are generated in `.bedrock_agentcore/{agent_name}/Dockerfile`
-2. Use `scripts/build_docker_image_and_push_to_ecr.sh` to build and push (this approach may change when starter-toolkit is upgraded):
+1. Dockerfiles are generated in `examples/{agent_name}/.bedrock_agentcore/{app_name}/Dockerfile`
+2. Use `scripts/build_docker_image_and_push_to_ecr.sh` to build and push:
    ```bash
    ./scripts/build_docker_image_and_push_to_ecr.sh \
-     --dockerfile=.bedrock_agentcore/examples_strands_math_agent_rl_app/Dockerfile \
+     --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
      --tag=latest
    ```
 3. Training engine takes ECR URI as config for deployment
 4. Environment variables (model inference address, model name, etc.) are injected by the training engine
-
-**Note:** When co-developing the package with examples, Docker images are built at project root with custom install steps to reflect library changes.
 
 ### Evaluation
 
@@ -312,8 +301,6 @@ Users can evaluate agents before and after training using the same `rl_app.py`.
 - **Rate limiting**: Handles ACR TPS limits (25)
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
 - **SQS-based completion**: Polls until all results are received
-
-Example usage: `examples/strands_migration_agent/evaluate.py`
 
 **Note:** `create_openai_compatible_model()` accepts `provider_model_id` to call hosted cloud models (for evaluation) instead of training cluster inference servers.
 
@@ -359,12 +346,10 @@ uv run pytest tests/
 
 ### Building and Pushing Docker Images
 
-**Note:** This approach may change when starter-toolkit is upgraded.
-
 ```bash
 # Ensure .env is configured with AWS_REGION, AWS_ACCOUNT, ECR_REPO_NAME
 ./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=.bedrock_agentcore/examples_strands_math_agent_rl_app/Dockerfile \
+  --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
   --tag=my-tag
 ```
 
@@ -440,9 +425,6 @@ uv run pre-commit install
 
 ### Dependency Updates
 - **bedrock-agentcore-starter-toolkit**: Needs upgrade to latest version for better Docker utilities and local testing support
-  - Build context will change (Dockerfiles move to example folders)
-  - Custom install steps for co-development may need updating
-  - Current `scripts/build_docker_image_and_push_to_ecr.sh` approach may be replaced
 
 ---
 

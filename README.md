@@ -155,13 +155,13 @@ AgentCore runtime is currently supported by:
 ACR deploys agents as Docker containers. Most Dockerfiles can be auto-generated with the [AgentCore CLI](https://aws.github.io/bedrock-agentcore-starter-toolkit/api-reference/cli.html). Example command:
 
 ```bash
-# Run from project root
-agentcore configure --entrypoint examples/strands_math_agent/rl_app.py \
-  --requirements-file examples/strands_math_agent/pyproject.toml \
+# Run from examples/strands_math_agent
+agentcore configure --entrypoint rl_app.py \
+  --requirements-file pyproject.toml \
   --deployment-type container --disable-memory --non-interactive
 ```
 
-You can further customize these files if needed. Pre-generated Dockerfiles for all examples are provided in `.bedrock_agentcore/`. Once you have a Dockerfile, follow these steps to build and push your agent image to ECR.
+You can further customize these Dockerfiles if needed. Once you have a Dockerfile, follow these steps to build and push your agent image to ECR.
 
 ### Setup Credentials and Environment Variables
 
@@ -183,7 +183,7 @@ Then edit `.env` and fill in your values:
 ```bash
 # Use examples/strands_math_agent as an example
 chmod +x scripts/build_docker_image_and_push_to_ecr.sh
-bash ./scripts/build_docker_image_and_push_to_ecr.sh --dockerfile=.bedrock_agentcore/examples_strands_math_agent_rl_app/Dockerfile --tag=dev
+bash ./scripts/build_docker_image_and_push_to_ecr.sh --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile --tag=dev
 ```
 
 ### Start Training with veRL

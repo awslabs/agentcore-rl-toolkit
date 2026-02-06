@@ -12,9 +12,9 @@ ENV UV_SYSTEM_PYTHON=1 \
 
 
 
-COPY examples/strands_math_agent examples/strands_math_agent
+COPY . .
 # Install from pyproject.toml directory
-RUN cd examples/strands_math_agent && uv pip install .
+RUN cd . && uv pip install .
 
 
 

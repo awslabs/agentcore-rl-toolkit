@@ -12,19 +12,14 @@ ENV UV_SYSTEM_PYTHON=1 \
 
 
 
-COPY examples/strands_math_agent examples/strands_math_agent
+COPY . .
 # Install from pyproject.toml directory
-RUN cd examples/strands_math_agent && uv pip install .
+RUN cd . && uv pip install .
 
 
 
 
 RUN uv pip install aws-opentelemetry-distro==0.12.2
-
-# [TODO]: remove the following lines after being able to add this agentcore-rl-toolkit as
-# a dependency in examples/strands_math_agent/pyproject.toml
-COPY . .
-RUN uv pip install --force-reinstall --no-deps .
 
 
 # Signal that this is running in Docker for host binding logic
