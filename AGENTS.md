@@ -36,7 +36,8 @@ uv run pytest tests/
 # Build and push Docker image to ECR (current approach, may change)
 ./scripts/build_docker_image_and_push_to_ecr.sh \
   --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
-  --tag=latest
+  --tag=latest \
+  --context=examples/strands_math_agent
 
 # Run example locally
 cd examples/strands_math_agent && uv sync && uv run python rl_app.py
@@ -288,7 +289,8 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
    ```bash
    ./scripts/build_docker_image_and_push_to_ecr.sh \
      --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
-     --tag=latest
+     --tag=latest \
+     --context=examples/strands_math_agent
    ```
 3. Training engine takes ECR URI as config for deployment
 4. Environment variables (model inference address, model name, etc.) are injected by the training engine
@@ -350,7 +352,8 @@ uv run pytest tests/
 # Ensure .env is configured with AWS_REGION, AWS_ACCOUNT, ECR_REPO_NAME
 ./scripts/build_docker_image_and_push_to_ecr.sh \
   --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
-  --tag=my-tag
+  --tag=my-tag \
+  --context=examples/strands_math_agent
 ```
 
 ### Running an Example Locally
