@@ -3,32 +3,32 @@ build/
 dist/
 *.egg-info/
 *.egg
+uv.lock
 
 # Python cache
-__pycache__/
-__pycache__*
-*.py[cod]
-*$py.class
-*.so
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
 .Python
 
 # Virtual environments
-.venv/
+**/.venv/
 .env
-venv/
-env/
+**/venv/
+**/env/
 ENV/
 
 # Testing
-.pytest_cache/
+**/.pytest_cache/
 .coverage
 .coverage*
 htmlcov/
 .tox/
 *.cover
 .hypothesis/
-.mypy_cache/
-.ruff_cache/
+**/.mypy_cache/
+**/.ruff_cache/
 
 # Development
 *.log
@@ -57,6 +57,7 @@ docs/
 
 # Project specific
 tests/
+examples/
 
 # Bedrock AgentCore specific - keep config but exclude runtime files
 .bedrock_agentcore.yaml

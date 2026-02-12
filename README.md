@@ -183,7 +183,10 @@ Then edit `.env` and fill in your values:
 ```bash
 # Use examples/strands_math_agent as an example
 chmod +x scripts/build_docker_image_and_push_to_ecr.sh
-bash ./scripts/build_docker_image_and_push_to_ecr.sh --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile --tag=dev
+./scripts/build_docker_image_and_push_to_ecr.sh \
+  --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
+  --tag=dev \
+  --context=examples/strands_math_agent
 ```
 
 ### Start Training with veRL

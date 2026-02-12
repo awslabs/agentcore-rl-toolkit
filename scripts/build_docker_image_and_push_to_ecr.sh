@@ -4,6 +4,8 @@ set -e
 # Initialize variables
 DOCKERFILE_PATH=""
 DOCKER_TAG=""
+CONTEXT=""
+ADDITIONAL_CONTEXT=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -16,11 +18,21 @@ while [[ $# -gt 0 ]]; do
       DOCKER_TAG="${1#*=}"
       shift
       ;;
+    --context=*)
+      CONTEXT="${1#*=}"
+      shift
+      ;;
+    --additional-context=*)
+      ADDITIONAL_CONTEXT="${1#*=}"
+      shift
+      ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 --dockerfile=PATH --tag=TAG"
-      echo "  --dockerfile Path to Dockerfile (required)"
-      echo "  --tag        Docker image tag to use (required)"
+      echo "Usage: $0 --dockerfile=PATH --tag=TAG --context=PATH [--additional-context=NAME=PATH]"
+      echo "  --dockerfile    Path to Dockerfile (required)"
+      echo "  --tag           Docker image tag to use (required)"
+      echo "  --context       Main build context directory (required)"
+      echo "  --additional-context Additional named build context (optional, e.g., toolkit=.)"
       exit 1
       ;;
   esac
@@ -29,20 +41,30 @@ done
 # Check if required parameters are provided
 if [ -z "$DOCKERFILE_PATH" ]; then
   echo "Error: --dockerfile parameter is required"
-  echo "Usage: $0 --dockerfile=PATH --tag=TAG"
+  echo "Usage: $0 --dockerfile=PATH --tag=TAG --context=PATH [--additional-context=NAME=PATH]"
   exit 1
 fi
 
 if [ -z "$DOCKER_TAG" ]; then
   echo "Error: --tag parameter is required"
-  echo "Usage: $0 --dockerfile=PATH --tag=TAG"
+  echo "Usage: $0 --dockerfile=PATH --tag=TAG --context=PATH [--additional-context=NAME=PATH]"
+  exit 1
+fi
+
+if [ -z "$CONTEXT" ]; then
+  echo "Error: --context parameter is required"
+  echo "Usage: $0 --dockerfile=PATH --tag=TAG --context=PATH [--additional-context=NAME=PATH]"
   exit 1
 fi
 
 echo "Building and pushing Docker image to ECR"
 echo "=========================================="
-echo "Dockerfile: ${DOCKERFILE_PATH}"
-echo "Tag:        ${DOCKER_TAG}"
+echo "Dockerfile:    ${DOCKERFILE_PATH}"
+echo "Tag:           ${DOCKER_TAG}"
+echo "Context:       ${CONTEXT}"
+if [ -n "$ADDITIONAL_CONTEXT" ]; then
+  echo "Additional context:    ${ADDITIONAL_CONTEXT}"
+fi
 echo "=========================================="
 
 # Load and validate environment
@@ -92,7 +114,11 @@ echo ""
 echo "Building and pushing Docker image..."
 echo "Image: ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${DOCKER_TAG}"
 # Build to arm64 as required by AgentCore runtime, which uses AWS Graviton
-docker buildx build --platform linux/arm64 -f ${DOCKERFILE_PATH} -t ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${DOCKER_TAG} --push .
+ADDITIONAL_CONTEXT_ARG=""
+if [ -n "$ADDITIONAL_CONTEXT" ]; then
+  ADDITIONAL_CONTEXT_ARG="--build-context ${ADDITIONAL_CONTEXT}"
+fi
+docker buildx build --platform linux/arm64 -f ${DOCKERFILE_PATH} ${ADDITIONAL_CONTEXT_ARG} -t ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${DOCKER_TAG} --push ${CONTEXT}
 
 # Verify the image
 echo ""
