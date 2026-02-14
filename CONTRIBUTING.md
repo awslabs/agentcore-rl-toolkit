@@ -37,8 +37,8 @@ source .venv/bin/activate
 # Install with development dependencies
 uv sync --frozen --extra dev
 
-# Install pre-commit hooks
-pre-commit install
+# Install pre-commit hooks (linting, formatting, and commit message validation)
+pre-commit install --install-hooks -t pre-commit -t commit-msg
 ```
 
 ## Contributing via Pull Requests
