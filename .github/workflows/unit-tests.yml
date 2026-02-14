@@ -23,3 +23,5 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -v
+        env:
+          AWS_DEFAULT_REGION: us-west-2
