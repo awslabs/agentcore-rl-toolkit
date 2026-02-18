@@ -117,7 +117,9 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         rollout_dict["rewards"] = rewards
         return rollout_dict
 
-    def save_rollout_and_notify(self, rollout_data: dict, training_config: dict):
+    def save_rollout_and_notify(
+        self, rollout_data: dict, training_config: dict, payload: dict = None, result_key: str = None
+    ):
         """
         Save rollout data to S3 and notify SQS queue.
 
@@ -129,6 +131,8 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 - exp_id: Experiment ID for organizing data
                 - session_id: Session id for the current task
                 - input_id: id for discriminating different input data examples
+            payload: Original request payload (included in saved result for debugging)
+            result_key: S3 key for the result (computed externally for consistency)
         """
         # Validate and extract training configuration
         try:
@@ -137,7 +141,9 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             logging.error(f"Invalid training configuration: {e}")
             raise
 
-        result_key = f"{config.exp_id}/{config.input_id}_{config.session_id}.json"
+        # Use provided result_key or compute it
+        if result_key is None:
+            result_key = f"{config.exp_id}/{config.input_id}_{config.session_id}.json"
 
         if "status_code" not in rollout_data:
             rollout_data["status_code"] = 200
@@ -145,9 +151,14 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         if "stop_reason" not in rollout_data:
             rollout_data["stop_reason"] = "end_turn"
 
-        # Return the input id identifying rollouts of the same input data (prompt) example
-        # for advantage computation.
+        # Include metadata for correlation and debugging
         rollout_data["input_id"] = config.input_id
+        rollout_data["s3_bucket"] = config.s3_bucket
+        rollout_data["result_key"] = result_key
+
+        # Include full payload for debugging (with _training config for reproducibility)
+        if payload is not None:
+            rollout_data["payload"] = payload
 
         # Save to S3
         try:
@@ -205,7 +216,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             Decorated function registered as entrypoint
         """
 
-        async def rollout_background_task(payload, context):
+        async def rollout_background_task(payload, context, result_key):
             """Background task that does the actual agent work and rollout saving."""
             training_config = payload.get("_training")
 
@@ -225,7 +236,12 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
                 # Save rollout data if we have training config
                 if isinstance(result, dict) and training_config:
-                    self.save_rollout_and_notify(rollout_data=result, training_config=training_config)
+                    self.save_rollout_and_notify(
+                        rollout_data=result,
+                        training_config=training_config,
+                        payload=payload,
+                        result_key=result_key,
+                    )
                     logging.info(f"Rollout data saved for function: {func.__name__}")
 
                 return result
@@ -234,7 +250,12 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 # Always save error rollout for client notification
                 if training_config:
                     error_rollout = {"status_code": 500, "stop_reason": str(e)}
-                    self.save_rollout_and_notify(rollout_data=error_rollout, training_config=training_config)
+                    self.save_rollout_and_notify(
+                        rollout_data=error_rollout,
+                        training_config=training_config,
+                        payload=payload,
+                        result_key=result_key,
+                    )
                     logging.error(f"Error rollout saved for function: {func.__name__}: {e}")
                 raise
             finally:
@@ -244,8 +265,26 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         @wraps(func)
         async def rollout_entrypoint_wrapper(payload, context):
             """Entrypoint that starts background task and returns immediately."""
+            training_config = payload.get("_training")
+
+            # Compute result_key upfront so we can return it to the client
+            result_key = None
+            if training_config:
+                exp_id = training_config.get("exp_id", "")
+                input_id = training_config.get("input_id", "")
+                session_id = training_config.get("session_id", "")
+                result_key = f"{exp_id}/{input_id}_{session_id}.json"
+
             # Start background task without waiting
-            asyncio.create_task(rollout_background_task(payload, context))
+            asyncio.create_task(rollout_background_task(payload, context, result_key))
+
+            # Return result location so client can poll S3 for completion
+            if training_config:
+                return {
+                    "status": "processing",
+                    "s3_bucket": training_config.get("s3_bucket"),
+                    "result_key": result_key,
+                }
             return {"status": "processing"}
 
         # Remove __wrapped__ so inspect.signature() sees the wrapper's actual signature

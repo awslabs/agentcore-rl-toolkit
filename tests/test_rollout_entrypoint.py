@@ -82,3 +82,51 @@ def test_entrypoint_with_sync_handler():
 
     assert response.status_code == 200
     assert response.json() == {"status": "processing"}
+
+
+def test_response_includes_result_location_with_training_config():
+    """Test that response includes s3_bucket and result_key when _training config is provided."""
+    app = AgentCoreRLApp()
+
+    @app.rollout_entrypoint
+    async def handler(payload: dict):
+        return {"rollout_data": [{"test": True}], "rewards": [1.0]}
+
+    client = TestClient(app)
+    response = client.post(
+        "/invocations",
+        json={
+            "prompt": "test",
+            "_training": {
+                "exp_id": "exp-123",
+                "session_id": "sess-456",
+                "input_id": "input-789",
+                "s3_bucket": "my-bucket",
+                "sqs_url": "https://sqs.us-east-1.amazonaws.com/123/queue",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "processing"
+    assert result["s3_bucket"] == "my-bucket"
+    assert result["result_key"] == "exp-123/input-789_sess-456.json"
+
+
+def test_response_without_training_config():
+    """Test that response is minimal when no _training config is provided."""
+    app = AgentCoreRLApp()
+
+    @app.rollout_entrypoint
+    async def handler(payload: dict):
+        return {"rollout_data": [{"test": True}], "rewards": [1.0]}
+
+    client = TestClient(app)
+    response = client.post("/invocations", json={"prompt": "test"})
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result == {"status": "processing"}
+    assert "s3_bucket" not in result
+    assert "result_key" not in result
