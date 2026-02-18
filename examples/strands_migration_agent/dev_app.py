@@ -10,12 +10,12 @@ from strands_tools import editor, shell
 from utils import load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
 from vllm_model import vLLMModel
 
-from agentcore_rl_toolkit import StrandsAgentCoreRLApp
+from agentcore_rl_toolkit import AgentCoreRLApp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = StrandsAgentCoreRLApp()
+app = AgentCoreRLApp()
 
 load_dotenv()
 
