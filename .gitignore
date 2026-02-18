@@ -14,6 +14,9 @@ build/
 # Environment variables
 .env
 
+# Config files
+config.toml
+
 # Claude Code configuration
 .claude/
 
