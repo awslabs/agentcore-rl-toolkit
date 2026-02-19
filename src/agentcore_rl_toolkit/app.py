@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
@@ -36,25 +35,31 @@ class TrainingConfig:
             raise ValueError(f"Missing required training config field: {e}") from e
 
 
-class AgentCoreRLApp(BedrockAgentCoreApp, ABC):
+class AgentCoreRLApp(BedrockAgentCoreApp):
     def __init__(self):
         super().__init__()
         self.s3_client = boto3.client("s3")
         self.sqs_client = boto3.client("sqs")
 
-    @abstractmethod
     def create_openai_compatible_model(self, **kwargs):
         """Create an OpenAI-compatible model for this framework.
 
-        Must be implemented by framework-specific subclasses.
+        Optional: Override in framework-specific subclasses, or create model directly
+        in your entrypoint (see examples/strands_migration_agent/dev_app.py).
 
         Args:
             **kwargs: Framework-specific model parameters
 
         Returns:
             Framework-specific model instance configured for vLLM server
+
+        Raises:
+            NotImplementedError: If called without override. Create model directly instead.
         """
-        pass
+        raise NotImplementedError(
+            "create_openai_compatible_model() is optional. "
+            "Either override in a subclass or create your model directly in the entrypoint."
+        )
 
     def _get_model_config(self):
         """Get and validate model configuration from environment."""

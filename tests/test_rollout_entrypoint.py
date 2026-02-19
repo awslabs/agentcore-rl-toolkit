@@ -7,16 +7,9 @@ from starlette.testclient import TestClient
 from agentcore_rl_toolkit import AgentCoreRLApp
 
 
-class MockAgentCoreRLApp(AgentCoreRLApp):
-    """Minimal concrete implementation for testing."""
-
-    def create_openai_compatible_model(self, **kwargs):
-        return None
-
-
 def test_wrapper_signature_has_context():
     """Test that the wrapper's signature includes (payload, context) for BedrockAgentCoreApp."""
-    app = MockAgentCoreRLApp()
+    app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
     async def my_handler(payload: dict):
@@ -32,7 +25,7 @@ def test_wrapper_signature_has_context():
 
 def test_wrapper_preserves_function_name():
     """Test that @wraps preserves the original function name."""
-    app = MockAgentCoreRLApp()
+    app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
     async def my_custom_handler(payload: dict):
@@ -44,7 +37,7 @@ def test_wrapper_preserves_function_name():
 
 def test_entrypoint_with_payload_only():
     """Test that user function with signature (payload) works."""
-    app = MockAgentCoreRLApp()
+    app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
     async def handler(payload: dict):
@@ -59,7 +52,7 @@ def test_entrypoint_with_payload_only():
 
 def test_entrypoint_with_payload_and_context():
     """Test that user function with signature (payload, context) works."""
-    app = MockAgentCoreRLApp()
+    app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
     async def handler(payload: dict, context):
@@ -78,7 +71,7 @@ def test_entrypoint_with_payload_and_context():
 
 def test_entrypoint_with_sync_handler():
     """Test that sync user function works."""
-    app = MockAgentCoreRLApp()
+    app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
     def handler(payload: dict):
