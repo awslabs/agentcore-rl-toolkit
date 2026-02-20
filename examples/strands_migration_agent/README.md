@@ -98,7 +98,15 @@ python preprocess.py --s3-bucket-name my-migration-bench-data --max-repos-per-sp
 After data preprocessing is done, you can start testing the agent
 
 ```bash
-# Start server with hot reloading
+# Start a local vLLM server
+vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct \
+-tp 8 \
+--port 4000 \
+--enable-auto-tool-choice \
+--tool-call-parser qwen3_coder \
+--max-model-len 262144
+
+# Start the app server with hot reloading
 uvicorn dev_app:app --port 8080 --reload --reload-dir ../..
 
 # Submit request
