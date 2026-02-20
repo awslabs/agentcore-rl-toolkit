@@ -121,15 +121,32 @@ class RolloutClient:
         concurrent access from multiple threads.
     """
 
+    @staticmethod
+    def _parse_region_from_arn(arn: str) -> str:
+        """Extract AWS region from an ARN.
+
+        ARN format: arn:partition:service:region:account-id:resource-type/resource-id
+
+        Args:
+            arn: The ARN to parse
+
+        Returns:
+            The region string (e.g., "us-west-2")
+
+        Raises:
+            ValueError: If the ARN format is invalid
+        """
+        parts = arn.split(":")
+        if len(parts) < 4 or not parts[3]:
+            raise ValueError(f"Invalid ARN format, cannot extract region: {arn}")
+        return parts[3]
+
     def __init__(
         self,
         agent_runtime_arn: str,
         s3_bucket: str,
         exp_id: str,
-        region: str = None,
         max_retry_attempts: int = 5,
-        # ACR constraints
-        max_concurrent_sessions: int = 100,
         tps_limit: int = 25,
         # Optional model inference config (for vLLM/SGLang servers)
         base_url: str = None,
@@ -141,12 +158,10 @@ class RolloutClient:
         Initialize RolloutClient for invoking agents and collecting rollouts.
 
         Args:
-            agent_runtime_arn: ARN of the ACR agent runtime
+            agent_runtime_arn: ARN of the ACR agent runtime (region is inferred from ARN)
             s3_bucket: S3 bucket for storing rollout results
             exp_id: Experiment ID for organizing results
-            region: AWS region (default: from environment)
             max_retry_attempts: Max retries for transient errors (default: 5)
-            max_concurrent_sessions: Max ACR sessions to run concurrently (default: 100)
             tps_limit: ACR invocation rate limit (default: 25)
             base_url: Optional vLLM/SGLang server URL
             model_id: Optional model ID for inference
@@ -158,13 +173,15 @@ class RolloutClient:
         self.base_url = base_url
         self.model_id = model_id
         self.extra_config = extra_config
-        self.max_concurrent_sessions = max_concurrent_sessions
         self.tps_limit = tps_limit
+
+        # Infer region from ARN (boto3 region must match resource region)
+        self.region = self._parse_region_from_arn(agent_runtime_arn)
 
         # Configure boto3 with adaptive retry for 429/503
         config = Config(retries={"max_attempts": max_retry_attempts, "mode": "adaptive"})
-        self.agentcore_client = boto3.client("bedrock-agentcore", region_name=region, config=config)
-        self.s3_client = boto3.client("s3", region_name=region, config=config)
+        self.agentcore_client = boto3.client("bedrock-agentcore", region_name=self.region, config=config)
+        self.s3_client = boto3.client("s3", region_name=self.region, config=config)
 
         # Rate limiting state
         self._last_invoke_time = 0.0
@@ -235,6 +252,7 @@ class RolloutClient:
     def run_batch(
         self,
         payloads: list[dict],
+        max_concurrent_sessions: int,
         initial_interval: float = 0.5,
         max_interval: float = 30.0,
         backoff_factor: float = 1.5,
@@ -255,6 +273,8 @@ class RolloutClient:
 
         Args:
             payloads: List of payloads to process
+            max_concurrent_sessions: Max ACR sessions to run concurrently. Set based
+                on your ACR session quota and model API quota, etc.
             initial_interval: Starting poll interval (default 0.5s)
             max_interval: Cap on poll interval (default 30s)
             backoff_factor: Multiply interval by this each poll (default 1.5x)
@@ -263,7 +283,7 @@ class RolloutClient:
             BatchResult iterator that yields BatchItem for each payload
 
         Usage:
-            for item in client.run_batch(payloads):
+            for item in client.run_batch(payloads, max_concurrent_sessions=10):
                 if item.success:
                     process(item.result)
                 else:
@@ -272,7 +292,7 @@ class RolloutClient:
         return BatchResult(
             client=self,
             payloads=payloads,
-            max_concurrent=self.max_concurrent_sessions,
+            max_concurrent=max_concurrent_sessions,
             initial_interval=initial_interval,
             max_interval=max_interval,
             backoff_factor=backoff_factor,

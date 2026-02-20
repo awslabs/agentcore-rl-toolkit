@@ -213,25 +213,44 @@ class TestRolloutClient:
         """Test RolloutClient initializes correctly."""
         with patch("agentcore_rl_toolkit.client.boto3"):
             client = RolloutClient(
-                agent_runtime_arn="arn:aws:bedrock-agentcore:us-east-1:123:agent/test",
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
                 s3_bucket="test-bucket",
                 exp_id="exp-001",
-                region="us-east-1",
-                max_concurrent_sessions=50,
                 tps_limit=10,
                 base_url="http://localhost:8000",
                 model_id="test-model",
                 temperature=0.7,
             )
 
-            assert client.agent_runtime_arn == "arn:aws:bedrock-agentcore:us-east-1:123:agent/test"
+            assert client.agent_runtime_arn == "arn:aws:bedrock-agentcore:us-west-2:123:agent/test"
             assert client.s3_bucket == "test-bucket"
             assert client.exp_id == "exp-001"
-            assert client.max_concurrent_sessions == 50
+            assert client.region == "us-west-2"  # Inferred from ARN
             assert client.tps_limit == 10
             assert client.base_url == "http://localhost:8000"
             assert client.model_id == "test-model"
             assert client.extra_config == {"temperature": 0.7}
+
+    def test_parse_region_from_arn_valid(self):
+        """Test _parse_region_from_arn extracts region correctly."""
+        assert (
+            RolloutClient._parse_region_from_arn("arn:aws:bedrock-agentcore:us-west-2:123456789012:agent/my-agent")
+            == "us-west-2"
+        )
+        assert RolloutClient._parse_region_from_arn("arn:aws:bedrock-agentcore:eu-west-2:123:agent/test") == "eu-west-2"
+        assert (
+            RolloutClient._parse_region_from_arn("arn:aws-cn:bedrock-agentcore:cn-north-1:123:agent/test")
+            == "cn-north-1"
+        )
+
+    def test_parse_region_from_arn_invalid(self):
+        """Test _parse_region_from_arn raises on invalid ARNs."""
+        with pytest.raises(ValueError, match="Invalid ARN format"):
+            RolloutClient._parse_region_from_arn("not-an-arn")
+        with pytest.raises(ValueError, match="Invalid ARN format"):
+            RolloutClient._parse_region_from_arn("arn:aws:service")
+        with pytest.raises(ValueError, match="Invalid ARN format"):
+            RolloutClient._parse_region_from_arn("arn:aws:service::account:resource")  # Empty region
 
     def test_invoke_returns_future(self):
         """Test invoke() returns a RolloutFuture."""
@@ -250,7 +269,7 @@ class TestRolloutClient:
             }
 
             client = RolloutClient(
-                agent_runtime_arn="arn:aws:bedrock-agentcore:us-east-1:123:agent/test",
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
                 s3_bucket="test-bucket",
                 exp_id="exp-001",
             )
@@ -275,7 +294,7 @@ class TestRolloutClient:
             }
 
             client = RolloutClient(
-                agent_runtime_arn="arn:aws:test",
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
                 s3_bucket="test-bucket",
                 exp_id="exp-001",
                 base_url="http://localhost:8000",
@@ -302,17 +321,17 @@ class TestRolloutClient:
         """Test run_batch() returns a BatchResult."""
         with patch("agentcore_rl_toolkit.client.boto3"):
             client = RolloutClient(
-                agent_runtime_arn="arn:aws:test",
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
                 s3_bucket="test-bucket",
                 exp_id="exp-001",
             )
 
             payloads = [{"prompt": "q1"}, {"prompt": "q2"}]
-            result = client.run_batch(payloads)
+            result = client.run_batch(payloads, max_concurrent_sessions=50)
 
             assert isinstance(result, BatchResult)
             assert result.payloads == payloads
-            assert result.max_concurrent == client.max_concurrent_sessions
+            assert result.max_concurrent == 50
 
 
 class TestBatchResult:
@@ -355,7 +374,7 @@ class TestBatchResult:
             mock_s3.get_object.side_effect = mock_get_object
 
             client = RolloutClient(
-                agent_runtime_arn="arn:aws:test",
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
                 s3_bucket="test-bucket",
                 exp_id="exp-001",
                 tps_limit=1000,  # High limit to speed up test
@@ -365,7 +384,7 @@ class TestBatchResult:
 
             # Stream results as they complete
             items = []
-            for item in client.run_batch(payloads):
+            for item in client.run_batch(payloads, max_concurrent_sessions=10):
                 assert isinstance(item, BatchItem)
                 assert item.success is True
                 assert item.error is None
@@ -414,7 +433,7 @@ class TestBatchResult:
             mock_s3.get_object.side_effect = mock_get_object
 
             client = RolloutClient(
-                agent_runtime_arn="arn:aws:test",
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
                 s3_bucket="test-bucket",
                 exp_id="exp-001",
                 tps_limit=1000,
@@ -425,7 +444,7 @@ class TestBatchResult:
             # Stream results, separating successes and errors
             successes = []
             errors = []
-            for item in client.run_batch(payloads):
+            for item in client.run_batch(payloads, max_concurrent_sessions=10):
                 if item.success:
                     successes.append(item)
                 else:
