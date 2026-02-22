@@ -394,6 +394,10 @@ class TestBatchResult:
             # Results may not be in order since they complete as they're polled
             result_values = sorted([item.result["result"] for item in items])
             assert result_values == [1, 2, 3]
+            # All successful items should have a positive elapsed time
+            for item in items:
+                assert item.elapsed is not None
+                assert item.elapsed >= 0
 
     def test_batch_continues_on_invocation_error(self):
         """Test that batch continues processing when one invocation fails."""
@@ -456,3 +460,51 @@ class TestBatchResult:
             # Error item should have index and error message
             assert errors[0].index == 1
             assert "ACR invocation failed" in errors[0].error
+            assert errors[0].elapsed == 0.0
+
+            # Successful items should have positive elapsed time
+            for item in successes:
+                assert item.elapsed is not None
+                assert item.elapsed >= 0
+
+    def test_batch_times_out_slow_requests(self):
+        """Test that batch times out requests that exceed the timeout."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.return_value = {
+                "response": mock_streaming_body(
+                    {
+                        "status": "processing",
+                        "s3_bucket": "bucket",
+                        "result_key": "key1.json",
+                    }
+                )
+            }
+
+            # S3 HEAD always returns 404 (result never ready)
+            mock_s3.head_object.side_effect = ClientError(
+                {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
+            )
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+                tps_limit=1000,
+            )
+
+            payloads = [{"prompt": "q1"}]
+
+            # Use very short timeout for testing
+            items = list(client.run_batch(payloads, max_concurrent_sessions=1, timeout=0.1))
+
+            assert len(items) == 1
+            assert items[0].success is False
+            assert "Timeout" in items[0].error
+            assert items[0].index == 0
+            assert items[0].elapsed >= 0.1
