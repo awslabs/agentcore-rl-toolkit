@@ -5,12 +5,13 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import openai
+from typing_extensions import override
+
 from strands.models.openai import OpenAIModel
 from strands.types.content import Messages
 from strands.types.exceptions import ContextWindowOverflowException, ModelThrottledException
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
-from typing_extensions import override
 
 logger = logging.getLogger(__name__)
 

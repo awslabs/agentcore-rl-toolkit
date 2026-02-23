@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["dev_app", "reward", "models", "utils", "vllm_model"]
+py-modules = ["dev_app", "reward", "models", "utils"]
 
 [tool.uv.sources]
 migrationbench = { git = "https://github.com/amazon-science/MigrationBench.git", rev = "354a7858567efd63583224080586371db48e7388" }
