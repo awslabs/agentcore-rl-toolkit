@@ -1,0 +1,12 @@
+# Copy this file to config.toml and fill in your values
+
+[agentcore]
+region = "us-west-2"
+agent_name = "my_strands_migration_agent"
+image_uri = "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/example-agent:tag"
+execution_role_arn = "arn:aws:iam::ACCOUNT_ID:role/EXAMPLE_ROLE"
+
+# Network configuration (optional)
+network_mode = "VPC"
+subnets = ["subnet-xxxxxxxxxxxxxxxxx"]
+security_groups = ["sg-xxxxxxxxxxxxxxxxx"]
