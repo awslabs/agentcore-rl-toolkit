@@ -3,6 +3,7 @@
 import io
 import json
 import time
+from concurrent.futures import CancelledError
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -205,6 +206,105 @@ class TestRolloutFuture:
         time.sleep(0.2)
         assert future.ready_to_poll() is True
 
+    def test_cancel_stops_session(self):
+        """Test cancel() calls stop_runtime_session with correct args and returns True."""
+        mock_s3 = MagicMock()
+        mock_acr = MagicMock()
+
+        future = RolloutFuture(
+            s3_client=mock_s3,
+            s3_bucket="test-bucket",
+            result_key="exp/input_session.json",
+            session_id="sess-12345678-abcd",
+            agentcore_client=mock_acr,
+            agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+        )
+
+        assert future.cancel() is True
+        assert future.cancelled is True
+        mock_acr.stop_runtime_session.assert_called_once_with(
+            agentRuntimeArn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+            runtimeSessionId="sess-12345678-abcd",
+        )
+
+    def test_cancel_is_idempotent(self):
+        """Test second cancel() is a no-op and API is called only once."""
+        mock_s3 = MagicMock()
+        mock_acr = MagicMock()
+
+        future = RolloutFuture(
+            s3_client=mock_s3,
+            s3_bucket="test-bucket",
+            result_key="exp/input_session.json",
+            session_id="sess-12345678-abcd",
+            agentcore_client=mock_acr,
+            agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+        )
+
+        assert future.cancel() is True
+        assert future.cancel() is False
+        mock_acr.stop_runtime_session.assert_called_once()
+
+    def test_cancel_without_client(self):
+        """Test cancel() returns False when agentcore_client is None."""
+        mock_s3 = MagicMock()
+
+        future = RolloutFuture(
+            s3_client=mock_s3,
+            s3_bucket="test-bucket",
+            result_key="exp/input_session.json",
+        )
+
+        assert future.cancel() is False
+        assert future.cancelled is True
+
+    def test_cancel_handles_exception(self):
+        """Test cancel() returns False when API raises, still marks cancelled."""
+        mock_s3 = MagicMock()
+        mock_acr = MagicMock()
+        mock_acr.stop_runtime_session.side_effect = Exception("Service unavailable")
+
+        future = RolloutFuture(
+            s3_client=mock_s3,
+            s3_bucket="test-bucket",
+            result_key="exp/input_session.json",
+            session_id="sess-12345678-abcd",
+            agentcore_client=mock_acr,
+            agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+        )
+
+        assert future.cancel() is False
+        assert future.cancelled is True
+
+    def test_done_returns_true_after_cancel(self):
+        """Test done() returns True after cancel (cancelled is a terminal state)."""
+        mock_s3 = MagicMock()
+
+        future = RolloutFuture(
+            s3_client=mock_s3,
+            s3_bucket="test-bucket",
+            result_key="exp/input_session.json",
+        )
+
+        future.cancel()
+        assert future.done() is True
+        # S3 should not be polled after cancellation
+        mock_s3.head_object.assert_not_called()
+
+    def test_result_raises_after_cancel(self):
+        """Test result() raises CancelledError after cancel."""
+        mock_s3 = MagicMock()
+
+        future = RolloutFuture(
+            s3_client=mock_s3,
+            s3_bucket="test-bucket",
+            result_key="exp/input_session.json",
+        )
+
+        future.cancel()
+        with pytest.raises(CancelledError):
+            future.result()
+
 
 class TestRolloutClient:
     """Tests for RolloutClient."""
@@ -316,6 +416,33 @@ class TestRolloutClient:
             assert payload["_training"]["base_url"] == "http://localhost:8000"
             assert payload["_training"]["model_id"] == "test-model"
             assert payload["_training"]["temperature"] == 0.7
+
+    def test_invoke_future_has_session_id(self):
+        """Test invoke() returns future with session_id and agentcore_client set."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.return_value = {
+                "response": mock_streaming_body(
+                    {"status": "processing", "s3_bucket": "test-bucket", "result_key": "exp/key.json"}
+                )
+            }
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+            )
+
+            future = client.invoke({"prompt": "test"}, session_id="my-session")
+
+            assert future.session_id == "my-session"
+            assert future.agentcore_client is mock_acr
+            assert future.agent_runtime_arn == "arn:aws:bedrock-agentcore:us-west-2:123:agent/test"
 
     def test_run_batch_returns_batch_result(self):
         """Test run_batch() returns a BatchResult."""
@@ -508,3 +635,49 @@ class TestBatchResult:
             assert "Timeout" in items[0].error
             assert items[0].index == 0
             assert items[0].elapsed >= 0.1
+
+    def test_batch_timeout_cancels_session(self):
+        """Test that batch timeout triggers stop_runtime_session call."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.return_value = {
+                "response": mock_streaming_body(
+                    {
+                        "status": "processing",
+                        "s3_bucket": "bucket",
+                        "result_key": "key1.json",
+                    }
+                )
+            }
+
+            # S3 HEAD always returns 404 (result never ready)
+            mock_s3.head_object.side_effect = ClientError(
+                {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
+            )
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+                tps_limit=1000,
+            )
+
+            payloads = [{"prompt": "q1"}]
+
+            # Use very short timeout for testing
+            items = list(client.run_batch(payloads, max_concurrent_sessions=1, timeout=0.1))
+
+            assert len(items) == 1
+            assert items[0].success is False
+            assert "Timeout" in items[0].error
+
+            # Verify stop_runtime_session was called
+            mock_acr.stop_runtime_session.assert_called_once()
+            call_kwargs = mock_acr.stop_runtime_session.call_args.kwargs
+            assert call_kwargs["agentRuntimeArn"] == "arn:aws:bedrock-agentcore:us-west-2:123:agent/test"
+            assert "runtimeSessionId" in call_kwargs

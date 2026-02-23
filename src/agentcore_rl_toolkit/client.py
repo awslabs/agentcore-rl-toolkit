@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 
 import boto3
@@ -43,12 +44,19 @@ class RolloutFuture:
         initial_interval: float = 0.5,
         max_interval: float = 30.0,
         backoff_factor: float = 1.5,
+        session_id: str = None,
+        agentcore_client=None,
+        agent_runtime_arn: str = None,
     ):
         self.s3_client = s3_client
         self.s3_bucket = s3_bucket
         self.result_key = result_key
+        self.session_id = session_id
+        self.agentcore_client = agentcore_client
+        self.agent_runtime_arn = agent_runtime_arn
         self._result = None
         self._done = False
+        self._cancelled = False
 
         # Per-future backoff state
         self._poll_interval = initial_interval
@@ -59,8 +67,12 @@ class RolloutFuture:
         self._start_time = time.time()  # Track when future was created
 
     def done(self) -> bool:
-        """Check if result is ready (non-blocking). Updates backoff state."""
-        if self._done:
+        """Check if result is ready (non-blocking). Updates backoff state.
+
+        Returns True if the future is in a terminal state: either the result
+        is available in S3 or the future was cancelled.
+        """
+        if self._done or self._cancelled:
             return True
         try:
             self.s3_client.head_object(Bucket=self.s3_bucket, Key=self.result_key)
@@ -89,6 +101,35 @@ class RolloutFuture:
         """Returns seconds since this future was created."""
         return time.time() - self._start_time
 
+    def cancel(self) -> bool:
+        """Cancel the underlying ACR session (best-effort).
+
+        Sets cancelled to True once called, even if the API call fails or
+        the client/session_id are unavailable. Use ``cancelled`` to check
+        whether cancellation was *attempted*, not whether the session was
+        successfully stopped. Returns True only when the stop API call succeeds.
+        """
+        if self._cancelled:
+            return False
+        self._cancelled = True
+        if not self.agentcore_client or not self.session_id:
+            return False
+        try:
+            self.agentcore_client.stop_runtime_session(
+                agentRuntimeArn=self.agent_runtime_arn,
+                runtimeSessionId=self.session_id,
+            )
+            logger.info(f"Stopped session {self.session_id[:8]}...")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to stop session {self.session_id[:8]}...: {e}")
+            return False
+
+    @property
+    def cancelled(self) -> bool:
+        """True if cancellation was attempted (may not have succeeded)."""
+        return self._cancelled
+
     def result(self, timeout: float = None) -> dict:
         """
         Block until result is ready, polling S3 HEAD with exponential backoff.
@@ -103,8 +144,11 @@ class RolloutFuture:
             The rollout result dictionary from S3
 
         Raises:
+            CancelledError: If the future was cancelled.
             TimeoutError: If timeout is reached before result is ready.
         """
+        if self._cancelled:
+            raise CancelledError("Future was cancelled")
         if self._result is not None:
             return self._result
 
@@ -240,6 +284,9 @@ class RolloutClient:
             s3_client=self.s3_client,
             s3_bucket=data["s3_bucket"],
             result_key=data["result_key"],
+            session_id=session_id,
+            agentcore_client=self.agentcore_client,
+            agent_runtime_arn=self.agent_runtime_arn,
         )
 
     def invoke(self, payload: dict, session_id: str = None, input_id: str = None) -> RolloutFuture:
@@ -378,6 +425,7 @@ class BatchResult:
                 # Check for timeout first
                 if future.elapsed() > self.timeout:
                     completed_keys.append(key)
+                    future.cancel()
                     yield BatchItem(
                         success=False,
                         error=f"Timeout after {self.timeout}s",
