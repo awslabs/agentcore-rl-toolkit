@@ -102,7 +102,6 @@ def test_response_includes_result_location_with_training_config():
                 "session_id": "sess-456",
                 "input_id": "input-789",
                 "s3_bucket": "my-bucket",
-                "sqs_url": "https://sqs.us-east-1.amazonaws.com/123/queue",
             },
         },
     )
