@@ -10,8 +10,8 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 
 @dataclass
-class TrainingConfig:
-    """Training configuration for rollout collection and storage."""
+class RolloutConfig:
+    """Rollout configuration for rollout collection and storage."""
 
     exp_id: str
     session_id: str
@@ -19,8 +19,8 @@ class TrainingConfig:
     s3_bucket: str
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TrainingConfig":
-        """Create TrainingConfig from dictionary with validation."""
+    def from_dict(cls, data: dict) -> "RolloutConfig":
+        """Create RolloutConfig from dictionary with validation."""
         try:
             return cls(
                 exp_id=data["exp_id"],
@@ -29,7 +29,7 @@ class TrainingConfig:
                 s3_bucket=data["s3_bucket"],
             )
         except KeyError as e:
-            raise ValueError(f"Missing required training config field: {e}") from e
+            raise ValueError(f"Missing required rollout config field: {e}") from e
 
 
 class AgentCoreRLApp(BedrockAgentCoreApp):
@@ -113,13 +113,13 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         rollout_dict["rewards"] = rewards
         return rollout_dict
 
-    def save_rollout(self, rollout_data: dict, training_config: dict, payload: dict = None, result_key: str = None):
+    def save_rollout(self, rollout_data: dict, rollout_config: dict, payload: dict = None, result_key: str = None):
         """
         Save rollout data to S3.
 
         Args:
             rollout_data: The prepared rollout data
-            training_config: Training configuration dict containing:
+            rollout_config: Rollout configuration dict containing:
                 - s3_bucket: S3 bucket name
                 - exp_id: Experiment ID for organizing data
                 - session_id: Session id for the current task
@@ -127,11 +127,11 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             payload: Original request payload (included in saved result for debugging)
             result_key: S3 key for the result (computed externally for consistency)
         """
-        # Validate and extract training configuration
+        # Validate and extract rollout configuration
         try:
-            config = TrainingConfig.from_dict(training_config)
+            config = RolloutConfig.from_dict(rollout_config)
         except ValueError as e:
-            logging.error(f"Invalid training configuration: {e}")
+            logging.error(f"Invalid rollout configuration: {e}")
             raise
 
         # Use provided result_key or compute it
@@ -149,7 +149,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         rollout_data["s3_bucket"] = config.s3_bucket
         rollout_data["result_key"] = result_key
 
-        # Include full payload for debugging (with _training config for reproducibility)
+        # Include full payload for debugging (with _rollout config for reproducibility)
         if payload is not None:
             rollout_data["payload"] = payload
 
@@ -192,7 +192,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
         async def rollout_background_task(payload, context, result_key):
             """Background task that does the actual agent work and rollout saving."""
-            training_config = payload.get("_training")
+            rollout_config = payload.get("_rollout")
 
             # Register with async task tracking system for logging and ping status
             task_id = self.add_async_task(f"{func.__name__}")
@@ -203,16 +203,16 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 result = await self._invoke_handler(func, context, self._takes_context(func), payload)
 
                 # If this is an RL training run, validate and normalize the rollout structure
-                if training_config:
+                if rollout_config:
                     if not isinstance(result, dict):
                         raise ValueError("RL training runs must return a dictionary")
                     result = self._validate_and_normalize_rollout(result)
 
                 # Save rollout data if we have training config
-                if isinstance(result, dict) and training_config:
+                if isinstance(result, dict) and rollout_config:
                     self.save_rollout(
                         rollout_data=result,
-                        training_config=training_config,
+                        rollout_config=rollout_config,
                         payload=payload,
                         result_key=result_key,
                     )
@@ -222,11 +222,11 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
             except Exception as e:
                 # Always save error rollout for client notification
-                if training_config:
+                if rollout_config:
                     error_rollout = {"status_code": 500, "stop_reason": str(e)}
                     self.save_rollout(
                         rollout_data=error_rollout,
-                        training_config=training_config,
+                        rollout_config=rollout_config,
                         payload=payload,
                         result_key=result_key,
                     )
@@ -239,24 +239,24 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         @wraps(func)
         async def rollout_entrypoint_wrapper(payload, context):
             """Entrypoint that starts background task and returns immediately."""
-            training_config = payload.get("_training")
+            rollout_config = payload.get("_rollout")
 
             # Compute result_key upfront so we can return it to the client
             result_key = None
-            if training_config:
-                exp_id = training_config.get("exp_id", "")
-                input_id = training_config.get("input_id", "")
-                session_id = training_config.get("session_id", "")
+            if rollout_config:
+                exp_id = rollout_config.get("exp_id", "")
+                input_id = rollout_config.get("input_id", "")
+                session_id = rollout_config.get("session_id", "")
                 result_key = f"{exp_id}/{input_id}_{session_id}.json"
 
             # Start background task without waiting
             asyncio.create_task(rollout_background_task(payload, context, result_key))
 
             # Return result location so client can poll S3 for completion
-            if training_config:
+            if rollout_config:
                 return {
                     "status": "processing",
-                    "s3_bucket": training_config.get("s3_bucket"),
+                    "s3_bucket": rollout_config.get("s3_bucket"),
                     "result_key": result_key,
                 }
             return {"status": "processing"}

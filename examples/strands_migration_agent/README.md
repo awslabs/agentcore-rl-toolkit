@@ -117,7 +117,7 @@ curl -X POST http://localhost:8080/invocations \
     "repo_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/15093015999__EJServer.tar.gz",
     "metadata_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/metadata.json",
     "require_maximal_migration": false,
-    "_training": {
+    "_rollout": {
         "exp_id": "dev",
         "s3_bucket": "agentcore-rl",
         "session_id": "session_x",
