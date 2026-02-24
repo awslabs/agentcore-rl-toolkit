@@ -145,10 +145,8 @@ The training architecture follows a **decoupled design** where agent rollouts an
 
 This architecture enables parallel and highly efficient rollouts with secure execution during RL training. The decoupled design means training libraries only need the agent's container image to start training—agent code and dependencies stay completely separate from the training library.
 
-### Supported Training Libraries
-
-AgentCore runtime is currently supported by:
-- **[veRL](https://github.com/volcengine/verl)**: See the integration [PR](https://github.com/volcengine/verl/pull/4216).
+**Supported Training Libraries:**
+- To be announced.
 
 ### Prepare Your Agent Container
 
@@ -188,26 +186,6 @@ chmod +x scripts/build_docker_image_and_push_to_ecr.sh
   --tag=dev \
   --context=examples/strands_math_agent
 ```
-
-### Start Training with veRL
-
-Once your container is pushed to ECR, configure veRL with the AgentCore-specific parameters:
-
-```bash
-# AgentCore configuration for veRL
-actor_rollout_ref.rollout.name=agentcore
-actor_rollout_ref.rollout.agentcore.agent_name=<your-agent-name>
-actor_rollout_ref.rollout.agentcore.container_uri=<account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
-actor_rollout_ref.rollout.agentcore.s3_bucket=<your-s3-bucket>
-```
-
-| Parameter | Description |
-|-----------|-------------|
-| `agent_name` | Name for your agent in ACR |
-| `container_uri` | ECR URI of your RL-ready agent container |
-| `s3_bucket` | S3 bucket for storing rollout data |
-
-For a complete example, see the [veRL AgentCore integration PR](https://github.com/volcengine/verl/pull/4216).
 
 ## Contributing
 
