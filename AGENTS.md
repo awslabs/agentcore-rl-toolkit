@@ -50,7 +50,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
 | `src/agentcore_rl_toolkit/frameworks/strands/app.py` | `StrandsAgentCoreRLApp` (Strands-specific) |
 | `src/agentcore_rl_toolkit/frameworks/strands/rollout_collector.py` | `StrandsRolloutCollector` hook |
-| `src/agentcore_rl_toolkit/batch_runner.py` | `BatchRunner` for parallel evaluation |
+| `src/agentcore_rl_toolkit/client.py` | `RolloutClient` for batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 
@@ -63,8 +63,7 @@ agentcore-rl-toolkit/
 ├── src/agentcore_rl_toolkit/
 │   ├── __init__.py                 # Public exports
 │   ├── app.py                      # AgentCoreRLApp base class
-│   ├── batch_runner.py             # BatchRunner for evaluation
-│   ├── models.py                   # Pydantic models (TrainingConfig, etc.)
+│   ├── client.py                   # RolloutClient for batch evaluation
 │   ├── reward_function.py          # RewardFunction base class
 │   └── frameworks/
 │       └── strands/
@@ -186,13 +185,13 @@ With `@app.rollout_entrypoint` decorator replacing `@app.entrypoint`:
 - Health status from `/ping` is automatically managed (busy while working, idle when done)
 - ACR can manage session lifecycle to avoid early termination or wasteful idle sessions
 
-#### Design Pattern 2: Event-driven architecture with S3 + SQS
+#### Design Pattern 2: S3-based result delivery with HEAD polling
 
 Since the client won't get results directly from HTTP:
 - `@app.rollout_entrypoint` requires returning rollout and reward from the entrypoint
-- Rollout data is saved to S3 and a message with output location is sent to SQS
-- Client polls SQS until all results are received
-- SQS ensures near real-time delivery, easier error filtering, and flexible consumption patterns
+- Rollout data is saved to S3 with a predictable key returned in the immediate HTTP response
+- Client polls S3 using efficient HEAD requests to detect when each result is available
+- No additional messaging infrastructure required — S3 is the single source of truth
 
 #### Core Classes
 
@@ -259,7 +258,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 
 The `@rollout_entrypoint` decorator automatically:
 - Executes the function asynchronously in the background (works with both sync and async functions)
-- Saves rollout data to S3 and notifies SQS
+- Saves rollout data to S3
 - Handles errors and saves error rollouts for client awareness
 
 ```diff
@@ -299,10 +298,10 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
 
 Users can evaluate agents before and after training using the same `rl_app.py`.
 
-**BatchRunner** (`src/agentcore_rl_toolkit/batch_runner.py`) orchestrates parallel evaluation:
+**RolloutClient** (`src/agentcore_rl_toolkit/client.py`) orchestrates parallel evaluation:
 - **Rate limiting**: Handles ACR TPS limits (25)
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
-- **SQS-based completion**: Polls until all results are received
+- **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
 
 **Note:** `create_openai_compatible_model()` accepts `provider_model_id` to call hosted cloud models (for evaluation) instead of training cluster inference servers.
 

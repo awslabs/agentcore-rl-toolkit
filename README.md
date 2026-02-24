@@ -10,7 +10,7 @@ Toolkit to Seamlessly Enable RL Training on Any Agent with Bedrock AgentCore.
 The toolkit handles the complexity of:
 - **Rollout collection**: Automatically captures agent interactions (conversations, tool calls, etc.) during RL training episodes
 - **ACR integration**: Works seamlessly with ACR's auto-scaling and session management for efficient parallel rollout generation
-- **Data pipeline**: Manages S3 storage and SQS messaging for asynchronous rollout delivery to training engines
+- **Data pipeline**: S3 storage for asynchronous rollout delivery to training engines
 - **Reward interface**: Provides a standard base class for implementing custom reward functions
 
 ## Installation
@@ -42,7 +42,7 @@ While session routing is valuable for multi-turn production agents, RL rollouts 
 - **Minimal migration effort**: Convert your production agent to RL-ready with a simple decorator change (`@app.entrypoint` → `@app.rollout_entrypoint`)
 - **Framework support**: Built-in support for Strands framework with extensible architecture for other frameworks
 - **Fire-and-forget pattern**: Background async processing eliminates brittle long-lived TCP connections
-- **Event-driven architecture**: S3 + SQS integration for reliable, scalable rollout delivery
+- **S3-based result delivery**: Rollout results stored in S3, polled via efficient S3 HEAD requests
 - **Production-ready**: Direct code reuse from production agents ensures training reflects real deployment behavior
 
 ### Starting Point: A Deployment-Ready Agent
@@ -127,21 +127,21 @@ The training architecture follows a **decoupled design** where agent rollouts an
 │              └──────────────┴───────────────────┘              │
 │                             │ 3. Save rollouts + rewards       │
 │                             ▼                                  │
-│           ┌─────────────────┐    ┌─────────────────┐           │
-│           │  S3 (rollouts)  │───►│  SQS (notify)   │           │
-│           └─────────────────┘    └────────┬────────┘           │
-└───────────────────────────────────────────┼────────────────────┘
-                                            │ 4. Poll for results
-                                            ▼
-                                    Training Engine receives
-                                    rollouts for policy update
+│                   ┌───────────────────┐                        │
+│                   │  S3 (rollouts)    │                        │
+│                   └─────────┬─────────┘                        │
+└─────────────────────────────┼──────────────────────────────────┘
+                              │ 4. Poll S3 HEAD for results
+                              ▼
+                  Training Engine receives
+                  rollouts for policy update
 ```
 
 **Workflow:**
 1. **Prompt submission**: Training engine submits N prompts to ACR, which auto-scales to spin up N parallel agent sessions
 2. **Agent execution**: Each agent session processes its prompt, calling the inference server for model responses
-3. **Rollout collection**: Agents save rollouts and rewards to S3, send notifications via SQS
-4. **Policy update**: Training engine polls SQS, collects rollouts from S3, and updates the model
+3. **Rollout collection**: Agents save rollouts and rewards to S3
+4. **Policy update**: Training engine polls S3 for completed rollouts and updates the model
 
 This architecture enables parallel and highly efficient rollouts with secure execution during RL training. The decoupled design means training libraries only need the agent's container image to start training—agent code and dependencies stay completely separate from the training library.
 

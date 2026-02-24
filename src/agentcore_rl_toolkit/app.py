@@ -3,7 +3,6 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from functools import wraps
 
 import boto3
@@ -17,7 +16,6 @@ class TrainingConfig:
     exp_id: str
     session_id: str
     input_id: str
-    sqs_url: str
     s3_bucket: str
 
     @classmethod
@@ -28,7 +26,6 @@ class TrainingConfig:
                 exp_id=data["exp_id"],
                 session_id=data["session_id"],
                 input_id=data["input_id"],
-                sqs_url=data["sqs_url"],
                 s3_bucket=data["s3_bucket"],
             )
         except KeyError as e:
@@ -39,7 +36,6 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
     def __init__(self):
         super().__init__()
         self.s3_client = boto3.client("s3")
-        self.sqs_client = boto3.client("sqs")
 
     def create_openai_compatible_model(self, **kwargs):
         """Create an OpenAI-compatible model for this framework.
@@ -117,17 +113,14 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         rollout_dict["rewards"] = rewards
         return rollout_dict
 
-    def save_rollout_and_notify(
-        self, rollout_data: dict, training_config: dict, payload: dict = None, result_key: str = None
-    ):
+    def save_rollout(self, rollout_data: dict, training_config: dict, payload: dict = None, result_key: str = None):
         """
-        Save rollout data to S3 and notify SQS queue.
+        Save rollout data to S3.
 
         Args:
             rollout_data: The prepared rollout data
             training_config: Training configuration dict containing:
                 - s3_bucket: S3 bucket name
-                - sqs_url: SQS queue URL for notifications
                 - exp_id: Experiment ID for organizing data
                 - session_id: Session id for the current task
                 - input_id: id for discriminating different input data examples
@@ -171,25 +164,6 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             logging.info(f"Stored complete results at {result_key}")
         except Exception as e:
             logging.error(f"Failed to store results in S3: {e}")
-            raise
-
-        # Send SQS notification (mimic S3 notification format)
-        try:
-            sqs_message = {
-                "Records": [
-                    {
-                        "eventSource": "rollout:collector",
-                        "eventName": "ObjectCreated:Put",
-                        "eventTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                        "s3": {"bucket": {"name": config.s3_bucket}, "object": {"key": result_key}},
-                    }
-                ]
-            }
-
-            self.sqs_client.send_message(QueueUrl=config.sqs_url, MessageBody=json.dumps(sqs_message))
-            logging.info(f"Sent SQS notification for {result_key}")
-        except Exception as e:
-            logging.error(f"Failed to send SQS notification for {result_key}: {e}")
             raise
 
     def rollout_entrypoint(self, func):
@@ -236,7 +210,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
                 # Save rollout data if we have training config
                 if isinstance(result, dict) and training_config:
-                    self.save_rollout_and_notify(
+                    self.save_rollout(
                         rollout_data=result,
                         training_config=training_config,
                         payload=payload,
@@ -250,7 +224,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 # Always save error rollout for client notification
                 if training_config:
                     error_rollout = {"status_code": 500, "stop_reason": str(e)}
-                    self.save_rollout_and_notify(
+                    self.save_rollout(
                         rollout_data=error_rollout,
                         training_config=training_config,
                         payload=payload,

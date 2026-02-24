@@ -119,7 +119,6 @@ curl -X POST http://localhost:8080/invocations \
     "require_maximal_migration": false,
     "_training": {
         "exp_id": "dev",
-        "sqs_url": "https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/agentcore-rl",
         "s3_bucket": "agentcore-rl",
         "session_id": "session_x",
         "input_id": "prompt_y",
