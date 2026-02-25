@@ -48,11 +48,11 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | File | Purpose |
 |------|---------|
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
-| `src/agentcore_rl_toolkit/frameworks/strands/app.py` | `StrandsAgentCoreRLApp` (Strands-specific) |
-| `src/agentcore_rl_toolkit/frameworks/strands/rollout_collector.py` | `StrandsRolloutCollector` hook |
+| `src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py` | `vLLMModel` with token ID collection for RL training |
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` for batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
+| `examples/strands_migration_agent/` | Java migration agent example |
 
 ---
 
@@ -68,14 +68,20 @@ agentcore-rl-toolkit/
 │   └── frameworks/
 │       └── strands/
 │           ├── __init__.py
-│           ├── app.py              # StrandsAgentCoreRLApp
-│           └── rollout_collector.py # StrandsRolloutCollector
+│           ├── app.py              # StrandsAgentCoreRLApp (legacy)
+│           ├── vllm_model.py       # vLLMModel with token ID collection
+│           └── rollout_collector.py # StrandsRolloutCollector (legacy)
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
 │   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
 │   │   ├── basic_app.py            # Production agent
 │   │   ├── rl_app.py               # RL-adapted agent
 │   │   ├── reward.py               # GSM8KReward implementation
+│   │   └── pyproject.toml          # Example-specific dependencies
+│   ├── strands_migration_agent/    # Java migration example
+│   │   ├── dev_app.py              # RL-adapted migration agent
+│   │   ├── evaluate.py             # Batch evaluation script
+│   │   ├── reward.py               # MigrationReward implementation
 │   │   └── pyproject.toml          # Example-specific dependencies
 ├── tests/
 │   └── test_rollout_entrypoint.py
@@ -198,18 +204,16 @@ Since the client won't get results directly from HTTP:
 **AgentCoreRLApp** (`src/agentcore_rl_toolkit/app.py`)
 - Inherits `BedrockAgentCoreApp` - drop-in replacement
 - Provides `@app.rollout_entrypoint` decorator
-- Expects `_rollout` dict in payload following `RolloutConfig` model (experiment id, session id, input id)
-
-**StrandsAgentCoreRLApp** (`src/agentcore_rl_toolkit/frameworks/strands/app.py`)
-- Framework-specific RL app extending `AgentCoreRLApp`
-- Implements `create_openai_compatible_model()` for inference with vLLM/SGLang servers
+- Expects `_rollout` dict in payload following `RolloutConfig` model (experiment id, session id, input id, base_url, model_id)
+- Framework-agnostic: works with any agent framework, not just Strands
 
 #### Utilities
 
-**StrandsRolloutCollector** (`src/agentcore_rl_toolkit/frameworks/strands/rollout_collector.py`)
-- Strands Hook to collect per-turn conversation
-- Each turn contains full message history (accounting for context management)
-- Output follows OpenAI-style messages format
+**vLLMModel** (`src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py`)
+- Extends Strands `OpenAIModel` for use with vLLM/SGLang inference servers
+- Collects token IDs (prompt and response) and logprobs directly from the inference server
+- Avoids retokenization issues that cause training instability
+- Use `model.get_token_data()` to retrieve collected token data after agent execution
 
 **RewardFunction** (`src/agentcore_rl_toolkit/reward_function.py`)
 - Base class for reward implementations
@@ -219,62 +223,59 @@ Since the client won't get results directly from HTTP:
 
 See `examples/strands_math_agent` for a complete example adapting from `basic_app.py` to `rl_app.py`.
 
-#### Step 1: Switch to StrandsAgentCoreRLApp
+#### Step 1: Switch to AgentCoreRLApp & Add Reward Function
 
-- `StrandsAgentCoreRLApp` inherits `AgentCoreRLApp`, a thin wrapper around `BedrockAgentCoreApp`
-- Provides framework-specific utilities like `create_openai_compatible_model()` with `base_url` from training cluster
-
-```diff
-- from bedrock_agentcore.runtime import BedrockAgentCoreApp
-+ from agentcore_rl_toolkit import StrandsAgentCoreRLApp
-
-- app = BedrockAgentCoreApp()
-+ app = StrandsAgentCoreRLApp()
-
-- model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
-+ model = app.create_openai_compatible_model()
-```
-
-#### Step 2: Add Rollout Collector Hook & Reward Function
-
-- Rollout collector is implemented as a Strands hook
+- `AgentCoreRLApp` is a thin wrapper around `BedrockAgentCoreApp` — framework-agnostic
 - Users implement the reward function for their use case
 
 ```diff
-+ from agentcore_rl_toolkit import StrandsRolloutCollector
+- from bedrock_agentcore.runtime import BedrockAgentCoreApp
++ from agentcore_rl_toolkit import AgentCoreRLApp
++ from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 + from reward import GSM8KReward
 
-+ rollout_collector = StrandsRolloutCollector()
-  agent = Agent(
-      model=model,
-      tools=[calculator],
-      system_prompt="Your task is to solve the math problem. Use calculator when applicable.",
-+     hooks=[rollout_collector]
-  )
+- app = BedrockAgentCoreApp()
++ app = AgentCoreRLApp()
 + reward_fn = GSM8KReward()
 ```
 
-#### Step 3: Update Entrypoint Decorator & Return Rollout
+#### Step 2: Create Model & Agent Inside Entrypoint
+
+- Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
+- `vLLMModel` collects token IDs directly from the inference server, avoiding retokenization
+- Model and agent are created per-invocation inside the entrypoint
+- This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
+- This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
+
+```diff
+- model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
+- agent = Agent(model=model, tools=[calculator], system_prompt="...")
+
+@app.rollout_entrypoint
+def invoke_agent(payload: dict):
+-     response = await agent.invoke_async(user_input)
++     base_url = payload["_rollout"]["base_url"]
++     model_id = payload["_rollout"]["model_id"]
++     model = vLLMModel(client_args={"api_key": "abc", "base_url": base_url}, model_id=model_id)
++     agent = Agent(model=model, tools=[calculator], system_prompt="...")
++     response = agent(user_input)
+```
+
+#### Step 3: Collect Token Data & Return Rollout
 
 The `@rollout_entrypoint` decorator automatically:
-- Executes the function asynchronously in the background (works with both sync and async functions)
-- Saves rollout data to S3
+- Executes the function in the background (works with both sync and async functions)
+- Saves rollout data to S3 with a predictable key
 - Handles errors and saves error rollouts for client awareness
 
 ```diff
-- @app.entrypoint
-+ @app.rollout_entrypoint
-async def invoke_agent(payload):
-    #   ... agent setup
-    response = await agent.invoke_async(user_input)
-
 -   return response.message["content"][0]["text"]
-+   rollout_data = rollout_collector.get_rollout_data()
++   rollout_data = model.get_token_data()
 +   rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=answer)
 +   return {"rollout_data": rollout_data, "rewards": rewards}
 ```
 
-Each example in `/examples` contains `basic_app.py` and `rl_app.py` to demonstrate this adaptation.
+Each example in `/examples` contains `basic_app.py` and `rl_app.py` (or `dev_app.py`) to demonstrate this adaptation.
 
 ### Deployment to ACR
 
@@ -292,7 +293,7 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
      --context=examples/strands_math_agent
    ```
 3. Training engine takes ECR URI as config for deployment
-4. Environment variables (model inference address, model name, etc.) are injected by the training engine
+4. Model config (`base_url`, `model_id`) is passed via the `_rollout` payload at invocation time
 
 ### Evaluation
 
@@ -303,7 +304,7 @@ Users can evaluate agents before and after training using the same `rl_app.py`.
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
 - **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
 
-**Note:** `create_openai_compatible_model()` accepts `provider_model_id` to call hosted cloud models (for evaluation) instead of training cluster inference servers.
+**Note:** For evaluation, pass the appropriate `base_url` and `model_id` in the `_rollout` payload to point to the desired inference server (training cluster or hosted cloud model).
 
 ---
 
@@ -311,13 +312,13 @@ Users can evaluate agents before and after training using the same `rl_app.py`.
 
 | Variable | Description | When Required |
 |----------|-------------|---------------|
-| `BASE_URL` | Inference server URL (vLLM/SGLang endpoint) | Training |
-| `MODEL_ID` | Model identifier for inference | Always |
 | `AWS_REGION` | AWS region | Always |
 | `AWS_ACCOUNT` | AWS account ID | Deployment |
 | `ECR_REPO_NAME` | ECR repository name | Deployment |
 
-See `.env.example` for template. The build script sources `.env` for these values.
+**Note:** `BASE_URL` and `MODEL_ID` are no longer set via environment variables. They are passed in the `_rollout` payload field, allowing the training engine to configure them per-invocation.
+
+See `.env.example` for template. The build script sources `.env` for deployment values.
 
 ---
 
@@ -327,7 +328,7 @@ See `.env.example` for template. The build script sources `.env` for these value
 
 1. Create folder in `examples/{agent_name}/`
 2. Add `basic_app.py` (production version using `BedrockAgentCoreApp`)
-3. Add `rl_app.py` (RL-adapted version using `StrandsAgentCoreRLApp`)
+3. Add `rl_app.py` (RL-adapted version using `AgentCoreRLApp` + `vLLMModel`)
 4. Add `reward.py` with `RewardFunction` implementation
 5. Add `pyproject.toml` with example-specific dependencies
 6. Run `uv sync` in the example folder
@@ -382,6 +383,11 @@ uv sync  # Creates .venv in this folder
 source .venv/bin/activate
 ```
 
+To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unreleased changes like `vLLMModel`):
+```bash
+uv pip install -e ../../ --force-reinstall --no-deps
+```
+
 ### Finding Source Code
 
 When source locations are unclear:
@@ -405,7 +411,8 @@ uv run pre-commit install
 ### Code Conventions
 
 - Return dict with `rollout_data` and `rewards` keys from `@rollout_entrypoint`
-- Follow OpenAI message format for rollouts
+- Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
+- Use `vLLMModel.get_token_data()` to collect token IDs instead of hook-based rollout collection
 - Implement reward functions as classes inheriting `RewardFunction`
 
 ### Symlink Note
@@ -421,8 +428,7 @@ uv run pre-commit install
 - No CI/CD pipeline yet (planned)
 
 ### Design Improvements
-- **Model creation**: `create_openai_compatible_model()` may need to be separated from `AgentCoreRLApp` for better separation of concerns
-- **Token collection**: Need to collect token IDs directly to avoid retokenization issues causing training instability (see [rLLM SDK](https://rllm-project.readthedocs.io/en/latest/core-concepts/sdk/#1-define-your-agent-function) for reference)
+- **Model creation**: `vLLMModel` is currently under `frameworks/strands/` but is largely framework-agnostic; may be moved to a shared location
 
 ### Dependency Updates
 - **bedrock-agentcore-starter-toolkit**: Needs upgrade to latest version for better Docker utilities and local testing support

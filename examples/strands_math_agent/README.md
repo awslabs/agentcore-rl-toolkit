@@ -83,26 +83,13 @@ uv add vllm
 CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-4B-Instruct-2507 --max-model-len 8192 --port 4000 --enable-auto-tool-choice --tool-call-parser hermes
 ```
 
-### Configure environment
-To inform the RL app where the inference server is, we will use environment variables.
+### Setup S3
+
+As explained in the main [README](../../README.md#key-features), RL apps follow a fire-and-forget pattern where rollout and reward are saved to S3. The client polls S3 using efficient HEAD requests to detect when each result is available. We recommend setting up this resource and testing locally first to catch any issues early.
 
 ```bash
-# Create .env file from examples/strands_math_agent/.env.example
-cp .env.example .env
-
-# Update the following env vars in .env if needed, otherwise the default values should just work
-BASE_URL=http://localhost:4000/v1
-MODEL_ID=Qwen/Qwen3-4B-Instruct-2507
-```
-
-### Setup S3 and SQS
-
-As explained in the main [README](../../README.md#key-features), RL apps follow a fire-and-forget pattern where rollout and reward are saved to S3, then a notification is sent to SQS. We recommend setting up these resources and testing locally first to catch any issues early.
-
-```bash
-# Create S3 bucket and SQS queue
+# Create S3 bucket
 aws s3 mb s3://agentcore-rl
-aws sqs create-queue --queue-name agentcore-rl --no-cli-pager
 ```
 
 ### Start the application server
@@ -121,18 +108,19 @@ curl -X POST http://localhost:8080/invocations \
      -d '{
        "prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?",
        "answer": "694",
-       "_training": {
+       "_rollout": {
          "exp_id": "test",
-         "sqs_url": "https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/agentcore-rl",
          "s3_bucket": "agentcore-rl",
          "session_id": "session_123",
-         "input_id": "prompt_123"
+         "input_id": "prompt_123",
+         "base_url": "http://localhost:4000/v1",
+         "model_id": "Qwen/Qwen3-4B-Instruct-2507"
        }
      }'
 ```
 You should see the rollout and reward saved to `s3://agentcore-rl/test/prompt_123_session_123.json`.
 
-> **Note:** The `_training` config in the request payload is optional. If not provided, S3 save and SQS notification will be skipped. During training, this field will be generated automatically by the training engine. However, we recommend testing the full flow locally.
+> **Note:** The `_rollout` config must include `base_url` and `model_id`, which tell the agent which inference server to use. The remaining fields (`exp_id`, `s3_bucket`, `session_id`, `input_id`) control S3 result storage and are optional — if omitted, S3 save will be skipped. During training, the full `_rollout` config is injected automatically by the training engine. We recommend testing the full flow locally.
 
 
 ## Run RL App Hosted on ACR
@@ -169,19 +157,19 @@ While this option is feasible thanks to the [decoupled design](../../README.md#h
 Deploy the agent after it has been configured through either option mentioned above.
 
 ```bash
-agentcore deploy --agent strands_math_agent_rl --env BASE_URL=$BASE_URL --env MODEL_ID=$MODEL_ID
+agentcore deploy --agent strands_math_agent_rl
 ```
 
 ### Setup IAM Permissions for ACR
 
-The S3 bucket and SQS queue were already created in the local setup section. Now we need to grant the ACR agent's execution role permission to access them.
+The S3 bucket was already created in the local setup section. Now we need to grant the ACR agent's execution role permission to access it.
 
 ```bash
 # Find your rl agent's execution_role in .bedrock_agentcore.yaml and set the role name
 # e.g., arn:aws:iam::123456789:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123 -> AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123
 ROLE_NAME="YOUR_ROLE_NAME_HERE"
 
-# Add S3 and SQS permissions to the execution role
+# Add S3 permissions to the execution role
 aws iam put-role-policy --role-name $ROLE_NAME \
   --policy-name RLToolkitAccess \
   --policy-document '{
@@ -191,11 +179,6 @@ aws iam put-role-policy --role-name $ROLE_NAME \
         "Effect": "Allow",
         "Action": ["s3:PutObject", "s3:GetObject"],
         "Resource": "arn:aws:s3:::agentcore-rl/*"
-      },
-      {
-        "Effect": "Allow",
-        "Action": ["sqs:SendMessage"],
-        "Resource": "arn:aws:sqs:*:*:agentcore-rl"
       }
     ]
   }'
@@ -204,16 +187,16 @@ aws iam put-role-policy --role-name $ROLE_NAME \
 ### Invoke
 
 ```bash
-# Replace {REGION} and {ACCOUNT} with your AWS region and account ID.
 agentcore invoke --agent strands_math_agent_rl '{
   "prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?",
   "answer": "694",
-  "_training": {
+  "_rollout": {
     "exp_id": "test",
-    "sqs_url": "https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/agentcore-rl",
     "s3_bucket": "agentcore-rl",
     "session_id": "session_213",
-    "input_id": "prompt_213"
+    "input_id": "prompt_213",
+    "base_url": "http://localhost:4000/v1",
+    "model_id": "Qwen/Qwen3-4B-Instruct-2507"
   }
 }'
 ```
@@ -233,13 +216,13 @@ The following covers instructions for a set of common dev workflows.
 docker build -t math:dev --load . -f .bedrock_agentcore/strands_math_agent_basic/Dockerfile
 ```
 
-Add AWS credentials to your `.env` file since Docker can't access your host's AWS credential chain. Append these lines:
+Add AWS credentials to your `.env` file since Docker can't access your host's AWS credential chain:
 
 ```bash
-AWS_ACCESS_KEY_ID=your_access_key_id
-AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AWS_REGION=us-west-2
+cp .env.example .env
 ```
+
+Then edit .env and fill in your own AWS credentials.
 
 ```bash
 # Run Docker
@@ -274,12 +257,13 @@ curl -X POST http://localhost:8080/invocations \
      -d '{
        "prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?",
        "answer": "694",
-       "_training": {
+       "_rollout": {
          "exp_id": "test",
-         "sqs_url": "https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/agentcore-rl",
          "s3_bucket": "agentcore-rl",
          "session_id": "session_321",
-         "input_id": "prompt_321"
+         "input_id": "prompt_321",
+         "base_url": "http://localhost:4000/v1",
+         "model_id": "Qwen/Qwen3-4B-Instruct-2507"
        }
      }'
 ```

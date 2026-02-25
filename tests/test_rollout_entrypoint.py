@@ -132,8 +132,8 @@ def test_response_without_rollout_config():
     assert "result_key" not in result
 
 
-def test_entrypoint_rejects_empty_rollout_config():
-    """Test that _rollout: {} returns HTTP 500 with missing field error."""
+def test_entrypoint_accepts_empty_rollout_config():
+    """Test that _rollout: {} (no S3 fields) returns HTTP 200 with minimal response."""
     app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
@@ -146,13 +146,43 @@ def test_entrypoint_rejects_empty_rollout_config():
         json={"prompt": "test", "_rollout": {}},
     )
 
-    assert response.status_code == 500
-    assert "Missing required rollout config field" in response.json()["error"]
+    assert response.status_code == 200
+    result = response.json()
+    assert result == {"status": "processing"}
+    assert "s3_bucket" not in result
+    assert "result_key" not in result
+
+
+def test_entrypoint_accepts_model_only_rollout_config():
+    """Test that _rollout with only base_url/model_id (no S3 fields) returns HTTP 200."""
+    app = AgentCoreRLApp()
+
+    @app.rollout_entrypoint
+    async def handler(payload: dict):
+        return {"rollout_data": [{"test": True}], "rewards": [1.0]}
+
+    client = TestClient(app)
+    response = client.post(
+        "/invocations",
+        json={
+            "prompt": "test",
+            "_rollout": {
+                "base_url": "http://localhost:8000/v1",
+                "model_id": "my-model",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result == {"status": "processing"}
+    assert "s3_bucket" not in result
+    assert "result_key" not in result
 
 
 @pytest.mark.parametrize("missing_field", ["exp_id", "session_id", "input_id", "s3_bucket"])
-def test_entrypoint_rejects_rollout_config_missing_single_field(missing_field):
-    """Test that omitting any single required field returns HTTP 500 with the field name in error."""
+def test_entrypoint_rejects_partial_s3_config(missing_field):
+    """Test that providing some but not all S3 fields returns HTTP 500."""
     app = AgentCoreRLApp()
 
     @app.rollout_entrypoint

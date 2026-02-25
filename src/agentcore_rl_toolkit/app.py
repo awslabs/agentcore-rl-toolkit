@@ -8,6 +8,8 @@ from functools import wraps
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
+_S3_CONFIG_FIELDS = ("exp_id", "session_id", "input_id", "s3_bucket")
+
 
 @dataclass
 class RolloutConfig:
@@ -208,8 +210,8 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                         raise ValueError("RL training runs must return a dictionary")
                     result = self._validate_and_normalize_rollout(result)
 
-                # Save rollout data if we have training config
-                if isinstance(result, dict) and rollout_dict:
+                # Save rollout data if we have S3 config
+                if isinstance(result, dict) and result_key:
                     self.save_rollout(
                         rollout_data=result,
                         rollout_config=rollout_dict,
@@ -221,8 +223,8 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 return result
 
             except Exception as e:
-                # Always save error rollout for client notification
-                if rollout_dict:
+                # Save error rollout for client notification when S3 is configured
+                if result_key:
                     error_rollout = {"status_code": 500, "stop_reason": str(e)}
                     self.save_rollout(
                         rollout_data=error_rollout,
@@ -245,7 +247,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             # ValueError propagates to base class, which returns HTTP 500.
             result_key = None
             rollout_config = None
-            if rollout_dict is not None:
+            if rollout_dict is not None and any(f in rollout_dict for f in _S3_CONFIG_FIELDS):
                 rollout_config = RolloutConfig.from_dict(rollout_dict)
                 result_key = f"{rollout_config.exp_id}/{rollout_config.input_id}_{rollout_config.session_id}.json"
 

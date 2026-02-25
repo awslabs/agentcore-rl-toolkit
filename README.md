@@ -75,29 +75,34 @@ if __name__ == "__main__":
 
 Starting from a deployment-ready agent like above, here are the changes needed for RL training (see [`rl_app.py`](examples/strands_math_agent/rl_app.py) for full example):
 ```python
-from agentcore_rl_toolkit import StrandsAgentCoreRLApp, StrandsRolloutCollector
+from agentcore_rl_toolkit import AgentCoreRLApp
+from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 from strands import Agent
 
-app = StrandsAgentCoreRLApp()
-model = app.create_openai_compatible_model()
-rollout_collector = StrandsRolloutCollector()
-agent = Agent(model=model, system_prompt="...", hooks=[rollout_collector])
-reward_fn = GSM8KReward() # user-defined reward function
+app = AgentCoreRLApp()
+reward_fn = GSM8KReward()  # user-defined reward function
 
 @app.rollout_entrypoint
-async def invoke_agent(payload):
-    response = await agent.invoke_async(payload.get("prompt"))
-    rollout_data = rollout_collector.get_rollout_data()
+def invoke_agent(payload: dict):
+    base_url = payload["_rollout"]["base_url"]
+    model_id = payload["_rollout"]["model_id"]
+    model = vLLMModel(client_args={"api_key": "abc", "base_url": base_url}, model_id=model_id)
+    agent = Agent(model=model, tools=[...], system_prompt="...")
+
+    response = agent(payload.get("prompt"))
+    rollout_data = model.get_token_data()
     rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=payload.get("answer"))
     return {"rollout_data": rollout_data, "rewards": rewards}
 ```
 
 **Key changes:**
-1. `BedrockAgentCoreApp` → `StrandsAgentCoreRLApp`
-2. `BedrockModel` → `app.create_openai_compatible_model()` (points to training cluster)
-3. Add `StrandsRolloutCollector` hook to capture conversations
-4. `@app.entrypoint` → `@app.rollout_entrypoint`
+1. `BedrockAgentCoreApp` → `AgentCoreRLApp` (framework-agnostic)
+2. `BedrockModel` → `vLLMModel` created inside the entrypoint with `base_url`/`model_id` from `_rollout` payload
+3. `@app.entrypoint` → `@app.rollout_entrypoint`
+4. Use `model.get_token_data()` to collect token IDs directly (avoids retokenization)
 5. Return `{"rollout_data": ..., "rewards": ...}` instead of text
+
+**Why create model and agent inside the entrypoint?** During RL training, the training engine can pass runtime configuration—such as inference server address, sampling parameters, and system prompt—via the `_rollout` payload, giving flexibility to accommodate different learning scenarios. This is safe because RL rollouts are single-invocation: the agent doesn't need persistent conversation history across requests, so there's no need to define model and agent as global variables.
 
 ## Start Training on Example Agents
 
