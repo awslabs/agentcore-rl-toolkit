@@ -66,6 +66,9 @@ tests/
 # Keep wheelhouse for offline installations
 # wheelhouse/
 
+# Results / data
+results/
+
 # Monorepo directories
 cdk/
 terraform/
