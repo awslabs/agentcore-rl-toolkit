@@ -192,7 +192,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
         async def rollout_background_task(payload, context, result_key):
             """Background task that does the actual agent work and rollout saving."""
-            rollout_config = payload.get("_rollout")
+            rollout_dict = payload.get("_rollout")
 
             # Register with async task tracking system for logging and ping status
             task_id = self.add_async_task(f"{func.__name__}")
@@ -203,16 +203,16 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 result = await self._invoke_handler(func, context, self._takes_context(func), payload)
 
                 # If this is an RL training run, validate and normalize the rollout structure
-                if rollout_config:
+                if rollout_dict:
                     if not isinstance(result, dict):
                         raise ValueError("RL training runs must return a dictionary")
                     result = self._validate_and_normalize_rollout(result)
 
                 # Save rollout data if we have training config
-                if isinstance(result, dict) and rollout_config:
+                if isinstance(result, dict) and rollout_dict:
                     self.save_rollout(
                         rollout_data=result,
-                        rollout_config=rollout_config,
+                        rollout_config=rollout_dict,
                         payload=payload,
                         result_key=result_key,
                     )
@@ -222,11 +222,11 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
             except Exception as e:
                 # Always save error rollout for client notification
-                if rollout_config:
+                if rollout_dict:
                     error_rollout = {"status_code": 500, "stop_reason": str(e)}
                     self.save_rollout(
                         rollout_data=error_rollout,
-                        rollout_config=rollout_config,
+                        rollout_config=rollout_dict,
                         payload=payload,
                         result_key=result_key,
                     )
@@ -239,15 +239,15 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         @wraps(func)
         async def rollout_entrypoint_wrapper(payload, context):
             """Entrypoint that starts background task and returns immediately."""
-            rollout_config = payload.get("_rollout")
+            rollout_dict = payload.get("_rollout")
 
-            # Compute result_key upfront so we can return it to the client
+            # Validate required fields before launching background task.
+            # ValueError propagates to base class, which returns HTTP 500.
             result_key = None
-            if rollout_config:
-                exp_id = rollout_config.get("exp_id", "")
-                input_id = rollout_config.get("input_id", "")
-                session_id = rollout_config.get("session_id", "")
-                result_key = f"{exp_id}/{input_id}_{session_id}.json"
+            rollout_config = None
+            if rollout_dict is not None:
+                rollout_config = RolloutConfig.from_dict(rollout_dict)
+                result_key = f"{rollout_config.exp_id}/{rollout_config.input_id}_{rollout_config.session_id}.json"
 
             # Start background task without waiting
             asyncio.create_task(rollout_background_task(payload, context, result_key))
@@ -256,7 +256,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             if rollout_config:
                 return {
                     "status": "processing",
-                    "s3_bucket": rollout_config.get("s3_bucket"),
+                    "s3_bucket": rollout_config.s3_bucket,
                     "result_key": result_key,
                 }
             return {"status": "processing"}
