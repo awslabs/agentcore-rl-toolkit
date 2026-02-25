@@ -242,7 +242,9 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 #### Step 2: Create Model & Agent Inside Entrypoint
 
 - Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
+- Optional `sampling_params` (e.g., `max_completion_tokens`, `temperature`) can also be passed via `_rollout` for training-engine-controlled generation settings
 - `vLLMModel` collects token IDs directly from the inference server, avoiding retokenization
+- `api_key` is set to `"EMPTY"` — the standard vLLM convention for servers that don't require authentication
 - Model and agent are created per-invocation inside the entrypoint
 - This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
 - This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
@@ -256,7 +258,8 @@ def invoke_agent(payload: dict):
 -     response = await agent.invoke_async(user_input)
 +     base_url = payload["_rollout"]["base_url"]
 +     model_id = payload["_rollout"]["model_id"]
-+     model = vLLMModel(client_args={"api_key": "abc", "base_url": base_url}, model_id=model_id)
++     params = payload["_rollout"].get("sampling_params", {})
++     model = vLLMModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
 +     agent = Agent(model=model, tools=[calculator], system_prompt="...")
 +     response = agent(user_input)
 ```
@@ -293,7 +296,7 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
      --context=examples/strands_math_agent
    ```
 3. Training engine takes ECR URI as config for deployment
-4. Model config (`base_url`, `model_id`) is passed via the `_rollout` payload at invocation time
+4. Model config (`base_url`, `model_id`, and optionally `sampling_params`) is passed via the `_rollout` payload at invocation time
 
 ### Evaluation
 
@@ -304,7 +307,7 @@ Users can evaluate agents before and after training using the same `rl_app.py`.
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
 - **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
 
-**Note:** For evaluation, pass the appropriate `base_url` and `model_id` in the `_rollout` payload to point to the desired inference server (training cluster or hosted cloud model).
+**Note:** For evaluation, pass the appropriate `base_url`, `model_id`, and optionally `sampling_params` in the `_rollout` payload to point to the desired inference server (training cluster or hosted cloud model).
 
 ---
 
@@ -316,7 +319,7 @@ Users can evaluate agents before and after training using the same `rl_app.py`.
 | `AWS_ACCOUNT` | AWS account ID | Deployment |
 | `ECR_REPO_NAME` | ECR repository name | Deployment |
 
-**Note:** `BASE_URL` and `MODEL_ID` are no longer set via environment variables. They are passed in the `_rollout` payload field, allowing the training engine to configure them per-invocation.
+**Note:** `BASE_URL` and `MODEL_ID` are no longer set via environment variables. They are passed in the `_rollout` payload field along with optional `sampling_params`, allowing the training engine to configure them per-invocation.
 
 See `.env.example` for template. The build script sources `.env` for deployment values.
 

@@ -41,10 +41,9 @@ reward_fn = MigrationReward()
 def invoke_agent(payload: dict):
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
+    params = payload["_rollout"].get("sampling_params", {})
 
-    model = vLLMModel(
-        client_args={"api_key": "abc", "base_url": base_url}, model_id=model_id, params={"max_completion_tokens": 8192}
-    )
+    model = vLLMModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
 
     agent = Agent(
         model=model,

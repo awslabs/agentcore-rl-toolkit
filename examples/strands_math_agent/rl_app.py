@@ -36,7 +36,7 @@ def invoke_agent(payload: dict):
     model_id = payload["_rollout"]["model_id"]
 
     model = vLLMModel(
-        client_args={"api_key": "abc", "base_url": base_url},
+        client_args={"api_key": "EMPTY", "base_url": base_url},
         model_id=model_id,
     )
 

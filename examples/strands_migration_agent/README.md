@@ -131,7 +131,8 @@ curl -X POST http://localhost:8080/invocations \
         "session_id": "session_x",
         "input_id": "prompt_y",
         "base_url": "http://localhost:4000/v1",
-        "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+        "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        "sampling_params": {"max_completion_tokens": 8192}
     }
   }'
 
