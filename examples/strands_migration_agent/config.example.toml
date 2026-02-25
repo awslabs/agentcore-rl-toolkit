@@ -6,7 +6,16 @@ agent_name = "my_strands_migration_agent"
 image_uri = "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/example-agent:tag"
 execution_role_arn = "arn:aws:iam::ACCOUNT_ID:role/EXAMPLE_ROLE"
 
+# Agent ARN (used after deployment)
+agent_arn = "arn:aws:bedrock-agentcore:REGION:ACCOUNT_ID:runtime/AGENT_ID"
+
 # Network configuration (optional)
 network_mode = "VPC"
 subnets = ["subnet-xxxxxxxxxxxxxxxxx"]
 security_groups = ["sg-xxxxxxxxxxxxxxxxx"]
+
+[eval]
+s3_input_bucket = "my-benchmark-bucket/path/to/inputs/"
+s3_output_bucket = "my-rollout-results-bucket"
+base_url = "http://INFERENCE_SERVER_IP:8000/v1"
+model_id = "my-model-id"

@@ -49,6 +49,14 @@ sudo apt install -y openjdk-17-jdk
 java --version
 ```
 
+If multiple Java versions are installed and the system's update-alternatives is still not pointing to Java 17, run:
+
+```bash
+sudo update-alternatives --config java
+```
+
+This will list all installed Java versions and let you pick Java 17.
+
 #### Install Maven 3.9.6
 
 ```bash
