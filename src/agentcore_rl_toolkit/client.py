@@ -205,7 +205,7 @@ class RolloutClient:
         # Optional model inference config (for vLLM/SGLang servers)
         base_url: str = None,
         model_id: str = None,
-        # Additional config passed through to _training (e.g., sampling params)
+        # Additional config passed through to _rollout (e.g., sampling params)
         **extra_config,
     ):
         """
@@ -219,7 +219,7 @@ class RolloutClient:
             tps_limit: ACR invocation rate limit (default: 25)
             base_url: Optional vLLM/SGLang server URL
             model_id: Optional model ID for inference
-            **extra_config: Additional config passed to _training (e.g., temperature, top_p)
+            **extra_config: Additional config passed to _rollout (e.g., temperature, top_p)
         """
         self.agent_runtime_arn = agent_runtime_arn
         self.s3_bucket = s3_bucket
@@ -267,7 +267,7 @@ class RolloutClient:
         if self.model_id:
             rollout_config["model_id"] = self.model_id
 
-        full_payload = {**payload, "_training": rollout_config}
+        full_payload = {**payload, "_rollout": rollout_config}
 
         # Invoke via boto3 with timing
         invoke_start = time.time()

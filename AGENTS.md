@@ -198,7 +198,7 @@ Since the client won't get results directly from HTTP:
 **AgentCoreRLApp** (`src/agentcore_rl_toolkit/app.py`)
 - Inherits `BedrockAgentCoreApp` - drop-in replacement
 - Provides `@app.rollout_entrypoint` decorator
-- Expects `_training` dict in payload following `TrainingConfig` model (experiment id, session id, input id)
+- Expects `_rollout` dict in payload following `RolloutConfig` model (experiment id, session id, input id)
 
 **StrandsAgentCoreRLApp** (`src/agentcore_rl_toolkit/frameworks/strands/app.py`)
 - Framework-specific RL app extending `AgentCoreRLApp`
@@ -421,7 +421,6 @@ uv run pre-commit install
 - No CI/CD pipeline yet (planned)
 
 ### Design Improvements
-- **User experience**: `_training` dict requirement is awkward for evaluation use cases; naming is ambiguous
 - **Model creation**: `create_openai_compatible_model()` may need to be separated from `AgentCoreRLApp` for better separation of concerns
 - **Token collection**: Need to collect token IDs directly to avoid retokenization issues causing training instability (see [rLLM SDK](https://rllm-project.readthedocs.io/en/latest/core-concepts/sdk/#1-define-your-agent-function) for reference)
 

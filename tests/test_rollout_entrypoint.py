@@ -84,8 +84,8 @@ def test_entrypoint_with_sync_handler():
     assert response.json() == {"status": "processing"}
 
 
-def test_response_includes_result_location_with_training_config():
-    """Test that response includes s3_bucket and result_key when _training config is provided."""
+def test_response_includes_result_location_with_rollout_config():
+    """Test that response includes s3_bucket and result_key when _rollout config is provided."""
     app = AgentCoreRLApp()
 
     @app.rollout_entrypoint
@@ -97,7 +97,7 @@ def test_response_includes_result_location_with_training_config():
         "/invocations",
         json={
             "prompt": "test",
-            "_training": {
+            "_rollout": {
                 "exp_id": "exp-123",
                 "session_id": "sess-456",
                 "input_id": "input-789",
@@ -113,8 +113,8 @@ def test_response_includes_result_location_with_training_config():
     assert result["result_key"] == "exp-123/input-789_sess-456.json"
 
 
-def test_response_without_training_config():
-    """Test that response is minimal when no _training config is provided."""
+def test_response_without_rollout_config():
+    """Test that response is minimal when no _rollout config is provided."""
     app = AgentCoreRLApp()
 
     @app.rollout_entrypoint

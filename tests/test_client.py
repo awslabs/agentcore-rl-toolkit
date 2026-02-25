@@ -380,8 +380,8 @@ class TestRolloutClient:
             assert future.s3_bucket == "test-bucket"
             assert future.result_key == "exp/key.json"
 
-    def test_invoke_builds_training_config(self):
-        """Test invoke() correctly builds _training config."""
+    def test_invoke_builds_rollout_config(self):
+        """Test invoke() correctly builds _rollout config."""
         with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
             mock_acr = MagicMock()
             mock_s3 = MagicMock()
@@ -409,13 +409,13 @@ class TestRolloutClient:
             payload = json.loads(call_args.kwargs["payload"])
 
             assert payload["prompt"] == "test"
-            assert payload["_training"]["exp_id"] == "exp-001"
-            assert payload["_training"]["session_id"] == "sess-1"
-            assert payload["_training"]["input_id"] == "input-1"
-            assert payload["_training"]["s3_bucket"] == "test-bucket"
-            assert payload["_training"]["base_url"] == "http://localhost:8000"
-            assert payload["_training"]["model_id"] == "test-model"
-            assert payload["_training"]["temperature"] == 0.7
+            assert payload["_rollout"]["exp_id"] == "exp-001"
+            assert payload["_rollout"]["session_id"] == "sess-1"
+            assert payload["_rollout"]["input_id"] == "input-1"
+            assert payload["_rollout"]["s3_bucket"] == "test-bucket"
+            assert payload["_rollout"]["base_url"] == "http://localhost:8000"
+            assert payload["_rollout"]["model_id"] == "test-model"
+            assert payload["_rollout"]["temperature"] == 0.7
 
     def test_invoke_future_has_session_id(self):
         """Test invoke() returns future with session_id and agentcore_client set."""
