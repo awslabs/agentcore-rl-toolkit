@@ -180,9 +180,9 @@ The training architecture follows a **decoupled design** where agent rollouts an
 │       └───────┬─────────────┘    └───────▲─────────────┘       │
 │               │                          │                     │
 └───────────────┼──────────────────────────┼─────────────────────┘
-                │ 1. Submit N prompts      │ 2. Model inference
-                │    to ACR                │    calls from agents
-                ▼                          │
+                │ 1. Submit N prompts      │                        ◄── ART Client-Side (1): RolloutClient
+                │    to ACR                │ 2. Model inference     ◄── ART Agent-Side (2): vLLMModel
+                ▼                          │    calls from agents
 ┌────────────────────────────────────────────────────────────────┐
 │                  AWS Bedrock AgentCore Runtime                 │
 │        ┌───────────┐  ┌───────────┐       ┌───────────┐        │
@@ -191,23 +191,23 @@ The training architecture follows a **decoupled design** where agent rollouts an
 │        └─────┬─────┘  └─────┬─────┘       └─────┬─────┘        │
 │              │              │                   │              │
 │              └──────────────┴───────────────────┘              │
-│                             │ 3. Save rollouts + rewards       │
+│                             │ 3. Save rollouts + rewards       │  ◄── ART Agent-Side (3): @rollout_entrypoint
 │                             ▼                                  │
 │                   ┌───────────────────┐                        │
 │                   │  S3 (rollouts)    │                        │
 │                   └─────────┬─────────┘                        │
 └─────────────────────────────┼──────────────────────────────────┘
-                              │ 4. Poll S3 HEAD for results
+                              │ 4. Poll S3 HEAD for results         ◄── ART Client-Side (4): RolloutFuture
                               ▼
                   Training Engine receives
                   rollouts for policy update
 ```
 
 **Workflow:**
-1. **Prompt submission**: Training engine submits N prompts to ACR, which auto-scales to spin up N parallel agent sessions
-2. **Agent execution**: Each agent session processes its prompt, calling the inference server for model responses
-3. **Rollout collection**: Agents save rollouts and rewards to S3
-4. **Policy update**: Training engine polls S3 for completed rollouts and updates the model
+1. **Prompt submission**: Training engine uses `RolloutClient` to submit N prompts to ACR — it injects rollout configs (`input_id`, `s3_bucket`, etc.) and handles rate limiting and concurrency, while ACR auto-scales N parallel agent sessions
+2. **Agent execution**: Each agent session runs the `@rollout_entrypoint`, which launches the agent loop asynchronously (reporting `/ping` as busy) and calls the inference server via `vLLMModel` for model responses
+3. **Rollout collection**: When the agent finishes, `@rollout_entrypoint` saves rollouts and rewards to S3 and reports `/ping` as idle so ACR can reclaim the session
+4. **Policy update**: Training engine uses `RolloutFuture` to poll S3 for completed rollouts and updates the model
 
 This architecture enables parallel and highly efficient rollouts with secure execution during RL training. The decoupled design means training libraries only need the agent's container image to start training—agent code and dependencies stay completely separate from the training library.
 
