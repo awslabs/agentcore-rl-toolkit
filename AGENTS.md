@@ -49,7 +49,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 |------|---------|
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
 | `src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py` | `vLLMModel` with token ID collection for RL training |
-| `src/agentcore_rl_toolkit/client.py` | `RolloutClient` for batch evaluation |
+| `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
@@ -68,9 +68,7 @@ agentcore-rl-toolkit/
 │   └── frameworks/
 │       └── strands/
 │           ├── __init__.py
-│           ├── app.py              # StrandsAgentCoreRLApp (legacy)
-│           ├── vllm_model.py       # vLLMModel with token ID collection
-│           └── rollout_collector.py # StrandsRolloutCollector (legacy)
+│           └── vllm_model.py       # vLLMModel with token ID collection
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
 │   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
@@ -160,7 +158,7 @@ agent = Agent(
 
 
 @app.entrypoint
-async def invoke_agent(payload):
+def invoke_agent(payload):
     """
     Invoke the agent with a payload
     """
@@ -168,7 +166,7 @@ async def invoke_agent(payload):
 
     print("User input:", user_input)
 
-    response = await agent.invoke_async(user_input)
+    response = agent(user_input)
 
     return response.message["content"][0]["text"]
 
@@ -199,12 +197,14 @@ Since the client won't get results directly from HTTP:
 - Client polls S3 using efficient HEAD requests to detect when each result is available
 - No additional messaging infrastructure required — S3 is the single source of truth
 
+On the client side, `RolloutClient` and `RolloutFuture` are the complement to these server-side patterns — they handle submitting requests to ACR and polling S3 for results, so both sides work together to manage long-running async agent tasks end-to-end. See the [Evaluation](#evaluation) section for details.
+
 #### Core Classes
 
 **AgentCoreRLApp** (`src/agentcore_rl_toolkit/app.py`)
 - Inherits `BedrockAgentCoreApp` - drop-in replacement
 - Provides `@app.rollout_entrypoint` decorator
-- Expects `_rollout` dict in payload following `RolloutConfig` model (experiment id, input id, s3_bucket, base_url, model_id)
+- Expects `_rollout` dict in payload with `RolloutConfig` fields (`exp_id`, `input_id`, `s3_bucket`) plus optional pass-through config (`base_url`, `model_id`, `sampling_params`)
 - Framework-agnostic: works with any agent framework, not just Strands
 
 #### Utilities
@@ -253,9 +253,11 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 - model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
 - agent = Agent(model=model, tools=[calculator], system_prompt="...")
 
-@app.rollout_entrypoint
-def invoke_agent(payload: dict):
--     response = await agent.invoke_async(user_input)
+- @app.entrypoint
+- def invoke_agent(payload):
+-     response = agent(user_input)
++ @app.rollout_entrypoint
++ def invoke_agent(payload: dict):
 +     base_url = payload["_rollout"]["base_url"]
 +     model_id = payload["_rollout"]["model_id"]
 +     params = payload["_rollout"].get("sampling_params", {})
@@ -302,7 +304,13 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
 
 Users can evaluate agents before and after training using the same `rl_app.py`.
 
-**RolloutClient** (`src/agentcore_rl_toolkit/client.py`) orchestrates parallel evaluation:
+**RolloutClient** (`src/agentcore_rl_toolkit/client.py`) provides two invocation patterns:
+- **`invoke()`**: Returns a `RolloutFuture` for fine-grained control — ideal for training loops (e.g., GRPO) where you submit individual rollouts and group results by `input_id`
+- **`run_batch()`**: Higher-level API for batch evaluation — manages concurrency, timeouts, and polling automatically
+
+Concretely, `invoke()` sends the request to ACR and returns a `RolloutFuture` immediately — meaning ACR has received the request and a background agent session is processing it. Calling `future.result(timeout=...)` blocks until the result appears in S3, polling with exponential backoff. It returns the complete rollout data (token IDs, rewards, etc.) once the agent finishes and writes to S3.
+
+Both patterns share the same infrastructure:
 - **Rate limiting**: Handles ACR TPS limits (25)
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
 - **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
@@ -339,9 +347,8 @@ See `.env.example` for template. The build script sources `.env` for deployment 
 ### Adding Support for a New Framework
 
 1. Create `src/agentcore_rl_toolkit/frameworks/{framework}/`
-2. Implement `{Framework}AgentCoreRLApp` extending `AgentCoreRLApp`
-3. Implement rollout collector appropriate for the framework
-4. Export in `src/agentcore_rl_toolkit/__init__.py`
+2. Implement framework-specific model or utility (e.g., `vLLMModel` for Strands) that collects token IDs and rollout data
+3. Export in the framework's `__init__.py`
 
 ### Running Tests
 
@@ -426,15 +433,8 @@ uv run pre-commit install
 
 ## Known Limitations & TODOs
 
-### Testing & CI
-- Limited test coverage (expansion planned)
-- No CI/CD pipeline yet (planned)
-
 ### Design Improvements
-- **Model creation**: `vLLMModel` is currently under `frameworks/strands/` but is largely framework-agnostic; may be moved to a shared location
-
-### Dependency Updates
-- **bedrock-agentcore-starter-toolkit**: Needs upgrade to latest version for better Docker utilities and local testing support
+- **Model gateway**: `vLLMModel` is currently framework specific under `frameworks/strands/`. In the future, we want to eliminate the need for a customized model to collect token ids. Instead, a gateway server will be used to direct model inference calls, automatically intercept the token ids, and persist to databases so that users don't have to manually collect them. This will also better reveal the status of a rollout session and preserve partial rollouts.
 
 ---
 

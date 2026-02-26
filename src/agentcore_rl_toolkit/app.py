@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import uuid
 from dataclasses import dataclass
 from functools import wraps
@@ -37,38 +36,6 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
     def __init__(self):
         super().__init__()
         self.s3_client = boto3.client("s3")
-
-    def create_openai_compatible_model(self, **kwargs):
-        """Create an OpenAI-compatible model for this framework.
-
-        Optional: Override in framework-specific subclasses, or create model directly
-        in your entrypoint (see examples/strands_migration_agent/dev_app.py).
-
-        Args:
-            **kwargs: Framework-specific model parameters
-
-        Returns:
-            Framework-specific model instance configured for vLLM server
-
-        Raises:
-            NotImplementedError: If called without override. Create model directly instead.
-        """
-        raise NotImplementedError(
-            "create_openai_compatible_model() is optional. "
-            "Either override in a subclass or create your model directly in the entrypoint."
-        )
-
-    def _get_model_config(self):
-        """Get and validate model configuration from environment."""
-        base_url = os.getenv("BASE_URL")
-        model_id = os.getenv("MODEL_ID")
-
-        if not base_url or not model_id:
-            raise ValueError(
-                "Missing required environment variables: BASE_URL, MODEL_ID. " "Make sure to call load_dotenv()."
-            )
-
-        return base_url, model_id
 
     def _validate_and_normalize_rollout(self, rollout_dict: dict) -> dict:
         """

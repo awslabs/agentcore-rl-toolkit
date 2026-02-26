@@ -1,3 +1,3 @@
-from .app import StrandsAgentCoreRLApp
+from .vllm_model import vLLMModel
 
-__all__ = ["StrandsAgentCoreRLApp"]
+__all__ = ["vLLMModel"]
