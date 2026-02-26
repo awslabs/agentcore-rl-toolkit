@@ -435,6 +435,7 @@ uv run pre-commit install
 
 ### Design Improvements
 - **Model gateway**: `vLLMModel` is currently framework specific under `frameworks/strands/`. In the future, we want to eliminate the need for a customized model to collect token ids. Instead, a gateway server will be used to direct model inference calls, automatically intercept the token ids, and persist to databases so that users don't have to manually collect them. This will also better reveal the status of a rollout session and preserve partial rollouts.
+- **Async client**: `RolloutClient` and `RolloutFuture` are currently synchronous (blocking). We plan to add async-compatible versions so they can be used natively in `asyncio` event loops.
 
 ---
 
