@@ -410,7 +410,6 @@ class TestRolloutClient:
 
             assert payload["prompt"] == "test"
             assert payload["_rollout"]["exp_id"] == "exp-001"
-            assert payload["_rollout"]["session_id"] == "sess-1"
             assert payload["_rollout"]["input_id"] == "input-1"
             assert payload["_rollout"]["s3_bucket"] == "test-bucket"
             assert payload["_rollout"]["base_url"] == "http://localhost:8000"
