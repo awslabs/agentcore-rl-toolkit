@@ -100,18 +100,18 @@ def test_response_includes_result_location_with_rollout_config():
             "prompt": "test",
             "_rollout": {
                 "exp_id": "exp-123",
-                "session_id": "sess-456",
                 "input_id": "input-789",
                 "s3_bucket": "my-bucket",
             },
         },
+        headers={"X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": "sess-456"},
     )
 
     assert response.status_code == 200
     result = response.json()
     assert result["status"] == "processing"
     assert result["s3_bucket"] == "my-bucket"
-    assert result["result_key"] == "exp-123/input-789_sess-456.json"
+    assert result["result_key"] == "exp-123/input-789/sess-456.json"
 
 
 def test_response_without_rollout_config():
@@ -180,7 +180,7 @@ def test_entrypoint_accepts_model_only_rollout_config():
     assert "result_key" not in result
 
 
-@pytest.mark.parametrize("missing_field", ["exp_id", "session_id", "input_id", "s3_bucket"])
+@pytest.mark.parametrize("missing_field", ["exp_id", "input_id", "s3_bucket"])
 def test_entrypoint_rejects_partial_s3_config(missing_field):
     """Test that providing some but not all S3 fields returns HTTP 500."""
     app = AgentCoreRLApp()
@@ -191,7 +191,6 @@ def test_entrypoint_rejects_partial_s3_config(missing_field):
 
     complete_config = {
         "exp_id": "exp-123",
-        "session_id": "sess-456",
         "input_id": "input-789",
         "s3_bucket": "my-bucket",
     }
@@ -201,6 +200,7 @@ def test_entrypoint_rejects_partial_s3_config(missing_field):
     response = client.post(
         "/invocations",
         json={"prompt": "test", "_rollout": incomplete_config},
+        headers={"X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": "sess-456"},
     )
 
     assert response.status_code == 500

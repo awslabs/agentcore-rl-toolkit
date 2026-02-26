@@ -257,7 +257,6 @@ class RolloutClient:
         # Build rollout config
         rollout_config = {
             "exp_id": self.exp_id,
-            "session_id": session_id,
             "input_id": input_id,
             "s3_bucket": self.s3_bucket,
             **self.extra_config,

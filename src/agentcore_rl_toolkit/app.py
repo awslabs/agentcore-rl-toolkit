@@ -2,13 +2,14 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 from functools import wraps
 
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
-_S3_CONFIG_FIELDS = ("exp_id", "session_id", "input_id", "s3_bucket")
+_S3_CONFIG_FIELDS = ("exp_id", "input_id", "s3_bucket")
 
 
 @dataclass
@@ -16,7 +17,6 @@ class RolloutConfig:
     """Rollout configuration for rollout collection and storage."""
 
     exp_id: str
-    session_id: str
     input_id: str
     s3_bucket: str
 
@@ -26,7 +26,6 @@ class RolloutConfig:
         try:
             return cls(
                 exp_id=data["exp_id"],
-                session_id=data["session_id"],
                 input_id=data["input_id"],
                 s3_bucket=data["s3_bucket"],
             )
@@ -115,7 +114,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         rollout_dict["rewards"] = rewards
         return rollout_dict
 
-    def save_rollout(self, rollout_data: dict, rollout_config: dict, payload: dict = None, result_key: str = None):
+    def save_rollout(self, rollout_data: dict, rollout_config: dict, result_key: str, payload: dict = None):
         """
         Save rollout data to S3.
 
@@ -124,7 +123,6 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             rollout_config: Rollout configuration dict containing:
                 - s3_bucket: S3 bucket name
                 - exp_id: Experiment ID for organizing data
-                - session_id: Session id for the current task
                 - input_id: id for discriminating different input data examples
             payload: Original request payload (included in saved result for debugging)
             result_key: S3 key for the result (computed externally for consistency)
@@ -135,10 +133,6 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         except ValueError as e:
             logging.error(f"Invalid rollout configuration: {e}")
             raise
-
-        # Use provided result_key or compute it
-        if result_key is None:
-            result_key = f"{config.exp_id}/{config.input_id}_{config.session_id}.json"
 
         if "status_code" not in rollout_data:
             rollout_data["status_code"] = 200
@@ -249,7 +243,10 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             rollout_config = None
             if rollout_dict is not None and any(f in rollout_dict for f in _S3_CONFIG_FIELDS):
                 rollout_config = RolloutConfig.from_dict(rollout_dict)
-                result_key = f"{rollout_config.exp_id}/{rollout_config.input_id}_{rollout_config.session_id}.json"
+                # session_id comes from ACR's HTTP header (set via runtimeSessionId),
+                # fall back to UUID for local testing.
+                session_id = context.session_id if context.session_id else str(uuid.uuid4())
+                result_key = f"{rollout_config.exp_id}/{rollout_config.input_id}/{session_id}.json"
 
             # Start background task without waiting
             asyncio.create_task(rollout_background_task(payload, context, result_key))

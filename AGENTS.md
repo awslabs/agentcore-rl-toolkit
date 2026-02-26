@@ -204,7 +204,7 @@ Since the client won't get results directly from HTTP:
 **AgentCoreRLApp** (`src/agentcore_rl_toolkit/app.py`)
 - Inherits `BedrockAgentCoreApp` - drop-in replacement
 - Provides `@app.rollout_entrypoint` decorator
-- Expects `_rollout` dict in payload following `RolloutConfig` model (experiment id, session id, input id, base_url, model_id)
+- Expects `_rollout` dict in payload following `RolloutConfig` model (experiment id, input id, s3_bucket, base_url, model_id)
 - Framework-agnostic: works with any agent framework, not just Strands
 
 #### Utilities
