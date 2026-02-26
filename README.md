@@ -7,9 +7,12 @@ Toolkit to Seamlessly Enable RL Training on Any Agent with Bedrock AgentCore.
 
 **AgentCore RL Toolkit (ART)** is an SDK that helps developers adapt their production LLM agents for online RL training with **AWS Bedrock AgentCore Runtime (ACR)**. It extends [bedrock-agentcore-sdk-python](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main) so most of your production agent code can be directly reused.
 
-The toolkit provides:
-- **Server-side** (`AgentCoreRLApp`, `vLLMModel`): Drop-in replacements that adapt your agent to run as an RL rollout worker — collecting token-level data, computing rewards, and saving results to S3 asynchronously.
-- **Client-side** (`RolloutClient`, `RolloutFuture`): Submit rollout requests and collect results with built-in concurrency control, rate limiting, and S3 polling — for both training loops and batch evaluation.
+LLM agent rollouts are long-running — an agent may run for minutes or hours making tool calls. The toolkit manages this with an async-first design:
+
+- **Agent Adaptation** (`AgentCoreRLApp`, `vLLMModel`): Adapt your production agent for RL training inside ACR — the `@rollout_entrypoint` decorator runs your agent in the background with fire-and-forget semantics, collecting token-level data, computing rewards, and saving results to S3.
+- **Simplified Rollout Collection** (`RolloutClient`, `RolloutFuture`): Submit rollout requests and collect results asynchronously with a future-based API, built-in concurrency control, rate limiting, and S3 polling — for both training loops and batch evaluation.
+
+Both components use S3 as their data layer, but the complexity is fully abstracted — your code never reads from or writes to S3 directly.
 
 ## Installation
 
@@ -40,10 +43,12 @@ While session routing is valuable for multi-turn production agents, RL rollouts 
 - **Minimal code changes**: Adapt your production agent with a decorator swap (`@app.entrypoint` → `@app.rollout_entrypoint`) and model replacement — most of your agent code stays the same
 - **Token-accurate rollout data**: `vLLMModel` collects token IDs and logprobs directly from the inference server, avoiding retokenization issues that cause training instability
 - **Async end-to-end**: Fire-and-forget server + future-based client — no long-lived TCP connections needed for long-running agent rollouts
-- **Client-side tooling**: `RolloutClient` manages concurrency, rate limiting, and S3 result polling out of the box for both training loops and batch evaluation
+- **Simplified rollout collection**: `RolloutClient` manages concurrency, rate limiting, and S3 result polling out of the box for both training loops and batch evaluation
 - **Production parity**: Direct code reuse from production agents ensures training behavior matches real deployment
 
-## Starting Point: A Deployment-Ready Agent
+## Agent-Side: Adapting Your Agent for RL
+
+### Starting Point: A Deployment-Ready Agent
 
 This section shows what a deployment-ready ACR agent looks like—use it as a reference if you're new to ACR, or skip ahead if you already have a production agent. The agent must conform to [ACR's HTTP contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html) (endpoints like `/invocations`, `/ping`), but [`BedrockAgentCoreApp`](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html) handles this for you.
 
@@ -69,7 +74,7 @@ if __name__ == "__main__":
     app.run()
 ```
 
-## Adapting for RL Training
+### Adapting for RL Training
 
 Starting from a deployment-ready agent like above, here are the changes needed for RL training (see [`rl_app.py`](examples/strands_math_agent/rl_app.py) for full example):
 ```python
@@ -106,7 +111,7 @@ def invoke_agent(payload: dict):
 
 LLM agent rollouts are long-running and asynchronous — an agent may run for minutes or even hours as it reasons and makes tool calls. Both sides of this toolkit are designed around that constraint:
 
-- **Server-side** (`@rollout_entrypoint`): Fire-and-forget — the HTTP response returns immediately while the agent runs in the background, saving rollout results to S3 when done. Covered above.
+- **Agent side** (`@rollout_entrypoint`): Fire-and-forget — the HTTP response returns immediately while the agent runs in the background, saving rollout results to S3 when done. Covered above.
 - **Client-side** (`RolloutClient` / `RolloutFuture`): Submits requests and provides a future-based API to collect results asynchronously as they complete. Covered here.
 
 ### Training Integration (`invoke()` + `RolloutFuture`)
