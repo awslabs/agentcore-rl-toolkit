@@ -45,6 +45,7 @@ class RolloutFuture:
         max_interval: float = 30.0,
         backoff_factor: float = 1.5,
         session_id: str = None,
+        input_id: str = None,
         agentcore_client=None,
         agent_runtime_arn: str = None,
     ):
@@ -52,6 +53,7 @@ class RolloutFuture:
         self.s3_bucket = s3_bucket
         self.result_key = result_key
         self.session_id = session_id
+        self.input_id = input_id
         self.agentcore_client = agentcore_client
         self.agent_runtime_arn = agent_runtime_arn
         self._result = None
@@ -284,6 +286,7 @@ class RolloutClient:
             s3_bucket=data["s3_bucket"],
             result_key=data["result_key"],
             session_id=session_id,
+            input_id=input_id,
             agentcore_client=self.agentcore_client,
             agent_runtime_arn=self.agent_runtime_arn,
         )

@@ -443,6 +443,31 @@ class TestRolloutClient:
             assert future.agentcore_client is mock_acr
             assert future.agent_runtime_arn == "arn:aws:bedrock-agentcore:us-west-2:123:agent/test"
 
+    def test_invoke_future_has_input_id(self):
+        """Test invoke() returns future with input_id set."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.return_value = {
+                "response": mock_streaming_body(
+                    {"status": "processing", "s3_bucket": "test-bucket", "result_key": "exp/key.json"}
+                )
+            }
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+            )
+
+            future = client.invoke({"prompt": "test"}, input_id="my-input")
+
+            assert future.input_id == "my-input"
+
     def test_run_batch_returns_batch_result(self):
         """Test run_batch() returns a BatchResult."""
         with patch("agentcore_rl_toolkit.client.boto3"):
