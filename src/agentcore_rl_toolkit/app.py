@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import traceback
 import uuid
 from dataclasses import dataclass
 from functools import wraps
@@ -183,17 +184,26 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
                 return result
 
-            except Exception as e:
-                # Save error rollout for client notification when S3 is configured
+            except BaseException as e:
+                # Save error rollout for client notification when S3 is configured.
+                # Uses BaseException to also catch CancelledError, GeneratorExit, etc.
+                # that can arise from task cancellation or deep async generator unwinding.
                 if result_key:
-                    error_rollout = {"status_code": 500, "stop_reason": str(e)}
-                    self.save_rollout(
-                        rollout_data=error_rollout,
-                        rollout_config=rollout_dict,
-                        payload=payload,
-                        result_key=result_key,
-                    )
-                    logging.error(f"Error rollout saved for function: {func.__name__}: {e}")
+                    try:
+                        error_rollout = {
+                            "status_code": 500,
+                            "stop_reason": str(e),
+                            "traceback": traceback.format_exc(),
+                        }
+                        self.save_rollout(
+                            rollout_data=error_rollout,
+                            rollout_config=rollout_dict,
+                            payload=payload,
+                            result_key=result_key,
+                        )
+                        logging.error(f"Error rollout saved for function: {func.__name__}: {e}")
+                    except Exception:
+                        logging.error(f"Failed to save error rollout for function: {func.__name__}", exc_info=True)
                 raise
             finally:
                 # Complete the async task for logging and ping status
