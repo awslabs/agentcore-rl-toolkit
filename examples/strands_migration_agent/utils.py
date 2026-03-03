@@ -31,18 +31,23 @@ def load_metadata_from_s3(s3_uri: str) -> dict:
 
 def setup_repo_environment(repo_path: str):
     """
-    1. Attempt to download dependencies (best-effort)
+    1. Pre-warm Maven caches (best-effort)
     2. Make sure git works.
     """
+    # Run full build lifecycle to pre-warm all caches: project dependencies,
+    # plugin dependencies, and plugin runtime downloads (e.g. frontend-maven-plugin
+    # fetching Node.js) that `dependency:go-offline` would miss.
+    # The build will likely fail (repo is still Java 8), but that's fine —
+    # the goal is to cache downloads so the agent's later `mvn clean verify` is quieter.
     result = subprocess.run(
-        ["mvn", "dependency:resolve", "-ntp"],
+        ["mvn", "clean", "verify"],
         cwd=repo_path,
         capture_output=True,
     )
     if result.returncode == 0:
-        logger.info("Dependencies downloaded successfully")
+        logger.info("Pre-warm build succeeded")
     else:
-        logger.warning("Dependency resolution failed (agent will handle during migration)")
+        logger.info("Pre-warm build failed (expected — repo not yet migrated)")
 
     # ensure git works
     subprocess.run(

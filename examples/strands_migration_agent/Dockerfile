@@ -40,7 +40,14 @@ ENV PATH=$MAVEN_HOME/bin:$PATH
 
 RUN echo "=== Maven Installation Verification ===" && mvn --version
 
-# 3. Install git
+# 3. Install Node.js (prevents some frontend plugins from downloading it
+#    at runtime, which incurs latency & introduces spammy logs)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 4. Install git
 RUN apt-get update && \
     apt-get install -y git && \
     apt-get clean && \

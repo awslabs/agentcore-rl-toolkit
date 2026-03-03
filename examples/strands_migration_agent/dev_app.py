@@ -28,10 +28,13 @@ system_prompt = (
     + "functional equivalence as the original repo in Java8, which means no additional "
     + "test should be ignored, skipped or disabled for the purpose of this migration.\n"
     + "Do not perform any work outside the repository folder the user provides.\n"
-    + "Tips:\n- When executing maven commands, try to keep the logs concise by filtering "
-    + "out unuseful information. For example, use the `-ntp` flag (e.g., mvn -ntp clean verify) "
-    + "to suppress download chatters; use `tail` or `head` to get logs progressively, "
-    + "if needed (e.g. mvn -ntp clean verify | tail -n 50)."
+    + "Rules:\n"
+    + "- Always use the `-ntp` flag with Maven to suppress download logs.\n"
+    + "- Always pipe Maven output through `tail -n 100` to limit output size. "
+    + "Example: mvn -ntp clean verify 2>&1 | tail -n 100\n"
+    + "- If you need to see earlier output, run a separate command with `head -n 100`.\n"
+    + "- When you have finished the task, generate a paragraph summarizing the changes you made "
+    + "without using any tools."
 )
 
 reward_fn = MigrationReward()
