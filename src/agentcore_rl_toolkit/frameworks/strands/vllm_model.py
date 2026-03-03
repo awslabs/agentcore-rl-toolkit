@@ -43,7 +43,9 @@ class vLLMModel(OpenAIModel):
         request = super().format_request(messages, tool_specs, system_prompt, tool_choice, **kwargs)
         request["stream"] = False
         request.pop("stream_options", None)
-        request["extra_body"] = {"return_token_ids": True}
+        existing_extra = request.get("extra_body", {})
+        existing_extra["return_token_ids"] = True
+        request["extra_body"] = existing_extra
         return request
 
     @override
