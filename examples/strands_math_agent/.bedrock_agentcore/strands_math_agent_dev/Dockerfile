@@ -10,20 +10,12 @@ ENV UV_SYSTEM_PYTHON=1 \
     AWS_REGION=us-west-2 \
     AWS_DEFAULT_REGION=us-west-2
 
-
-
 COPY . .
-# Install from pyproject.toml directory
-RUN cd . && uv pip install .
-
-
-
+# Install local toolkit from build context, then install example deps
+RUN --mount=type=bind,from=toolkit,source=.,target=/toolkit \
+    uv pip install /toolkit && uv pip install .
 
 RUN uv pip install aws-opentelemetry-distro==0.12.2
-
-
-# Signal that this is running in Docker for host binding logic
-ENV DOCKER_CONTAINER=1
 
 # Create non-root user
 RUN useradd -m -u 1000 bedrock_agentcore
@@ -33,9 +25,5 @@ EXPOSE 9000
 EXPOSE 8000
 EXPOSE 8080
 
-# Copy entire project (respecting .dockerignore)
-COPY . .
-
 # Use the full module path
-
 CMD ["opentelemetry-instrument", "python", "-m", "rl_app"]

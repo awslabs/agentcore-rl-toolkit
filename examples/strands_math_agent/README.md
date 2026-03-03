@@ -243,7 +243,7 @@ Assume the vLLM server has been set up per the instructions above.
 # Make sure you're in examples/strands_math_agent/
 
 # Build Docker
-docker build --build-context toolkit=../.. -t math_rl:dev --load . -f .bedrock_agentcore/strands_math_agent_rl/Dockerfile
+docker build --build-context toolkit=../.. -t math_rl:dev --load . -f .bedrock_agentcore/strands_math_agent_dev/Dockerfile
 
 # Run Docker
 # In addition to overriding the docker CMD, we also directly use the host's network so that the agent
@@ -275,7 +275,7 @@ Currently, ACR requires ARM64 containers (AWS Graviton), so only containers buil
 # Run only once
 docker buildx create --use
 
-docker buildx build --build-context toolkit=../.. --platform linux/arm64 -t math_rl:dev --load . -f .bedrock_agentcore/strands_math_agent_rl/Dockerfile
+docker buildx build --build-context toolkit=../.. --platform linux/arm64 -t math_rl:dev --load . -f .bedrock_agentcore/strands_math_agent_dev/Dockerfile
 ```
 
 ### Manual deployment
