@@ -304,16 +304,46 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
 
 Users can evaluate agents before and after training using the same `rl_app.py`.
 
-**RolloutClient** (`src/agentcore_rl_toolkit/client.py`) provides two invocation patterns:
+**RolloutClient** (`src/agentcore_rl_toolkit/client.py`) provides both sync and async invocation patterns:
+
+**Sync API** (blocking — suitable for scripts and simple loops):
 - **`invoke()`**: Returns a `RolloutFuture` for fine-grained control — ideal for training loops (e.g., GRPO) where you submit individual rollouts and group results by `input_id`
 - **`run_batch()`**: Higher-level API for batch evaluation — manages concurrency, timeouts, and polling automatically
 
-Concretely, `invoke()` sends the request to ACR and returns a `RolloutFuture` immediately — meaning ACR has received the request and a background agent session is processing it. Calling `future.result(timeout=...)` blocks until the result appears in S3, polling with exponential backoff. It returns the complete rollout data (token IDs, rewards, etc.) once the agent finishes and writes to S3.
+**Async API** (non-blocking — suitable for `asyncio` event loops in RL training frameworks):
+- **`invoke_async()`**: Like `invoke()` but doesn't block the event loop. Cold starts on one request don't block submission of others.
+- **`run_batch_async()`**: Like `run_batch()` but returns an async iterator with concurrent submission.
+- **`RolloutFuture`** supports `await future`, `future.result_async(timeout=...)`, and `future.done_async()`.
 
-Both patterns share the same infrastructure:
+Concretely, `invoke()` / `invoke_async()` sends the request to ACR and returns a `RolloutFuture` immediately — meaning ACR has received the request and a background agent session is processing it. Calling `future.result(timeout=...)` or `await future.result_async(timeout=...)` blocks/waits until the result appears in S3, polling with exponential backoff. It returns the complete rollout data (token IDs, rewards, etc.) once the agent finishes and writes to S3.
+
+Both sync and async patterns share the same infrastructure:
 - **Rate limiting**: Handles ACR TPS limits (25)
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
 - **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
+
+**Async usage example:**
+
+```python
+import asyncio
+from agentcore_rl_toolkit import RolloutClient
+
+client = RolloutClient(agent_runtime_arn="arn:...", s3_bucket="my-bucket", exp_id="exp-1")
+
+async def run():
+    # Fire all requests concurrently (cold starts don't block each other)
+    tasks = [asyncio.create_task(client.invoke_async(p)) for p in payloads]
+    futures = await asyncio.gather(*tasks)
+
+    # Wait for all results concurrently
+    results = await asyncio.gather(*[f.result_async(timeout=300) for f in futures])
+    # Or without timeout: results = await asyncio.gather(*futures)
+
+    # Or use run_batch_async for managed concurrency:
+    async for item in client.run_batch_async(payloads, max_concurrent_sessions=100):
+        if item.success:
+            process(item.result)
+```
 
 **Note:** For evaluation, pass the appropriate `base_url`, `model_id`, and optionally `sampling_params` in the `_rollout` payload to point to the desired inference server (training cluster or hosted cloud model).
 
@@ -435,7 +465,6 @@ uv run pre-commit install
 
 ### Design Improvements
 - **Model gateway**: `vLLMModel` is currently framework specific under `frameworks/strands/`. In the future, we want to eliminate the need for a customized model to collect token ids. Instead, a gateway server will be used to direct model inference calls, automatically intercept the token ids, and persist to databases so that users don't have to manually collect them. This will also better reveal the status of a rollout session and preserve partial rollouts.
-- **Async client**: `RolloutClient` and `RolloutFuture` are currently synchronous (blocking). We plan to add async-compatible versions so they can be used natively in `asyncio` event loops.
 
 ---
 
