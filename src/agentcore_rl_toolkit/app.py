@@ -38,56 +38,24 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         super().__init__()
         self.s3_client = boto3.client("s3")
 
-    def _validate_and_normalize_rollout(self, rollout_dict: dict) -> dict:
+    def save_result(self, result: dict, rollout_config: dict, result_key: str, payload: dict = None):
         """
-        Validate and normalize rollout data structure.
+        Save result data to S3.
 
-        Ensures the return value from user functions has the expected format:
-        {"rollout_data": [...], "rewards": [...]}
+        The result dict is saved as-is with metadata added for correlation and debugging.
+        Any JSON-serializable dict is accepted — there are no required keys.
+
+        Reserved keys — the SDK injects the following keys into the saved JSON.
+        Avoid using these in your return dict to prevent unexpected overwrites:
+            - ``status_code``: Set to 200 if not already present in the user dict.
+            - ``stop_reason``: Set to ``"end_turn"`` if not already present.
+            - ``input_id``: Always overwritten with the value from rollout config.
+            - ``s3_bucket``: Always overwritten with the value from rollout config.
+            - ``result_key``: Always overwritten with the computed S3 key.
+            - ``payload``: Always overwritten with the original request payload.
 
         Args:
-            rollout_dict: Dictionary returned from user function
-
-        Returns:
-            Normalized rollout dictionary with validated structure
-
-        Raises:
-            ValueError: If structure is invalid or rewards don't match rollout length
-        """
-        # Require both fields to exist
-        if "rollout_data" not in rollout_dict:
-            raise ValueError("Return value must include 'rollout_data' field")
-        if "rewards" not in rollout_dict:
-            raise ValueError("Return value must include 'rewards' field")
-
-        rollout_data = rollout_dict["rollout_data"]
-        rewards = rollout_dict["rewards"]
-
-        # Validate rollout_data
-        if not isinstance(rollout_data, list) or len(rollout_data) == 0:
-            raise ValueError("rollout_data must be a list with length >= 1")
-
-        # Normalize rewards to list if not already
-        if not isinstance(rewards, list):
-            rewards = [rewards]
-
-        # Validate rewards length
-        if len(rewards) != 1 and len(rewards) != len(rollout_data):
-            raise ValueError(
-                f"rewards must be length 1 (outcome reward) or "
-                f"match rollout_data length {len(rollout_data)} (per-step reward)"
-            )
-
-        # Update with normalized rewards
-        rollout_dict["rewards"] = rewards
-        return rollout_dict
-
-    def save_rollout(self, rollout_data: dict, rollout_config: dict, result_key: str, payload: dict = None):
-        """
-        Save rollout data to S3.
-
-        Args:
-            rollout_data: The prepared rollout data
+            result: The result data to save (any JSON-serializable dict)
             rollout_config: Rollout configuration dict containing:
                 - s3_bucket: S3 bucket name
                 - exp_id: Experiment ID for organizing data
@@ -102,27 +70,27 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
             logging.error(f"Invalid rollout configuration: {e}")
             raise
 
-        if "status_code" not in rollout_data:
-            rollout_data["status_code"] = 200
+        if "status_code" not in result:
+            result["status_code"] = 200
 
-        if "stop_reason" not in rollout_data:
-            rollout_data["stop_reason"] = "end_turn"
+        if "stop_reason" not in result:
+            result["stop_reason"] = "end_turn"
 
         # Include metadata for correlation and debugging
-        rollout_data["input_id"] = config.input_id
-        rollout_data["s3_bucket"] = config.s3_bucket
-        rollout_data["result_key"] = result_key
+        result["input_id"] = config.input_id
+        result["s3_bucket"] = config.s3_bucket
+        result["result_key"] = result_key
 
         # Include full payload for debugging (with _rollout config for reproducibility)
         if payload is not None:
-            rollout_data["payload"] = payload
+            result["payload"] = payload
 
         # Save to S3
         try:
             self.s3_client.put_object(
                 Bucket=config.s3_bucket,
                 Key=result_key,
-                Body=json.dumps(rollout_data, indent=2),
+                Body=json.dumps(result, indent=2),
                 ContentType="application/json",
             )
             logging.info(f"Stored complete results at {result_key}")
@@ -132,30 +100,44 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
 
     def rollout_entrypoint(self, func):
         """
-        Decorator for RL training that handles asyncio.create_task and rollout saving automatically.
+        Decorator for RL training that handles asyncio.create_task and result saving automatically.
 
         This decorator:
         1. Handles both sync and async user functions using BedrockAgentCoreApp's infrastructure
-        2. Automatically saves rollout data when user returns it
-        3. Handles errors and saves error rollouts for client notification
+        2. Automatically saves the returned dict to S3 when S3 config is present
+        3. Handles errors and saves error results for client notification
         4. Returns immediately with {"status": "processing"} for non-blocking behavior
+
+        The return value must be a JSON-serializable dict when S3 save is configured.
+        Any dict structure is accepted — there are no required keys. Common patterns:
+        - RL training: {"rollout_data": [...], "rewards": [...]}
+        - Evaluation: {"rewards": [...], "metrics": {...}}
+        - Custom: {"summary": "...", "artifacts": {...}}
+
+        Serialization note: saved via json.dumps() → S3 as application/json.
+        Supported types: str, int, float, bool, None, list, dict.
+        Non-serializable values (custom objects, bytes, datetime, numpy arrays, etc.)
+        will trigger the error path and an error file will be saved to S3.
+
+        Reserved keys: ``save_result`` injects SDK metadata into the saved JSON.
+        See ``save_result`` docstring for the full list of reserved keys.
 
         Usage:
             @app.rollout_entrypoint
             def invoke_agent(payload, context):  # Can be sync or async
                 # Framework-specific rollout collection
-                rollout_data = collect_rollout(...)
-                return rollout_data  # Automatically saved!
+                result = collect_result(...)
+                return result  # Automatically saved!
 
         Args:
-            func: The user function that handles agent logic and rollout collection
+            func: The user function that handles agent logic and result collection
 
         Returns:
             Decorated function registered as entrypoint
         """
 
         async def rollout_background_task(payload, context, result_key):
-            """Background task that does the actual agent work and rollout saving."""
+            """Background task that does the actual agent work and result saving."""
             rollout_dict = payload.get("_rollout")
 
             # Register with async task tracking system for logging and ping status
@@ -166,44 +148,42 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 # This automatically runs sync functions in thread pool to avoid blocking
                 result = await self._invoke_handler(func, context, self._takes_context(func), payload)
 
-                # If this is an RL training run, validate and normalize the rollout structure
-                if rollout_dict:
+                # Save result to S3 if S3 config is present
+                if result_key:
                     if not isinstance(result, dict):
-                        raise ValueError("RL training runs must return a dictionary")
-                    result = self._validate_and_normalize_rollout(result)
-
-                # Save rollout data if we have S3 config
-                if isinstance(result, dict) and result_key:
-                    self.save_rollout(
-                        rollout_data=result,
+                        raise ValueError(
+                            f"Return value must be a dict when S3 save is configured, got {type(result).__name__}"
+                        )
+                    self.save_result(
+                        result=result,
                         rollout_config=rollout_dict,
                         payload=payload,
                         result_key=result_key,
                     )
-                    logging.info(f"Rollout data saved for function: {func.__name__}")
+                    logging.info(f"Result saved for function: {func.__name__}")
 
                 return result
 
             except BaseException as e:
-                # Save error rollout for client notification when S3 is configured.
+                # Save error result for client notification when S3 is configured.
                 # Uses BaseException to also catch CancelledError, GeneratorExit, etc.
                 # that can arise from task cancellation or deep async generator unwinding.
                 if result_key:
                     try:
-                        error_rollout = {
+                        error_result = {
                             "status_code": 500,
                             "stop_reason": str(e),
                             "traceback": traceback.format_exc(),
                         }
-                        self.save_rollout(
-                            rollout_data=error_rollout,
+                        self.save_result(
+                            result=error_result,
                             rollout_config=rollout_dict,
                             payload=payload,
                             result_key=result_key,
                         )
-                        logging.error(f"Error rollout saved for function: {func.__name__}: {e}")
+                        logging.error(f"Error result saved for function: {func.__name__}: {e}")
                     except Exception:
-                        logging.error(f"Failed to save error rollout for function: {func.__name__}", exc_info=True)
+                        logging.error(f"Failed to save error result for function: {func.__name__}", exc_info=True)
                 raise
             finally:
                 # Complete the async task for logging and ping status

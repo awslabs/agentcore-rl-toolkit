@@ -266,18 +266,33 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 +     response = agent(user_input)
 ```
 
-#### Step 3: Collect Token Data & Return Rollout
+#### Step 3: Collect Token Data & Return Result
 
 The `@rollout_entrypoint` decorator automatically:
 - Executes the function in the background (works with both sync and async functions)
-- Saves rollout data to S3 with a predictable key
-- Handles errors and saves error rollouts for client awareness
+- Saves the returned dict to S3 with a predictable key
+- Handles errors and saves error results for client awareness
+
+The return value must be a JSON-serializable dict when S3 save is configured. Any dict structure is accepted — there are no required keys. `rollout_data` is optional (e.g., when the gateway collects it server-side).
+
+**Reserved keys**: The SDK injects metadata into the saved S3 JSON. Avoid using these keys in your return dict:
+- `status_code`, `stop_reason` — added only if not already present in your dict
+- `input_id`, `s3_bucket`, `result_key`, `payload` — always overwritten with SDK values
 
 ```diff
 -   return response.message["content"][0]["text"]
 +   rollout_data = model.get_token_data()
 +   rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=answer)
 +   return {"rollout_data": rollout_data, "rewards": rewards}
+```
+
+Other valid return patterns:
+```python
+# Evaluation-only (no rollout_data needed)
+return {"rewards": rewards, "metrics": {"latency_ms": elapsed}}
+
+# Custom artifacts
+return {"summary": "...", "artifacts": {...}}
 ```
 
 Each example in `/examples` contains `basic_app.py` and `rl_app.py` (or `dev_app.py`) to demonstrate this adaptation.
@@ -450,7 +465,7 @@ uv run pre-commit install
 
 ### Code Conventions
 
-- Return dict with `rollout_data` and `rewards` keys from `@rollout_entrypoint`
+- Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use `vLLMModel.get_token_data()` to collect token IDs instead of hook-based rollout collection
 - Implement reward functions as classes inheriting `RewardFunction`
