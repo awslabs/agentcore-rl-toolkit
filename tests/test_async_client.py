@@ -375,3 +375,64 @@ def test_sync_run_batch_still_works():
     items = list(client.run_batch([{"prompt": "a"}], max_concurrent_sessions=1))
     assert len(items) == 1
     assert items[0].success
+
+
+# ---------------------------------------------------------------------------
+# Per-invocation overrides (async)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invoke_async_with_overrides():
+    """invoke_async merges per-invocation overrides into _rollout config."""
+    with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+        acr_client = MagicMock()
+
+        def _fake_invoke(**kwargs):
+            body = MagicMock()
+            body.read.return_value = json.dumps(
+                {"s3_bucket": FAKE_BUCKET, "result_key": FAKE_RESULT_KEY, "status": "processing"}
+            ).encode()
+            return {"response": body}
+
+        acr_client.invoke_agent_runtime.side_effect = _fake_invoke
+        s3_client = _make_s3_client(found=True)
+
+        mock_boto3.client.side_effect = lambda service, **kw: (
+            acr_client if service == "bedrock-agentcore" else s3_client
+        )
+        client = RolloutClient(
+            agent_runtime_arn=FAKE_ARN,
+            s3_bucket=FAKE_BUCKET,
+            exp_id=FAKE_EXP,
+            base_url="http://default:8000",
+        )
+
+        await client.invoke_async(
+            {"prompt": "hello"},
+            session_id="s-1",
+            input_id="i-1",
+            base_url="http://override:8000",
+            temperature=0.9,
+        )
+
+    payload = json.loads(acr_client.invoke_agent_runtime.call_args.kwargs["payload"])
+    assert payload["_rollout"]["base_url"] == "http://override:8000"
+    assert payload["_rollout"]["temperature"] == 0.9
+
+
+@pytest.mark.asyncio
+async def test_run_batch_async_error_contains_traceback():
+    """Async batch invoke errors should contain full traceback strings."""
+    client = _make_client()
+
+    client.agentcore_client.invoke_agent_runtime = MagicMock(side_effect=RuntimeError("Connection refused"))
+
+    items = []
+    async for item in client.run_batch_async([{"prompt": "a"}], max_concurrent_sessions=1):
+        items.append(item)
+
+    assert len(items) == 1
+    assert not items[0].success
+    assert "Traceback (most recent call last)" in items[0].error
+    assert "Connection refused" in items[0].error

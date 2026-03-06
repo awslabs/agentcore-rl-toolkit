@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 import uuid
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
@@ -13,6 +14,11 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
+
+
+def _format_exception(exc: BaseException) -> str:
+    """Format an exception with its full traceback."""
+    return "".join(traceback.format_exception(exc))
 
 
 @dataclass
@@ -309,8 +315,11 @@ class RolloutClient:
         """Parse ACR invocation response."""
         return json.loads(response["response"].read())
 
-    def _build_full_payload(self, payload: dict, input_id: str) -> dict:
-        """Build the full payload with _rollout config."""
+    def _build_full_payload(self, payload: dict, input_id: str, **overrides) -> dict:
+        """Build the full payload with _rollout config.
+
+        Merge order (last wins): required fields → client defaults → per-invocation overrides.
+        """
         rollout_config = {
             "exp_id": self.exp_id,
             "input_id": input_id,
@@ -321,9 +330,10 @@ class RolloutClient:
             rollout_config["base_url"] = self.base_url
         if self.model_id:
             rollout_config["model_id"] = self.model_id
+        rollout_config.update(overrides)
         return {**payload, "_rollout": rollout_config}
 
-    def _rate_limited_invoke(self, payload: dict, session_id: str, input_id: str) -> RolloutFuture:
+    def _rate_limited_invoke(self, payload: dict, session_id: str, input_id: str, **overrides) -> RolloutFuture:
         """Invoke with TPS rate limiting."""
         # Enforce TPS limit
         now = time.time()
@@ -332,7 +342,7 @@ class RolloutClient:
             time.sleep(self._min_invoke_interval - elapsed)
         self._last_invoke_time = time.time()
 
-        full_payload = self._build_full_payload(payload, input_id)
+        full_payload = self._build_full_payload(payload, input_id, **overrides)
 
         # Invoke via boto3 with timing
         invoke_start = time.time()
@@ -361,7 +371,9 @@ class RolloutClient:
             self._async_lock = asyncio.Lock()
         return self._async_lock
 
-    async def _async_rate_limited_invoke(self, payload: dict, session_id: str, input_id: str) -> RolloutFuture:
+    async def _async_rate_limited_invoke(
+        self, payload: dict, session_id: str, input_id: str, **overrides
+    ) -> RolloutFuture:
         """Invoke with async TPS rate limiting.
 
         The lock is held only during the timing check and released before the
@@ -374,7 +386,7 @@ class RolloutClient:
                 await asyncio.sleep(self._min_invoke_interval - elapsed)
             self._last_invoke_time = time.time()
 
-        full_payload = self._build_full_payload(payload, input_id)
+        full_payload = self._build_full_payload(payload, input_id, **overrides)
 
         # Invoke via boto3 in a thread (includes response parsing which reads streaming body)
         def _invoke_and_parse():
@@ -399,7 +411,7 @@ class RolloutClient:
             agent_runtime_arn=self.agent_runtime_arn,
         )
 
-    def invoke(self, payload: dict, session_id: str = None, input_id: str = None) -> RolloutFuture:
+    def invoke(self, payload: dict, session_id: str = None, input_id: str = None, **rollout_overrides) -> RolloutFuture:
         """
         Single invocation, returns Future for the result.
 
@@ -407,6 +419,9 @@ class RolloutClient:
             payload: The payload to send to the agent
             session_id: Optional session ID (default: auto-generated UUID)
             input_id: Optional input ID (default: auto-generated UUID)
+            **rollout_overrides: Per-invocation overrides merged into _rollout config
+                (e.g., base_url, model_id, temperature). These take precedence over
+                client-level defaults.
 
         Returns:
             RolloutFuture that can be awaited or polled for the result
@@ -414,18 +429,26 @@ class RolloutClient:
         Usage:
             future = client.invoke({"prompt": "...", "answer": "42"})
             result = future.result(timeout=60)
+
+            # With per-invocation overrides:
+            future = client.invoke(payload, base_url="http://other-server", temperature=0.9)
         """
         session_id = session_id or str(uuid.uuid4())
         input_id = input_id or str(uuid.uuid4())
-        return self._rate_limited_invoke(payload, session_id, input_id)
+        return self._rate_limited_invoke(payload, session_id, input_id, **rollout_overrides)
 
-    async def invoke_async(self, payload: dict, session_id: str = None, input_id: str = None) -> RolloutFuture:
+    async def invoke_async(
+        self, payload: dict, session_id: str = None, input_id: str = None, **rollout_overrides
+    ) -> RolloutFuture:
         """Async version of ``invoke()``. Returns a ``RolloutFuture``.
 
         Args:
             payload: The payload to send to the agent
             session_id: Optional session ID (default: auto-generated UUID)
             input_id: Optional input ID (default: auto-generated UUID)
+            **rollout_overrides: Per-invocation overrides merged into _rollout config
+                (e.g., base_url, model_id, temperature). These take precedence over
+                client-level defaults.
 
         Returns:
             RolloutFuture that can be awaited or polled for the result
@@ -435,10 +458,13 @@ class RolloutClient:
             future = await client.invoke_async({"prompt": "...", "answer": "42"})
             result = await future.result_async(timeout=60)
             # or simply: result = await future
+
+            # With per-invocation overrides:
+            future = await client.invoke_async(payload, base_url="http://other-server")
         """
         session_id = session_id or str(uuid.uuid4())
         input_id = input_id or str(uuid.uuid4())
-        return await self._async_rate_limited_invoke(payload, session_id, input_id)
+        return await self._async_rate_limited_invoke(payload, session_id, input_id, **rollout_overrides)
 
     def run_batch(
         self,
@@ -582,7 +608,7 @@ class BatchResult:
                     future._backoff_factor = self.backoff_factor
                     active_futures[future.result_key] = (idx, future)
                 except Exception as e:
-                    yield BatchItem(success=False, error=str(e), index=idx, elapsed=0.0)
+                    yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=0.0)
 
             # Poll futures that are ready (per-future backoff) and check for timeouts
             completed_keys = []
@@ -603,7 +629,7 @@ class BatchResult:
                         result = future.result()
                         yield BatchItem(success=True, result=result, index=idx, elapsed=future.elapsed())
                     except Exception as e:
-                        yield BatchItem(success=False, error=str(e), index=idx, elapsed=future.elapsed())
+                        yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=future.elapsed())
 
             # Remove completed from active
             for key in completed_keys:
@@ -687,7 +713,7 @@ class AsyncBatchResult:
                     future._backoff_factor = self.backoff_factor
                     active_futures[future.result_key] = (idx, future)
                 except Exception as e:
-                    yield BatchItem(success=False, error=str(e), index=idx, elapsed=time.time() - start)
+                    yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=time.time() - start)
 
             # Poll active futures that are ready and check for timeouts
             completed_keys = []
@@ -707,7 +733,7 @@ class AsyncBatchResult:
                         result = await future.result_async()
                         yield BatchItem(success=True, result=result, index=idx, elapsed=future.elapsed())
                     except Exception as e:
-                        yield BatchItem(success=False, error=str(e), index=idx, elapsed=future.elapsed())
+                        yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=future.elapsed())
 
             for key in completed_keys:
                 del active_futures[key]
