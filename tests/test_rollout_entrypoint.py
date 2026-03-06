@@ -1,6 +1,9 @@
 """Tests for the @rollout_entrypoint decorator."""
 
 import inspect
+import json
+import time
+from unittest.mock import MagicMock
 
 import pytest
 from starlette.testclient import TestClient
@@ -180,6 +183,56 @@ def test_entrypoint_accepts_model_only_rollout_config():
     assert "result_key" not in result
 
 
+def test_entrypoint_with_rewards_only():
+    """Test that returning only rewards (no rollout_data) works."""
+    app = AgentCoreRLApp()
+
+    @app.rollout_entrypoint
+    async def handler(payload: dict):
+        return {"rewards": [1.0, 0.5]}
+
+    client = TestClient(app)
+    response = client.post("/invocations", json={"prompt": "test"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "processing"}
+
+
+def test_entrypoint_with_custom_fields_only():
+    """Test that returning arbitrary custom fields (no rollout_data or rewards) works."""
+    app = AgentCoreRLApp()
+
+    @app.rollout_entrypoint
+    async def handler(payload: dict):
+        return {"metrics": {"accuracy": 0.95}, "summary": "All tests passed"}
+
+    client = TestClient(app)
+    response = client.post("/invocations", json={"prompt": "test"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "processing"}
+
+
+def test_entrypoint_with_rollout_data_rewards_and_extra_fields():
+    """Test that returning rollout_data + rewards + extra fields works."""
+    app = AgentCoreRLApp()
+
+    @app.rollout_entrypoint
+    async def handler(payload: dict):
+        return {
+            "rollout_data": [{"tokens": [1, 2, 3]}],
+            "rewards": [1.0],
+            "metrics": {"latency_ms": 150},
+            "agent_version": "v2",
+        }
+
+    client = TestClient(app)
+    response = client.post("/invocations", json={"prompt": "test"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "processing"}
+
+
 @pytest.mark.parametrize("missing_field", ["exp_id", "input_id", "s3_bucket"])
 def test_entrypoint_rejects_partial_s3_config(missing_field):
     """Test that providing some but not all S3 fields returns HTTP 500."""
@@ -207,3 +260,112 @@ def test_entrypoint_rejects_partial_s3_config(missing_field):
     error_msg = response.json()["error"]
     assert "Missing required rollout config field" in error_msg
     assert missing_field in error_msg
+
+
+# --- S3 save path tests (mocked S3) ---
+
+_ROLLOUT_CONFIG = {
+    "exp_id": "exp-001",
+    "input_id": "input-001",
+    "s3_bucket": "test-bucket",
+}
+
+
+def _make_app_with_mock_s3(handler_fn):
+    """Create an AgentCoreRLApp with mocked S3 client and register the handler."""
+    app = AgentCoreRLApp()
+    app.s3_client = MagicMock()
+
+    app.rollout_entrypoint(handler_fn)
+
+    return app
+
+
+def _invoke_and_wait_for_s3(app, payload, *, timeout=5.0):
+    """POST to /invocations and wait for the background task to call put_object."""
+    client = TestClient(app)
+    response = client.post(
+        "/invocations",
+        json=payload,
+        headers={"X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": "sess-test"},
+    )
+
+    # Poll until the background task calls put_object
+    deadline = time.monotonic() + timeout
+    while app.s3_client.put_object.call_count == 0 and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    return response
+
+
+def test_s3_save_rewards_only():
+    """Test that a rewards-only dict is saved to S3 with SDK metadata."""
+
+    async def handler(payload: dict):
+        return {"rewards": [1.0]}
+
+    app = _make_app_with_mock_s3(handler)
+    response = _invoke_and_wait_for_s3(app, {"prompt": "test", "_rollout": _ROLLOUT_CONFIG})
+
+    assert response.status_code == 200
+    assert app.s3_client.put_object.call_count == 1
+
+    call_kwargs = app.s3_client.put_object.call_args[1]
+    assert call_kwargs["Bucket"] == "test-bucket"
+    assert call_kwargs["Key"] == "exp-001/input-001/sess-test.json"
+
+    body = json.loads(call_kwargs["Body"])
+    # User field preserved
+    assert body["rewards"] == [1.0]
+    # SDK metadata injected
+    assert body["status_code"] == 200
+    assert body["stop_reason"] == "end_turn"
+    assert body["input_id"] == "input-001"
+    assert body["s3_bucket"] == "test-bucket"
+    assert body["result_key"] == "exp-001/input-001/sess-test.json"
+    assert body["payload"]["prompt"] == "test"
+
+
+def test_s3_save_custom_fields():
+    """Test that arbitrary custom fields are saved to S3 with SDK metadata."""
+
+    async def handler(payload: dict):
+        return {"metrics": {"accuracy": 0.95}, "summary": "All passed"}
+
+    app = _make_app_with_mock_s3(handler)
+    response = _invoke_and_wait_for_s3(app, {"prompt": "eval", "_rollout": _ROLLOUT_CONFIG})
+
+    assert response.status_code == 200
+    assert app.s3_client.put_object.call_count == 1
+
+    body = json.loads(app.s3_client.put_object.call_args[1]["Body"])
+    # User fields preserved
+    assert body["metrics"] == {"accuracy": 0.95}
+    assert body["summary"] == "All passed"
+    # SDK metadata present
+    assert body["status_code"] == 200
+    assert body["input_id"] == "input-001"
+    assert "result_key" in body
+
+
+def test_s3_save_backward_compat_rollout_and_rewards():
+    """Test that the classic rollout_data + rewards structure is saved correctly."""
+
+    async def handler(payload: dict):
+        return {"rollout_data": [{"tokens": [10, 20, 30]}], "rewards": [1.0, 0.5]}
+
+    app = _make_app_with_mock_s3(handler)
+    response = _invoke_and_wait_for_s3(app, {"prompt": "math", "_rollout": _ROLLOUT_CONFIG})
+
+    assert response.status_code == 200
+    assert app.s3_client.put_object.call_count == 1
+
+    body = json.loads(app.s3_client.put_object.call_args[1]["Body"])
+    # User fields preserved
+    assert body["rollout_data"] == [{"tokens": [10, 20, 30]}]
+    assert body["rewards"] == [1.0, 0.5]
+    # SDK metadata present
+    assert body["status_code"] == 200
+    assert body["stop_reason"] == "end_turn"
+    assert body["input_id"] == "input-001"
+    assert body["s3_bucket"] == "test-bucket"
