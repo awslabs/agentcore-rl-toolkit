@@ -1,8 +1,10 @@
 """Client for invoking agents and collecting rollouts via S3 polling."""
 
+import asyncio
 import json
 import logging
 import time
+import traceback
 import uuid
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
@@ -12,6 +14,11 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
+
+
+def _format_exception(exc: BaseException) -> str:
+    """Format an exception with its full traceback."""
+    return "".join(traceback.format_exception(exc))
 
 
 @dataclass
@@ -132,6 +139,63 @@ class RolloutFuture:
         """True if cancellation was attempted (may not have succeeded)."""
         return self._cancelled
 
+    async def done_async(self) -> bool:
+        """Check if result is ready (non-blocking, async). Updates backoff state.
+
+        Like ``done()`` but wraps the S3 HEAD call in ``asyncio.to_thread()``
+        so it doesn't block the event loop.
+        """
+        if self._done or self._cancelled:
+            return True
+        try:
+            await asyncio.to_thread(self.s3_client.head_object, Bucket=self.s3_bucket, Key=self.result_key)
+            self._done = True
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                self._last_poll_time = time.time()
+                self._poll_interval = min(self._poll_interval * self._backoff_factor, self._max_interval)
+                return False
+            raise
+
+    def _fetch_result(self) -> dict:
+        """Fetch and parse the result from S3. Contains blocking I/O."""
+        response = self.s3_client.get_object(Bucket=self.s3_bucket, Key=self.result_key)
+        return json.loads(response["Body"].read())
+
+    async def _async_poll(self) -> dict:
+        """Poll until result is ready, using asyncio.sleep for backoff."""
+        if self._cancelled:
+            raise CancelledError("Future was cancelled")
+        if self._result is not None:
+            return self._result
+
+        while True:
+            if await self.done_async():
+                self._result = await asyncio.to_thread(self._fetch_result)
+                return self._result
+            await asyncio.sleep(self._poll_interval)
+
+    def __await__(self):
+        return self._async_poll().__await__()
+
+    async def result_async(self, timeout: float = None) -> dict:
+        """Async version of ``result()``.
+
+        Args:
+            timeout: Max time to wait in seconds. If None, waits indefinitely.
+
+        Returns:
+            The rollout result dictionary from S3.
+
+        Raises:
+            CancelledError: If the future was cancelled.
+            TimeoutError: If timeout is reached before result is ready.
+        """
+        if timeout is not None:
+            return await asyncio.wait_for(self._async_poll(), timeout=timeout)
+        return await self
+
     def result(self, timeout: float = None) -> dict:
         """
         Block until result is ready, polling S3 HEAD with exponential backoff.
@@ -158,8 +222,7 @@ class RolloutFuture:
 
         while True:
             if self.done():
-                response = self.s3_client.get_object(Bucket=self.s3_bucket, Key=self.result_key)
-                self._result = json.loads(response["Body"].read())
+                self._result = self._fetch_result()
                 return self._result
 
             if timeout and (time.time() - start) > timeout:
@@ -172,8 +235,13 @@ class RolloutFuture:
 class RolloutClient:
     """Client for invoking agents and collecting rollouts with full lifecycle management.
 
+    Provides both sync and async APIs. Sync methods (``invoke``, ``run_batch``)
+    block the caller. Async methods (``invoke_async``, ``run_batch_async``) are
+    suitable for use inside ``asyncio`` event loops.
+
     Note:
-        This client is NOT thread-safe. Use separate client instances for
+        This client is NOT thread-safe. Do not mix sync and async calls
+        concurrently on the same instance. Use separate client instances for
         concurrent access from multiple threads.
     """
 
@@ -247,16 +315,11 @@ class RolloutClient:
         """Parse ACR invocation response."""
         return json.loads(response["response"].read())
 
-    def _rate_limited_invoke(self, payload: dict, session_id: str, input_id: str) -> RolloutFuture:
-        """Invoke with TPS rate limiting."""
-        # Enforce TPS limit
-        now = time.time()
-        elapsed = now - self._last_invoke_time
-        if elapsed < self._min_invoke_interval:
-            time.sleep(self._min_invoke_interval - elapsed)
-        self._last_invoke_time = time.time()
+    def _build_full_payload(self, payload: dict, input_id: str, **overrides) -> dict:
+        """Build the full payload with _rollout config.
 
-        # Build rollout config
+        Merge order (last wins): required fields → client defaults → per-invocation overrides.
+        """
         rollout_config = {
             "exp_id": self.exp_id,
             "input_id": input_id,
@@ -267,8 +330,19 @@ class RolloutClient:
             rollout_config["base_url"] = self.base_url
         if self.model_id:
             rollout_config["model_id"] = self.model_id
+        rollout_config.update(overrides)
+        return {**payload, "_rollout": rollout_config}
 
-        full_payload = {**payload, "_rollout": rollout_config}
+    def _rate_limited_invoke(self, payload: dict, session_id: str, input_id: str, **overrides) -> RolloutFuture:
+        """Invoke with TPS rate limiting."""
+        # Enforce TPS limit
+        now = time.time()
+        elapsed = now - self._last_invoke_time
+        if elapsed < self._min_invoke_interval:
+            time.sleep(self._min_invoke_interval - elapsed)
+        self._last_invoke_time = time.time()
+
+        full_payload = self._build_full_payload(payload, input_id, **overrides)
 
         # Invoke via boto3 with timing
         invoke_start = time.time()
@@ -291,7 +365,53 @@ class RolloutClient:
             agent_runtime_arn=self.agent_runtime_arn,
         )
 
-    def invoke(self, payload: dict, session_id: str = None, input_id: str = None) -> RolloutFuture:
+    def _get_async_lock(self) -> asyncio.Lock:
+        """Lazily create and return the async rate-limiting lock."""
+        if not hasattr(self, "_async_lock"):
+            self._async_lock = asyncio.Lock()
+        return self._async_lock
+
+    async def _async_rate_limited_invoke(
+        self, payload: dict, session_id: str, input_id: str, **overrides
+    ) -> RolloutFuture:
+        """Invoke with async TPS rate limiting.
+
+        The lock is held only during the timing check and released before the
+        HTTP call, so cold starts on one request don't block submission of others.
+        """
+        async with self._get_async_lock():
+            now = time.time()
+            elapsed = now - self._last_invoke_time
+            if elapsed < self._min_invoke_interval:
+                await asyncio.sleep(self._min_invoke_interval - elapsed)
+            self._last_invoke_time = time.time()
+
+        full_payload = self._build_full_payload(payload, input_id, **overrides)
+
+        # Invoke via boto3 in a thread (includes response parsing which reads streaming body)
+        def _invoke_and_parse():
+            invoke_start = time.time()
+            response = self.agentcore_client.invoke_agent_runtime(
+                agentRuntimeArn=self.agent_runtime_arn,
+                runtimeSessionId=session_id,
+                payload=json.dumps(full_payload),
+            )
+            invoke_elapsed = time.time() - invoke_start
+            logger.info(f"Invoked session {session_id[:8]}... in {invoke_elapsed:.1f}s")
+            return self._parse_response(response)
+
+        data = await asyncio.to_thread(_invoke_and_parse)
+        return RolloutFuture(
+            s3_client=self.s3_client,
+            s3_bucket=data["s3_bucket"],
+            result_key=data["result_key"],
+            session_id=session_id,
+            input_id=input_id,
+            agentcore_client=self.agentcore_client,
+            agent_runtime_arn=self.agent_runtime_arn,
+        )
+
+    def invoke(self, payload: dict, session_id: str = None, input_id: str = None, **rollout_overrides) -> RolloutFuture:
         """
         Single invocation, returns Future for the result.
 
@@ -299,6 +419,9 @@ class RolloutClient:
             payload: The payload to send to the agent
             session_id: Optional session ID (default: auto-generated UUID)
             input_id: Optional input ID (default: auto-generated UUID)
+            **rollout_overrides: Per-invocation overrides merged into _rollout config
+                (e.g., base_url, model_id, temperature). These take precedence over
+                client-level defaults.
 
         Returns:
             RolloutFuture that can be awaited or polled for the result
@@ -306,10 +429,42 @@ class RolloutClient:
         Usage:
             future = client.invoke({"prompt": "...", "answer": "42"})
             result = future.result(timeout=60)
+
+            # With per-invocation overrides:
+            future = client.invoke(payload, base_url="http://other-server", temperature=0.9)
         """
         session_id = session_id or str(uuid.uuid4())
         input_id = input_id or str(uuid.uuid4())
-        return self._rate_limited_invoke(payload, session_id, input_id)
+        return self._rate_limited_invoke(payload, session_id, input_id, **rollout_overrides)
+
+    async def invoke_async(
+        self, payload: dict, session_id: str = None, input_id: str = None, **rollout_overrides
+    ) -> RolloutFuture:
+        """Async version of ``invoke()``. Returns a ``RolloutFuture``.
+
+        Args:
+            payload: The payload to send to the agent
+            session_id: Optional session ID (default: auto-generated UUID)
+            input_id: Optional input ID (default: auto-generated UUID)
+            **rollout_overrides: Per-invocation overrides merged into _rollout config
+                (e.g., base_url, model_id, temperature). These take precedence over
+                client-level defaults.
+
+        Returns:
+            RolloutFuture that can be awaited or polled for the result
+
+        Usage::
+
+            future = await client.invoke_async({"prompt": "...", "answer": "42"})
+            result = await future.result_async(timeout=60)
+            # or simply: result = await future
+
+            # With per-invocation overrides:
+            future = await client.invoke_async(payload, base_url="http://other-server")
+        """
+        session_id = session_id or str(uuid.uuid4())
+        input_id = input_id or str(uuid.uuid4())
+        return await self._async_rate_limited_invoke(payload, session_id, input_id, **rollout_overrides)
 
     def run_batch(
         self,
@@ -359,6 +514,40 @@ class RolloutClient:
                     log.warning(f"Payload {item.index} failed: {item.error}")
         """
         return BatchResult(
+            client=self,
+            payloads=payloads,
+            max_concurrent=max_concurrent_sessions,
+            timeout=timeout,
+            initial_interval=initial_interval,
+            max_interval=max_interval,
+            backoff_factor=backoff_factor,
+            log_interval=log_interval,
+        )
+
+    def run_batch_async(
+        self,
+        payloads: list[dict],
+        max_concurrent_sessions: int,
+        timeout: float = 900.0,
+        initial_interval: float = 0.5,
+        max_interval: float = 30.0,
+        backoff_factor: float = 1.5,
+        log_interval: float = 30.0,
+    ) -> "AsyncBatchResult":
+        """Async version of ``run_batch()``. Returns an async iterator.
+
+        Same semantics as ``run_batch`` but submissions and polling use
+        ``asyncio`` so cold starts on one request don't block others.
+
+        Usage::
+
+            async for item in client.run_batch_async(payloads, max_concurrent_sessions=10):
+                if item.success:
+                    process(item.result)
+                else:
+                    log.warning(f"Payload {item.index} failed: {item.error}")
+        """
+        return AsyncBatchResult(
             client=self,
             payloads=payloads,
             max_concurrent=max_concurrent_sessions,
@@ -419,7 +608,7 @@ class BatchResult:
                     future._backoff_factor = self.backoff_factor
                     active_futures[future.result_key] = (idx, future)
                 except Exception as e:
-                    yield BatchItem(success=False, error=str(e), index=idx, elapsed=0.0)
+                    yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=0.0)
 
             # Poll futures that are ready (per-future backoff) and check for timeouts
             completed_keys = []
@@ -440,7 +629,7 @@ class BatchResult:
                         result = future.result()
                         yield BatchItem(success=True, result=result, index=idx, elapsed=future.elapsed())
                     except Exception as e:
-                        yield BatchItem(success=False, error=str(e), index=idx, elapsed=future.elapsed())
+                        yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=future.elapsed())
 
             # Remove completed from active
             for key in completed_keys:
@@ -465,3 +654,114 @@ class BatchResult:
                     min_wait = min(min_wait, max(0, min_timeout_wait))
                 if min_wait > 0:
                     time.sleep(min_wait)
+
+
+class AsyncBatchResult:
+    """Async iterator that manages batch execution lifecycle with adaptive polling.
+
+    Submissions are dispatched as concurrent tasks so that cold starts on one
+    request don't block submission of others.
+    """
+
+    def __init__(
+        self,
+        client: RolloutClient,
+        payloads: list[dict],
+        max_concurrent: int,
+        timeout: float = 900.0,
+        initial_interval: float = 0.5,
+        max_interval: float = 30.0,
+        backoff_factor: float = 1.5,
+        log_interval: float = 30.0,
+    ):
+        self.client = client
+        self.payloads = list(payloads)
+        self.max_concurrent = max_concurrent
+        self.timeout = timeout
+        self.initial_interval = initial_interval
+        self.max_interval = max_interval
+        self.backoff_factor = backoff_factor
+        self.log_interval = log_interval
+
+    async def _run(self):
+        """Yield ``BatchItem`` as sessions complete."""
+        pending_payloads = list(enumerate(self.payloads))  # (index, payload)
+        # Tasks that are still submitting (HTTP call in progress)
+        submitting: dict[asyncio.Task, tuple[int, float]] = {}  # task -> (index, start_time)
+        # Futures whose submission completed and are now polling S3
+        active_futures: dict[str, tuple[int, RolloutFuture]] = {}  # key -> (index, future)
+        last_status_log = time.time()
+
+        while pending_payloads or submitting or active_futures:
+            # Fire new submissions as concurrent tasks
+            while pending_payloads and (len(submitting) + len(active_futures)) < self.max_concurrent:
+                idx, payload = pending_payloads.pop(0)
+                session_id = str(uuid.uuid4())
+                input_id = str(uuid.uuid4())
+                task = asyncio.create_task(self.client._async_rate_limited_invoke(payload, session_id, input_id))
+                submitting[task] = (idx, time.time())
+
+            # Collect completed submissions → move to active_futures
+            done_tasks = [t for t in submitting if t.done()]
+            for task in done_tasks:
+                idx, start = submitting.pop(task)
+                try:
+                    future = task.result()
+                    future._poll_interval = self.initial_interval
+                    future._initial_interval = self.initial_interval
+                    future._max_interval = self.max_interval
+                    future._backoff_factor = self.backoff_factor
+                    active_futures[future.result_key] = (idx, future)
+                except Exception as e:
+                    yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=time.time() - start)
+
+            # Poll active futures that are ready and check for timeouts
+            completed_keys = []
+            for key, (idx, future) in active_futures.items():
+                if future.elapsed() > self.timeout:
+                    completed_keys.append(key)
+                    await asyncio.to_thread(future.cancel)
+                    yield BatchItem(
+                        success=False,
+                        error=f"Timeout after {self.timeout}s",
+                        index=idx,
+                        elapsed=future.elapsed(),
+                    )
+                elif future.ready_to_poll() and await future.done_async():
+                    completed_keys.append(key)
+                    try:
+                        result = await future.result_async()
+                        yield BatchItem(success=True, result=result, index=idx, elapsed=future.elapsed())
+                    except Exception as e:
+                        yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=future.elapsed())
+
+            for key in completed_keys:
+                del active_futures[key]
+
+            # Log status periodically
+            if active_futures and (time.time() - last_status_log) >= self.log_interval:
+                elapsed_times = [f.elapsed() for _, f in active_futures.values()]
+                min_elapsed = min(elapsed_times)
+                max_elapsed = max(elapsed_times)
+                logger.info(
+                    f"[Status] {len(active_futures)} active, {len(submitting)} submitting, "
+                    f"{len(pending_payloads)} pending, elapsed: {min_elapsed:.0f}s-{max_elapsed:.0f}s"
+                )
+                last_status_log = time.time()
+
+            # Sleep until next event
+            if (active_futures or submitting) and not completed_keys and not done_tasks:
+                min_wait = float("inf")
+                if active_futures:
+                    min_wait = min(f.time_until_next_poll() for _, f in active_futures.values())
+                    if self.timeout:
+                        min_timeout_wait = min(self.timeout - f.elapsed() for _, f in active_futures.values())
+                        min_wait = min(min_wait, max(0, min_timeout_wait))
+                # If only submitting tasks are pending, use a short sleep
+                if submitting and min_wait == float("inf"):
+                    min_wait = 0.1
+                if min_wait > 0 and min_wait != float("inf"):
+                    await asyncio.sleep(min_wait)
+
+    def __aiter__(self):
+        return self._run().__aiter__()

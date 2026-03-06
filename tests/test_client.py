@@ -705,3 +705,132 @@ class TestBatchResult:
             call_kwargs = mock_acr.stop_runtime_session.call_args.kwargs
             assert call_kwargs["agentRuntimeArn"] == "arn:aws:bedrock-agentcore:us-west-2:123:agent/test"
             assert "runtimeSessionId" in call_kwargs
+
+    def test_invoke_with_per_invocation_overrides(self):
+        """Test invoke() merges per-invocation overrides into _rollout config."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.return_value = {
+                "response": mock_streaming_body({"status": "processing", "s3_bucket": "bucket", "result_key": "key"})
+            }
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+                base_url="http://default:8000",
+                model_id="default-model",
+            )
+
+            client.invoke(
+                {"prompt": "test"},
+                session_id="sess-1",
+                input_id="input-1",
+                base_url="http://override:8000",
+                temperature=0.5,
+            )
+
+            payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
+            assert payload["_rollout"]["base_url"] == "http://override:8000"
+            assert payload["_rollout"]["temperature"] == 0.5
+            assert payload["_rollout"]["model_id"] == "default-model"
+
+    def test_invoke_overrides_work_without_client_defaults(self):
+        """Test per-invocation overrides work even when client has no base_url/model_id."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.return_value = {
+                "response": mock_streaming_body({"status": "processing", "s3_bucket": "bucket", "result_key": "key"})
+            }
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+                # No base_url or model_id
+            )
+
+            client.invoke(
+                {"prompt": "test"},
+                base_url="http://override:8000",
+                model_id="override-model",
+            )
+
+            payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
+            assert payload["_rollout"]["base_url"] == "http://override:8000"
+            assert payload["_rollout"]["model_id"] == "override-model"
+
+    def test_invoke_overrides_do_not_mutate_client(self):
+        """Test per-invocation overrides don't affect subsequent invocations."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            invoke_count = [0]
+
+            def mock_invoke(*args, **kwargs):
+                invoke_count[0] += 1
+                return {
+                    "response": mock_streaming_body(
+                        {"status": "processing", "s3_bucket": "bucket", "result_key": f"key{invoke_count[0]}.json"}
+                    )
+                }
+
+            mock_acr.invoke_agent_runtime.side_effect = mock_invoke
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+                base_url="http://default:8000",
+            )
+
+            # First call with override
+            client.invoke({"prompt": "test"}, base_url="http://override:8000")
+            # Second call without override
+            client.invoke({"prompt": "test"})
+
+            calls = mock_acr.invoke_agent_runtime.call_args_list
+            payload1 = json.loads(calls[0].kwargs["payload"])
+            payload2 = json.loads(calls[1].kwargs["payload"])
+
+            assert payload1["_rollout"]["base_url"] == "http://override:8000"
+            assert payload2["_rollout"]["base_url"] == "http://default:8000"
+
+    def test_batch_error_contains_traceback(self):
+        """Test that batch invoke errors contain full traceback strings."""
+        with patch("agentcore_rl_toolkit.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_s3 = MagicMock()
+            mock_boto3.client.side_effect = lambda service, **kwargs: (
+                mock_acr if service == "bedrock-agentcore" else mock_s3
+            )
+
+            mock_acr.invoke_agent_runtime.side_effect = RuntimeError("ACR invocation failed")
+
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+                tps_limit=1000,
+            )
+
+            items = list(client.run_batch([{"prompt": "q1"}], max_concurrent_sessions=1))
+
+            assert len(items) == 1
+            assert items[0].success is False
+            assert "Traceback (most recent call last)" in items[0].error
+            assert "ACR invocation failed" in items[0].error
