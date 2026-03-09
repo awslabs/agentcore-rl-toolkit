@@ -141,42 +141,135 @@ curl -X POST http://localhost:8080/invocations \
 ## Docker
 
 ### Build & run locally
+
+Set the repo root path first:
+
 ```bash
-docker buildx build --build-context toolkit=../.. -t migration:dev --load -f Dockerfile .
+export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
+export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
 ```
 
-Since Docker can't access your host's AWS credential chain, append these AWS credentials to your `.env` file.
+```bash
+docker buildx build \
+  --build-context toolkit=$TOOLKIT_ROOT \
+  -t migration:dev --load \
+  -f $MIGRATION_DIR/Dockerfile \
+  $MIGRATION_DIR
+```
+
+Add AWS credentials to your `.env` file since Docker can't access your host's AWS credential chain:
 
 ```bash
-AWS_ACCESS_KEY_ID=your_access_key_id
-AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AWS_REGION=us-west-2
+cp $MIGRATION_DIR/.env.example $MIGRATION_DIR/.env
+# Edit .env and fill in your AWS credentials
+# AWS_ACCESS_KEY_ID=your_access_key_id
+# AWS_SECRET_ACCESS_KEY=your_secret_access_key
+# AWS_REGION=us-west-2
 ```
 
 Then start the server as follows, and send the request.
-
 ```bash
-docker run --network host --env-file .env migration:dev python -m dev_app
+# Run with host network so the agent can access the locally hosted vLLM server
+docker run --network host --env-file $MIGRATION_DIR/.env migration:dev python -m dev_app
+
+# Submit request (same curl as above)
 ```
 
 ### Build & push to ECR
 
 ```bash
+cd /path/to/your/agentcore-rl-toolkit/repo
+cp .env.example .env
+# Edit .env and fill in your AWS credentials and ECR repo name before proceeding
+
 ./scripts/build_docker_image_and_push_to_ecr.sh \
---dockerfile=examples/strands_migration_agent/Dockerfile \
---tag=dev \
---context=examples/strands_migration_agent \
---additional-context=toolkit=.
+  --dockerfile=$MIGRATION_DIR/Dockerfile \
+  --tag=dev \
+  --context=$MIGRATION_DIR \
+  --additional-context=toolkit=$TOOLKIT_ROOT
 ```
 
 ## Deploy
 
-Create your config.toml file and fill in the values.
+Create your `config.toml` file and fill in the `[agentcore]` section:
+
 ```bash
+cd /path/to/your/agentcore-rl-toolkit/repo/examples/strands_migration_agent
 cp config.example.toml config.toml
 ```
 
-Then run
+Edit `config.toml` with your deployment values:
+
+```toml
+[agentcore]
+region = "us-west-2"
+agent_name = "my_strands_migration_agent"
+image_uri = "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/example-agent:tag"  # ECR image URI from the push step
+execution_role_arn = "arn:aws:iam::ACCOUNT_ID:role/EXAMPLE_ROLE"
+
+# Network configuration (optional — omit for PUBLIC mode)
+network_mode = "VPC"
+subnets = ["subnet-xxxxxxxxxxxxxxxxx"]
+security_groups = ["sg-xxxxxxxxxxxxxxxxx"]
+```
+
+Then run:
+
 ```bash
 python deploy.py
 ```
+
+The deploy script will print the Amazon Resource Name (ARN) of your deployed agent in its output log. Copy this value — you will need it for evaluation.
+
+## Evaluate
+
+After deploying the agent to ACR, you can run batch evaluation against the MigrationBench dataset. The evaluation scripts use `RolloutClient` to submit requests to ACR and poll S3 for results.
+
+First, fill in the `agent_arn` and the `[eval]` section in your `config.toml`:
+
+- **`agent_arn`**: The ARN printed in the deploy step output log.
+- **`s3_input_bucket`**: The S3 path where `preprocess.py` uploaded the dataset. For example, if you ran `python preprocess.py --s3-bucket-name my-migration-bench-data`, the test split is at `my-migration-bench-data/tars/test/`.
+- **`s3_output_bucket`**: The S3 bucket where evaluation rollout results will be saved.
+
+```toml
+[agentcore]
+agent_arn = "arn:aws:bedrock-agentcore:REGION:ACCOUNT_ID:runtime/AGENT_ID"
+
+[eval]
+s3_input_bucket = "my-migration-bench-data/tars/test/"
+s3_output_bucket = "agentcore-rl"
+base_url = "http://INFERENCE_SERVER_IP:4000/v1"
+model_id = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+sampling_params = {max_completion_tokens = 8192}
+```
+
+### Sync evaluation
+
+```bash
+cd /path/to/your/agentcore-rl-toolkit/repo/examples/strands_migration_agent
+
+# Run full evaluation
+python evaluate.py --exp_id my_eval --max_concurrent 50 --timeout 1800
+
+# Quick test with a few repos
+python evaluate.py --exp_id my_eval_test --limit 5
+```
+
+### Async evaluation
+
+The async script supports two modes:
+- **batch** (default): Uses `run_batch_async()` with managed concurrency
+- **individual**: Uses `invoke_async()` + `gather` for fine-grained control
+
+```bash
+cd /path/to/your/agentcore-rl-toolkit/repo/examples/strands_migration_agent
+
+# With custom concurrency and timeout
+python evaluate_async.py --mode batch --exp_id my_eval_async --max_concurrent 50 --timeout 1800
+```
+
+Note that all arguments can also be passed via CLI to override `config.toml` values.
+
+Both `evaluate.py` (sync) and `evaluate_async.py` (async) can run multiple agent instances concurrently via `--max_concurrent`. The difference is that the sync script submits requests sequentially — a slow submission (e.g., ACR cold start) blocks the next one — while the async script dispatches submissions as concurrent tasks so cold starts don't block each other.
+
+Results are saved as JSONL files under `results/` (e.g., `results/my_eval.jsonl`).

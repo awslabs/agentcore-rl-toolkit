@@ -272,6 +272,7 @@ class RolloutClient:
         exp_id: str,
         max_retry_attempts: int = 5,
         tps_limit: int = 25,
+        max_pool_connections: int = 10,
         # Optional model inference config (for vLLM/SGLang servers)
         base_url: str = None,
         model_id: str = None,
@@ -287,6 +288,9 @@ class RolloutClient:
             exp_id: Experiment ID for organizing results
             max_retry_attempts: Max retries for transient errors (default: 5)
             tps_limit: ACR invocation rate limit (default: 25)
+            max_pool_connections: Max urllib3 connection pool size per boto3 client (default: 10).
+                Set to at least the max number of concurrent requests to avoid
+                "Connection pool is full, discarding connection" warnings.
             base_url: Optional vLLM/SGLang server URL
             model_id: Optional model ID for inference
             **extra_config: Additional config passed to _rollout (e.g., temperature, top_p)
@@ -303,7 +307,10 @@ class RolloutClient:
         self.region = self._parse_region_from_arn(agent_runtime_arn)
 
         # Configure boto3 with adaptive retry for 429/503
-        config = Config(retries={"max_attempts": max_retry_attempts, "mode": "adaptive"})
+        config = Config(
+            retries={"max_attempts": max_retry_attempts, "mode": "adaptive"},
+            max_pool_connections=max_pool_connections,
+        )
         self.agentcore_client = boto3.client("bedrock-agentcore", region_name=self.region, config=config)
         self.s3_client = boto3.client("s3", region_name=self.region, config=config)
 
