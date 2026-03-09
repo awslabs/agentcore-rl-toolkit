@@ -79,13 +79,15 @@ mvn --version
 ## Installation
 
 ```bash
-cd examples/strands_migration_agent
+export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
+export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
+
+cd $MIGRATION_DIR
 
 uv venv --python 3.13
 source .venv/bin/activate
 uv pip install -e .
 uv pip install -e ../../ --force-reinstall --no-deps # install the parent repo
-
 ```
 
 ## Run locally
@@ -93,6 +95,8 @@ uv pip install -e ../../ --force-reinstall --no-deps # install the parent repo
 First, preprocess the MigrationBench dataset and upload to S3:
 
 ```bash
+cd $MIGRATION_DIR
+
 # Create S3 bucket if needed
 aws s3 mb s3://my-migration-bench-data
 
@@ -103,21 +107,32 @@ python preprocess.py --s3-bucket-name my-migration-bench-data
 python preprocess.py --s3-bucket-name my-migration-bench-data --max-repos-per-split 2 --skip-s3-sync
 ```
 
-After data preprocessing is done, you can start testing the agent
+After data preprocessing is done, you can start testing the agent. First, prepare the environment file so Strands runs in non-interactive server mode:
 
 ```bash
-# Start a local vLLM server
+cp .env.example .env
+```
+
+Then start the vLLM server, the app, and submit a request. Each command runs in its own terminal:
+
+```bash
+# Terminal 1: Start a local vLLM server
 vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct \
 -tp 8 \
 --port 4000 \
 --enable-auto-tool-choice \
 --tool-call-parser qwen3_coder \
 --max-model-len 262144
+```
 
-# Start the app server with hot reloading
+```bash
+# Terminal 2: Start the app server with hot reloading (from $MIGRATION_DIR)
+cd $MIGRATION_DIR
 uvicorn dev_app:app --port 8080 --reload --reload-dir ../..
+```
 
-# Submit request
+```bash
+# Terminal 3: Submit request
 curl -X POST http://localhost:8080/invocations \
   -H "Content-Type: application/json" \
   -d '{
@@ -135,21 +150,18 @@ curl -X POST http://localhost:8080/invocations \
         "sampling_params": {"max_completion_tokens": 8192}
     }
   }'
-
 ```
 
 ## Docker
 
 ### Build & run locally
 
-Set the repo root path first:
+Set the repo root path and migration agent path first, then build docker:
 
 ```bash
 export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
 export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-```
 
-```bash
 docker buildx build \
   --build-context toolkit=$TOOLKIT_ROOT \
   -t migration:dev --load \
@@ -177,10 +189,18 @@ docker run --network host --env-file $MIGRATION_DIR/.env migration:dev python -m
 
 ### Build & push to ECR
 
+You need to build docker and push it to AWS ECR for deploying agent, running evaluation or running RL training with AgentCore.
+
 ```bash
-cd /path/to/your/agentcore-rl-toolkit/repo
+export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
+export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
+
+cd $TOOLKIT_ROOT
 cp .env.example .env
-# Edit .env and fill in your AWS credentials and ECR repo name before proceeding
+# Edit .env and fill in your AWS region, account ID, and ECR repo name before proceeding
+# AWS_REGION=us-west-2
+# AWS_ACCOUNT=your-aws-account-number
+# ECR_REPO_NAME=your-ecr-repo-name
 
 ./scripts/build_docker_image_and_push_to_ecr.sh \
   --dockerfile=$MIGRATION_DIR/Dockerfile \
@@ -194,7 +214,10 @@ cp .env.example .env
 Create your `config.toml` file and fill in the `[agentcore]` section:
 
 ```bash
-cd /path/to/your/agentcore-rl-toolkit/repo/examples/strands_migration_agent
+export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
+export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
+
+cd $MIGRATION_DIR
 cp config.example.toml config.toml
 ```
 
@@ -246,7 +269,10 @@ sampling_params = {max_completion_tokens = 8192}
 ### Sync evaluation
 
 ```bash
-cd /path/to/your/agentcore-rl-toolkit/repo/examples/strands_migration_agent
+export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
+export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
+
+cd $MIGRATION_DIR
 
 # Run full evaluation
 python evaluate.py --exp_id my_eval --max_concurrent 50 --timeout 1800
@@ -262,7 +288,10 @@ The async script supports two modes:
 - **individual**: Uses `invoke_async()` + `gather` for fine-grained control
 
 ```bash
-cd /path/to/your/agentcore-rl-toolkit/repo/examples/strands_migration_agent
+export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
+export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
+
+cd $MIGRATION_DIR
 
 # With custom concurrency and timeout
 python evaluate_async.py --mode batch --exp_id my_eval_async --max_concurrent 50 --timeout 1800
