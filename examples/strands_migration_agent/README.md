@@ -78,6 +78,8 @@ mvn --version
 
 ## Installation
 
+Set the repo root and migration agent paths — these variables are used throughout this document:
+
 ```bash
 export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
 export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
@@ -156,12 +158,9 @@ curl -X POST http://localhost:8080/invocations \
 
 ### Build & run locally
 
-Set the repo root path and migration agent path first, then build docker:
+Build the docker image:
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-
 docker buildx build \
   --build-context toolkit=$TOOLKIT_ROOT \
   -t migration:dev --load \
@@ -169,11 +168,13 @@ docker buildx build \
   $MIGRATION_DIR
 ```
 
-Add AWS credentials to your `.env` file since Docker can't access your host's AWS credential chain:
+The agent inside the container needs AWS credentials to access S3 (for saving rollout results and downloading datasets). Since Docker containers can't access your host's AWS credential, you need to pass them explicitly via an `.env` file:
 
 ```bash
 cp $MIGRATION_DIR/.env.example $MIGRATION_DIR/.env
-# Edit .env and fill in your AWS credentials
+# Edit .env and add your AWS credentials.
+# If you have configured your AWS credential, you should be able to find
+# them at ~/.aws/credentials.
 # AWS_ACCESS_KEY_ID=your_access_key_id
 # AWS_SECRET_ACCESS_KEY=your_secret_access_key
 # AWS_REGION=us-west-2
@@ -192,15 +193,14 @@ docker run --network host --env-file $MIGRATION_DIR/.env migration:dev python -m
 You need to build docker and push it to AWS ECR for deploying agent, running evaluation or running RL training with AgentCore.
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-
 cd $TOOLKIT_ROOT
 cp .env.example .env
 # Edit .env and fill in your AWS region, account ID, and ECR repo name before proceeding
 # AWS_REGION=us-west-2
 # AWS_ACCOUNT=your-aws-account-number
 # ECR_REPO_NAME=your-ecr-repo-name
+# The script uses the AWS CLI, which reads credentials from ~/.aws/credentials.
+# Make sure this is configured (e.g., run `aws configure`) before proceeding.
 
 ./scripts/build_docker_image_and_push_to_ecr.sh \
   --dockerfile=$MIGRATION_DIR/Dockerfile \
@@ -214,9 +214,6 @@ cp .env.example .env
 Create your `config.toml` file and fill in the `[agentcore]` section:
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-
 cd $MIGRATION_DIR
 cp config.example.toml config.toml
 ```
@@ -269,9 +266,6 @@ sampling_params = {max_completion_tokens = 8192}
 ### Sync evaluation
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-
 cd $MIGRATION_DIR
 
 # Run full evaluation
@@ -288,9 +282,6 @@ The async script supports two modes:
 - **individual**: Uses `invoke_async()` + `gather` for fine-grained control
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-
 cd $MIGRATION_DIR
 
 # With custom concurrency and timeout
