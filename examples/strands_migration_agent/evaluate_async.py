@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -200,6 +201,12 @@ async def main():
         default=None,
         help="Limit number of repositories to evaluate (for testing)",
     )
+    parser.add_argument(
+        "--sampling_params",
+        type=str,
+        default=eval_config.get("sampling_params"),
+        help="Sampling parameters as JSON string (e.g. '{\"temperature\": 0.7}')",
+    )
 
     args = parser.parse_args()
 
@@ -240,13 +247,26 @@ async def main():
 
     logger.info(f"Results will be written to: {result_path}")
 
+    # Parse sampling params
+    sampling_params = {}
+    if args.sampling_params:
+        if isinstance(args.sampling_params, str):
+            sampling_params = json.loads(args.sampling_params)
+        else:
+            sampling_params = dict(args.sampling_params)
+
     # Create client
+    # In batch mode, concurrency is capped by max_concurrent.
+    # In individual mode, all payloads are submitted at once.
+    max_pool = args.max_concurrent if args.mode == "batch" else len(payloads)
     client = RolloutClient(
         agent_runtime_arn=args.agent_arn,
         s3_bucket=args.s3_output_bucket,
         exp_id=args.exp_id,
         base_url=args.base_url,
         model_id=args.model_id,
+        max_pool_connections=max_pool,
+        sampling_params=sampling_params,
     )
 
     # Run evaluation

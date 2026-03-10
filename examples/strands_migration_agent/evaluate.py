@@ -1,6 +1,7 @@
 """Evaluation script for migration agent using RolloutClient.run_batch()."""
 
 import argparse
+import json
 import logging
 import time
 from pathlib import Path
@@ -73,6 +74,12 @@ def main():
         default=None,
         help="Limit number of repositories to evaluate (for testing)",
     )
+    parser.add_argument(
+        "--sampling_params",
+        type=str,
+        default=eval_config.get("sampling_params"),
+        help="Sampling parameters as JSON string (e.g. '{\"temperature\": 0.7}')",
+    )
 
     args = parser.parse_args()
 
@@ -112,6 +119,14 @@ def main():
 
     logger.info(f"Results will be written to: {result_path}")
 
+    # Parse sampling params
+    sampling_params = {}
+    if args.sampling_params:
+        if isinstance(args.sampling_params, str):
+            sampling_params = json.loads(args.sampling_params)
+        else:
+            sampling_params = dict(args.sampling_params)
+
     # Create client
     client = RolloutClient(
         agent_runtime_arn=args.agent_arn,
@@ -119,6 +134,8 @@ def main():
         exp_id=args.exp_id,
         base_url=args.base_url,
         model_id=args.model_id,
+        max_pool_connections=args.max_concurrent,
+        sampling_params=sampling_params,
     )
 
     # Run batch and stream results

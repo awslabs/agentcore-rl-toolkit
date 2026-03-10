@@ -19,3 +19,4 @@ s3_input_bucket = "my-benchmark-bucket/path/to/inputs/"
 s3_output_bucket = "my-rollout-results-bucket"
 base_url = "http://INFERENCE_SERVER_IP:8000/v1"
 model_id = "my-model-id"
+sampling_params = {temperature = 0.0}
