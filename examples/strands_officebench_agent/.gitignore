@@ -1,0 +1,5 @@
+# Evaluation results
+results/
+
+# Lock file (users generate via uv sync)
+uv.lock
