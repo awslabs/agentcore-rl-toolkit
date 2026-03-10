@@ -164,15 +164,19 @@ class RolloutFuture:
         return json.loads(response["Body"].read())
 
     async def _async_poll(self) -> dict:
-        """Poll until result is ready, using asyncio.sleep for backoff."""
-        if self._cancelled:
-            raise CancelledError("Future was cancelled")
+        """Poll until result is ready, using asyncio.sleep for backoff.
+
+        Automatically cancels the ACR session once the result is fetched.
+        """
         if self._result is not None:
             return self._result
+        if self._cancelled:
+            raise CancelledError("Future was cancelled")
 
         while True:
             if await self.done_async():
                 self._result = await asyncio.to_thread(self._fetch_result)
+                await asyncio.to_thread(self.cancel)
                 return self._result
             await asyncio.sleep(self._poll_interval)
 
@@ -182,6 +186,9 @@ class RolloutFuture:
     async def result_async(self, timeout: float = None) -> dict:
         """Async version of ``result()``.
 
+        The underlying ACR session is automatically cancelled once the result
+        is fetched, so callers don't need to manage session cleanup.
+
         Args:
             timeout: Max time to wait in seconds. If None, waits indefinitely.
 
@@ -189,12 +196,16 @@ class RolloutFuture:
             The rollout result dictionary from S3.
 
         Raises:
-            CancelledError: If the future was cancelled.
+            CancelledError: If the future was cancelled before a result was available.
             TimeoutError: If timeout is reached before result is ready.
         """
-        if timeout is not None:
-            return await asyncio.wait_for(self._async_poll(), timeout=timeout)
-        return await self
+        try:
+            if timeout is not None:
+                return await asyncio.wait_for(self._async_poll(), timeout=timeout)
+            return await self
+        except (TimeoutError, asyncio.TimeoutError):
+            await asyncio.to_thread(self.cancel)
+            raise
 
     def result(self, timeout: float = None) -> dict:
         """
@@ -210,22 +221,24 @@ class RolloutFuture:
             The rollout result dictionary from S3
 
         Raises:
-            CancelledError: If the future was cancelled.
+            CancelledError: If the future was cancelled before a result was available.
             TimeoutError: If timeout is reached before result is ready.
         """
-        if self._cancelled:
-            raise CancelledError("Future was cancelled")
         if self._result is not None:
             return self._result
+        if self._cancelled:
+            raise CancelledError("Future was cancelled")
 
         start = time.time()
 
         while True:
             if self.done():
                 self._result = self._fetch_result()
+                self.cancel()
                 return self._result
 
             if timeout and (time.time() - start) > timeout:
+                self.cancel()
                 raise TimeoutError(f"Result not ready after {timeout}s")
 
             # Use the per-future backoff interval
@@ -637,6 +650,8 @@ class BatchResult:
                         yield BatchItem(success=True, result=result, index=idx, elapsed=future.elapsed())
                     except Exception as e:
                         yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=future.elapsed())
+                    finally:
+                        future.cancel()
 
             # Remove completed from active
             for key in completed_keys:
@@ -741,6 +756,8 @@ class AsyncBatchResult:
                         yield BatchItem(success=True, result=result, index=idx, elapsed=future.elapsed())
                     except Exception as e:
                         yield BatchItem(success=False, error=_format_exception(e), index=idx, elapsed=future.elapsed())
+                    finally:
+                        await asyncio.to_thread(future.cancel)
 
             for key in completed_keys:
                 del active_futures[key]
