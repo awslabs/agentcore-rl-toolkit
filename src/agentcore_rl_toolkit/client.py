@@ -373,9 +373,15 @@ class RolloutClient:
         )
 
     def _get_async_lock(self) -> asyncio.Lock:
-        """Lazily create and return the async rate-limiting lock."""
-        if not hasattr(self, "_async_lock"):
+        """Lazily create and return the async rate-limiting lock.
+
+        Detects when the running event loop has changed (e.g., due to a new
+        ``asyncio.run()`` call) and recreates the lock for the current loop.
+        """
+        loop = asyncio.get_running_loop()
+        if not hasattr(self, "_async_lock") or self._async_lock_loop is not loop:
             self._async_lock = asyncio.Lock()
+            self._async_lock_loop = loop
         return self._async_lock
 
     async def _async_rate_limited_invoke(
