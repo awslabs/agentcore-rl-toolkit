@@ -1,5 +1,6 @@
 """Local test script for OfficeBench agent — bypasses ACR/S3."""
 
+import argparse
 import json
 import logging
 import os
@@ -8,22 +9,7 @@ import shutil
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure local paths BEFORE importing tools (they read env at import time)
-OFFICEBENCH_DIR = os.environ.get("OFFICEBENCH_DIR", os.path.expanduser("~/OfficeBench"))
 TESTBED_DIR = "/tmp/testbed"
-
-os.environ["OFFICEBENCH_APPS_DIR"] = os.path.join(OFFICEBENCH_DIR, "apps")
-os.environ["OFFICEBENCH_TESTBED_DIR"] = TESTBED_DIR
-os.environ["BYPASS_TOOL_CONSENT"] = "true"
-
-from reward import OfficeBenchReward  # noqa: E402
-from strands import Agent  # noqa: E402
-from strands.agent.conversation_manager import NullConversationManager  # noqa: E402
-from strands.models import BedrockModel  # noqa: E402
-from strands_tools import shell  # noqa: E402
-from tools import ALL_TOOLS  # noqa: E402
-
-MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 SYSTEM_PROMPT = (
     "You are an AI office assistant for user {username}. "
@@ -70,21 +56,42 @@ def setup_local_testbed(task_dir: str):
         logger.info("Created cache/ snapshot of original data")
 
 
-def run_task(task_id: str, subtask_id: str = "0"):
-    """Run a single OfficeBench subtask locally."""
-    task_dir = os.path.join(OFFICEBENCH_DIR, "tasks", task_id)
-    config_path = os.path.join(task_dir, "subtasks", f"{subtask_id}.json")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task_id", type=str, default="1-1", help="Task ID (e.g. 1-1)")
+    parser.add_argument("--subtask_id", type=str, default="0", help="Subtask ID (e.g. 0, 1, 2)")
+    parser.add_argument(
+        "--model_id",
+        type=str,
+        default="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        help="Bedrock model ID",
+    )
+    args = parser.parse_args()
+
+    # Configure local paths BEFORE importing tools (they read env at import time)
+    officebench_dir = os.environ.get("OFFICEBENCH_DIR", os.path.expanduser("~/OfficeBench"))
+    os.environ["OFFICEBENCH_APPS_DIR"] = os.path.join(officebench_dir, "apps")
+    os.environ["OFFICEBENCH_TESTBED_DIR"] = TESTBED_DIR
+    os.environ["BYPASS_TOOL_CONSENT"] = "true"
+
+    from reward import OfficeBenchReward
+    from strands import Agent
+    from strands.agent.conversation_manager import NullConversationManager
+    from strands.models import BedrockModel
+    from strands_tools import shell
+    from tools import ALL_TOOLS
+
+    task_dir = os.path.join(officebench_dir, "tasks", args.task_id)
+    config_path = os.path.join(task_dir, "subtasks", f"{args.subtask_id}.json")
 
     with open(config_path) as f:
         task_config = json.load(f)
 
-    logger.info(f"Task {task_id}/{subtask_id}: {task_config['task']}")
+    logger.info(f"Task {args.task_id}/{args.subtask_id}: {task_config['task']}")
 
-    # Setup testbed
     setup_local_testbed(task_dir)
 
-    # Create model and agent
-    model = BedrockModel(model_id=MODEL_ID)
+    model = BedrockModel(model_id=args.model_id)
 
     system_prompt = SYSTEM_PROMPT.format(
         username=task_config.get("username", "User"),
@@ -101,34 +108,21 @@ def run_task(task_id: str, subtask_id: str = "0"):
         conversation_manager=NullConversationManager(),
     )
 
-    # Run agent
     response = agent(task_config["task"])
     response_text = response.message["content"][0]["text"]
     logger.info(f"Agent response: {response_text}")
 
-    # Evaluate
     reward_fn = OfficeBenchReward()
     reward = reward_fn(testbed_dir=TESTBED_DIR, evaluation_config=task_config["evaluation"])
     logger.info(f"Reward: {reward}")
 
-    # Show testbed contents
-    for root, dirs, files in os.walk(TESTBED_DIR):
+    for root, _dirs, files in os.walk(TESTBED_DIR):
         for f in files:
             path = os.path.join(root, f)
             logger.info(f"  Testbed file: {path} ({os.path.getsize(path)} bytes)")
 
-    return reward
+    print(f"\nResult: {'PASS' if reward == 1.0 else 'FAIL'} (reward={reward})")
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--task_id", type=str, default="1-1", help="Task ID (e.g. 1-1)")
-    parser.add_argument("--subtask_id", type=str, default="0", help="Subtask ID (e.g. 0, 1, 2)")
-    parser.add_argument("--model_id", type=str, default=MODEL_ID, help="Bedrock model ID")
-    args = parser.parse_args()
-
-    MODEL_ID = args.model_id
-    reward = run_task(args.task_id, args.subtask_id)
-    print(f"\nResult: {'PASS' if reward == 1.0 else 'FAIL'} (reward={reward})")
+    main()

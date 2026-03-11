@@ -83,9 +83,9 @@ def _list_emails(username: str, testbed_dir: str, first_n_letters: int = -1) -> 
             email = BytesParser(policy=policy.default).parsebytes(email_content)
         email_name = os.path.basename(email_file)
         message += f"Email ID: {email_name}\n"
-        message += f'From: {email["From"]}\n'
-        message += f'To: {email["To"]}\n'
-        message += f'Subject: {email["Subject"]}\n'
+        message += f"From: {email['From']}\n"
+        message += f"To: {email['To']}\n"
+        message += f"Subject: {email['Subject']}\n"
 
         # Get content
         if email.is_multipart():
@@ -94,15 +94,11 @@ def _list_emails(username: str, testbed_dir: str, first_n_letters: int = -1) -> 
                 ct = part.get_content_type()
                 if ct in ("text/plain", "text/html"):
                     parts.append(
-                        part.get_payload(decode=True).decode(
-                            part.get_content_charset() or "utf-8", errors="replace"
-                        )
+                        part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
                     )
             content = "\n".join(parts)
         else:
-            content = email.get_payload(decode=True).decode(
-                email.get_content_charset() or "utf-8", errors="replace"
-            )
+            content = email.get_payload(decode=True).decode(email.get_content_charset() or "utf-8", errors="replace")
 
         if first_n_letters != -1:
             message += f"Content: {content[:first_n_letters]}...\n"
@@ -205,9 +201,7 @@ def evaluate_diff_contain_text(testbed_dir: str, args: dict) -> bool:
     if input_content == output_content:
         return False
 
-    diff = "\n".join(
-        difflib.unified_diff(input_content.split("\n"), output_content.split("\n"), n=0)
-    )
+    diff = "\n".join(difflib.unified_diff(input_content.split("\n"), output_content.split("\n"), n=0))
     for keyword in args["keywords"]:
         if keyword not in diff:
             return False
@@ -222,7 +216,7 @@ def evaluate_excel_cell_value(testbed_dir: str, args: dict) -> bool:
 
     content = _read_excel(file_path)
     for match in args["matches"]:
-        pattern = f'({match["row"]}, {match["col"]}): {match["value"]}'
+        pattern = f"({match['row']}, {match['col']}): {match['value']}"
         if pattern not in content:
             return False
     return True
@@ -300,8 +294,11 @@ def evaluate_exact_match(testbed_dir: str, args: dict) -> bool:
                     return False
         return True
 
+    def _read_text_file(x):
+        return open(x).read()
+
     if doc_type in ("txt", "ics"):
-        helper = lambda x: open(x).read()
+        helper = _read_text_file
     elif doc_type == "doc":
         helper = _read_word
     elif doc_type == "pdf":

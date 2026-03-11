@@ -52,16 +52,18 @@ def list_all_subtasks(s3_uri: str) -> list[dict]:
             key = obj["Key"]
             if key.endswith("/config.json"):
                 # Parse: {prefix}/{task_id}/{subtask_id}/config.json
-                rel = key[len(prefix):]
+                rel = key[len(prefix) :]
                 parts = rel.split("/")
                 if len(parts) == 3:  # task_id/subtask_id/config.json
                     task_id, subtask_id, _ = parts
-                    entries.append({
-                        "task_id": task_id,
-                        "subtask_id": subtask_id,
-                        "task_uri": f"s3://{bucket_name}/{key}",
-                        "testbed_uri": f"s3://{bucket_name}/{prefix}{task_id}/testbed.tar.gz",
-                    })
+                    entries.append(
+                        {
+                            "task_id": task_id,
+                            "subtask_id": subtask_id,
+                            "task_uri": f"s3://{bucket_name}/{key}",
+                            "testbed_uri": f"s3://{bucket_name}/{prefix}{task_id}/testbed.tar.gz",
+                        }
+                    )
 
     # Sort by (category, task_num, subtask_id)
     def sort_key(e):
@@ -260,9 +262,7 @@ def main():
             failed += 1
             record["error"] = item.error
             record["elapsed"] = item.elapsed
-            logger.warning(
-                f"[{completed}/{len(payloads)}] {display_id} failed in {item.elapsed:.1f}s: {item.error}"
-            )
+            logger.warning(f"[{completed}/{len(payloads)}] {display_id} failed in {item.elapsed:.1f}s: {item.error}")
 
         append_result_to_file(result_path, record)
 

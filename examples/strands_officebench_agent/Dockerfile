@@ -8,7 +8,9 @@ ENV UV_SYSTEM_PYTHON=1 \
     PYTHONUNBUFFERED=1 \
     DOCKER_CONTAINER=1 \
     AWS_REGION=us-west-2 \
-    AWS_DEFAULT_REGION=us-west-2
+    AWS_DEFAULT_REGION=us-west-2 \
+    BYPASS_TOOL_CONSENT=true \
+    STRANDS_NON_INTERACTIVE=true
 
 # ---------- OfficeBench specific requirements ----------
 # System dependencies: LibreOffice (doc conversion), Tesseract (OCR), ImageMagick
@@ -23,14 +25,17 @@ RUN apt-get update && \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Clone OfficeBench app scripts
+RUN git clone --depth 1 https://github.com/zlwang-cs/OfficeBench.git /tmp/officebench && \
+    cp -r /tmp/officebench/apps /apps && \
+    rm -rf /tmp/officebench
+
 # Create testbed directories
 RUN mkdir -p /testbed/data /testbed/calendar /testbed/emails
 
 # ----------
 
 COPY . .
-# OfficeBench app scripts are expected at /apps/ (copied into context by build.sh)
-RUN if [ -d "apps" ]; then cp -r apps /apps; fi
 
 # Install local toolkit from build context, then install example deps
 RUN --mount=type=bind,from=toolkit,source=.,target=/toolkit \

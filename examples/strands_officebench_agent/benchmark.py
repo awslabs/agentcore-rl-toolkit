@@ -57,16 +57,18 @@ def list_all_subtasks(s3_uri: str) -> list[dict]:
         for obj in page.get("Contents", []):
             key = obj["Key"]
             if key.endswith("/config.json"):
-                rel = key[len(prefix):]
+                rel = key[len(prefix) :]
                 parts = rel.split("/")
                 if len(parts) == 3:
                     task_id, subtask_id, _ = parts
-                    entries.append({
-                        "task_id": task_id,
-                        "subtask_id": subtask_id,
-                        "task_uri": f"s3://{bucket_name}/{key}",
-                        "testbed_uri": f"s3://{bucket_name}/{prefix}{task_id}/testbed.tar.gz",
-                    })
+                    entries.append(
+                        {
+                            "task_id": task_id,
+                            "subtask_id": subtask_id,
+                            "task_uri": f"s3://{bucket_name}/{key}",
+                            "testbed_uri": f"s3://{bucket_name}/{prefix}{task_id}/testbed.tar.gz",
+                        }
+                    )
 
     def sort_key(e):
         parts = e["task_id"].split("-")
@@ -156,14 +158,17 @@ def print_leaderboard(summary: dict):
     s2 = cats.get("2-app", {"total": 0, "passed": 0, "pass_rate": 0})
     s3 = cats.get("3-app", {"total": 0, "passed": 0, "pass_rate": 0})
 
-    header = f"| {'Model':<40} | {'Single App (93)':>15} | {'Two Apps (95)':>14} | {'Three Apps (112)':>16} | {'Overall (300)':>14} |"
-    sep = f"|{'-'*42}|{'-'*17}|{'-'*16}|{'-'*18}|{'-'*16}|"
+    header = (
+        f"| {'Model':<40} | {'Single App (93)':>15} "
+        f"| {'Two Apps (95)':>14} | {'Three Apps (112)':>16} | {'Overall (300)':>14} |"
+    )
+    sep = f"|{'-' * 42}|{'-' * 17}|{'-' * 16}|{'-' * 18}|{'-' * 16}|"
     row = (
         f"| {model:<40} "
-        f"| {s1['pass_rate']*100:>14.2f}% "
-        f"| {s2['pass_rate']*100:>13.2f}% "
-        f"| {s3['pass_rate']*100:>15.2f}% "
-        f"| {overall['pass_rate']*100:>13.2f}% |"
+        f"| {s1['pass_rate'] * 100:>14.2f}% "
+        f"| {s2['pass_rate'] * 100:>13.2f}% "
+        f"| {s3['pass_rate'] * 100:>15.2f}% "
+        f"| {overall['pass_rate'] * 100:>13.2f}% |"
     )
     detail = (
         f"| {'(passed/total)':<40} "
@@ -198,10 +203,16 @@ def main():
     parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature")
     parser.add_argument("--top_p", type=float, default=None, help="Top-p sampling")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max output tokens per turn")
-    parser.add_argument("--thinking_budget", type=int, default=None, help="Enable thinking mode with token budget (e.g. 10000)")
+    parser.add_argument(
+        "--thinking_budget",
+        type=int,
+        default=None,
+        help="Enable thinking mode with token budget (e.g. 10000)",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Limit number of tasks")
-    parser.add_argument("--category", type=str, default=None, choices=["1", "2", "3"],
-                        help="Only run a specific category")
+    parser.add_argument(
+        "--category", type=str, default=None, choices=["1", "2", "3"], help="Only run a specific category"
+    )
     parser.add_argument("--resume", action="store_true", help="Resume from existing results")
 
     args = parser.parse_args()
@@ -308,15 +319,13 @@ def main():
                 record["error"] = item.error
                 record["elapsed"] = item.elapsed
                 record["is_pass"] = False
-                logger.warning(
-                    f"[{done_count}/{len(entries)}] {display_id} ERROR ({item.elapsed:.1f}s): {item.error}"
-                )
+                logger.warning(f"[{done_count}/{len(entries)}] {display_id} ERROR ({item.elapsed:.1f}s): {item.error}")
 
             with open(result_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
 
     # Compute and save summary
-    wall_clock_time = time.time() - benchmark_start if 'benchmark_start' in dir() else 0
+    wall_clock_time = time.time() - benchmark_start if "benchmark_start" in dir() else 0
     # Re-read to handle resume case
     if result_path.exists():
         # Calculate cumulative task time (sum of all individual elapsed times)
@@ -343,12 +352,14 @@ def main():
         cats = summary["categories"]
         for cat_name in sorted(cats):
             s = cats[cat_name]
-            logger.info(f"  {cat_name}: {s['passed']}/{s['total']} ({s['pass_rate']:.1%}) "
-                        f"[failed={s['failed']}, errored={s['errored']}]")
+            logger.info(
+                f"  {cat_name}: {s['passed']}/{s['total']} ({s['pass_rate']:.1%}) "
+                f"[failed={s['failed']}, errored={s['errored']}]"
+            )
         o = summary["overall"]
         logger.info(f"  Overall: {o['passed']}/{o['total']} ({o['pass_rate']:.1%})")
-        logger.info(f"  Wall clock time: {wall_clock_time:.1f}s ({wall_clock_time/60:.1f}m)")
-        logger.info(f"  Cumulative task time: {cumulative_elapsed:.1f}s ({cumulative_elapsed/60:.1f}m)")
+        logger.info(f"  Wall clock time: {wall_clock_time:.1f}s ({wall_clock_time / 60:.1f}m)")
+        logger.info(f"  Cumulative task time: {cumulative_elapsed:.1f}s ({cumulative_elapsed / 60:.1f}m)")
         logger.info(f"  Results: {result_path}")
         logger.info(f"  Summary: {summary_path}")
 

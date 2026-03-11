@@ -21,10 +21,6 @@ This agent evaluates LLMs on the [OfficeBench](https://github.com/zlwang-cs/Offi
 
 ## Prerequisites
 
-- **OfficeBench repository**: Clone it locally
-  ```bash
-  git clone https://github.com/zlwang-cs/OfficeBench /path/to/OfficeBench
-  ```
 - **AWS credentials**: IAM role with access to S3 and Bedrock AgentCore
 - **Docker**: With buildx support (for building arm64 images)
 
@@ -43,9 +39,11 @@ uv pip install -e ../../ --force-reinstall --no-deps  # install agentcore-rl-too
 
 ### 1. Preprocess tasks (upload to S3)
 
-Upload all 300 OfficeBench tasks to S3 (run once):
+Upload all 300 OfficeBench tasks to S3 (run once). This requires a local clone of the OfficeBench repo:
 
 ```bash
+git clone https://github.com/zlwang-cs/OfficeBench /path/to/OfficeBench
+
 python preprocess.py \
     --officebench_dir /path/to/OfficeBench \
     --s3_bucket your-bucket \
@@ -66,20 +64,16 @@ s3://your-bucket/officebench/
 
 ### 2. Build Docker image & push to ECR
 
+The Dockerfile automatically clones the OfficeBench repo and copies the app scripts during build — no local clone needed for this step.
+
 ```bash
 cd /path/to/agentcore-rl-toolkit
 
-# Using the build wrapper (copies OfficeBench apps automatically)
-OFFICEBENCH_DIR=/path/to/OfficeBench ./examples/strands_officebench_agent/build.sh --tag=v1
-
-# Or manually:
-cp -r /path/to/OfficeBench/apps examples/strands_officebench_agent/apps
 ./scripts/build_docker_image_and_push_to_ecr.sh \
     --dockerfile=examples/strands_officebench_agent/Dockerfile \
     --context=examples/strands_officebench_agent \
     --additional-context=toolkit=. \
     --tag=v1
-rm -rf examples/strands_officebench_agent/apps
 ```
 
 Requires a `.env` file at the repo root:
@@ -88,8 +82,6 @@ AWS_REGION=xxxxx
 AWS_ACCOUNT=xxxxxxxxxxxxx
 ECR_REPO_NAME=xxxxxxxxxxxx
 ```
-
-`OFFICEBENCH_DIR` points to your local OfficeBench clone (default: `~/OfficeBench`).
 
 ### 3. Deploy to AgentCore
 
@@ -187,22 +179,29 @@ Note: thinking mode and temperature=0 are incompatible (Anthropic API requiremen
 
 ## Local Testing (no ACR)
 
-For development and debugging, you can run tasks locally without deploying to ACR:
+For development and debugging, you can run tasks locally without deploying to ACR.
 
+Install dependencies and set up the environment:
 ```bash
-# Single task
-python test_local.py --task_id 1-1 --subtask_id 0
+cd examples/strands_officebench_agent
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -e .
+uv pip install -e ../../ --force-reinstall --no-deps
 
-# Batch local evaluation
-python run_local_eval.py --exp_id local_test --limit 10
-python run_local_eval.py --exp_id local_test --category 1
-python run_local_eval.py --exp_id local_test --resume
+# The OfficeBench app scripts hardcode /testbed/ as the working directory.
+# Create a symlink so local runs write to /tmp/testbed/ instead:
+sudo ln -sf /tmp/testbed /testbed
 ```
 
-Local testing requires:
-- OfficeBench repo at the path set in `OFFICEBENCH_DIR` (or default path)
-- A `/testbed` symlink: `sudo ln -sf /tmp/testbed /testbed`
-- Bedrock API access (via IAM role or AWS credentials)
+Run tasks:
+```bash
+# Single task
+OFFICEBENCH_DIR=/path/to/OfficeBench python test_local.py --task_id 1-1 --subtask_id 0
+
+# Batch local evaluation
+OFFICEBENCH_DIR=/path/to/OfficeBench python run_local_eval.py --exp_id local_test --limit 10
+```
 
 ## File Structure
 
@@ -213,60 +212,17 @@ strands_officebench_agent/
 ├── reward.py           # OfficeBenchReward with 9 evaluation functions
 ├── models.py           # Pydantic request models
 ├── utils.py            # S3 helpers (load task, setup testbed)
-├── benchmark.py        # Full benchmark runner (ACR, recommended)
-├── evaluate.py         # Batch evaluation via RolloutClient (ACR)
+├── benchmark.py        # Full benchmark runner (ACR)
+├── evaluate.py         # Batch evaluation via RolloutClient (ACR, lower-level)
 ├── preprocess.py       # Package OfficeBench tasks for S3
 ├── deploy.py           # Deploy container to AgentCore
-├── build.sh            # Build & push Docker image to ECR
 ├── Dockerfile          # ACR container (LibreOffice, Tesseract, apps)
-├── test_local.py       # Single-task local testing
+├── test_local.py       # Single-task local testing (no ACR)
 ├── run_local_eval.py   # Batch local evaluation (no ACR)
 ├── config.toml         # Your configuration (gitignored)
 ├── config.example.toml # Configuration template
 └── pyproject.toml      # Python dependencies
 ```
-
-## Architecture
-
-```
-                     ┌──────────────────────────────────┐
-                     │         ACR Container            │
-  benchmark.py       │  ┌────────────────────────────┐  │
-  (client-side)      │  │  dev_app.py                │  │
-       │             │  │  1. Load task from S3      │  │
-       │  payload    │  │  2. Setup /testbed/        │  │
-       ├────────────>│  │  3. Run Strands Agent      │  │
-       │             │  │     └─ tools.py (20 tools) │  │
-       │  immediate  │  │  4. Evaluate (reward.py)   │  │
-       │<────────────│  │  5. Save result to S3      │  │
-       │ "processing"│  └────────────────────────────┘  │
-       │             └──────────────────────────────────┘
-       │
-       │  poll S3 (HEAD)
-       ├──────────────> s3://bucket/{exp_id}/{input_id}/{session_id}.json
-       │
-       │  result ready
-       │<──────────────
-       │
-  ┌────▼──────────┐
-  │ rollouts.jsonl│  (per-task results with full conversation)
-  │ summary.json  │  (scores by category)
-  └───────────────┘
-```
-
-## Tools
-
-The agent has access to 20 tools wrapping OfficeBench application scripts, plus a shell tool:
-
-| Category | Tools |
-|----------|-------|
-| Calendar | `calendar_create_event`, `calendar_delete_event`, `calendar_list_events` |
-| Email | `email_send_email`, `email_list_emails`, `email_read_email` |
-| Excel | `excel_read_file`, `excel_set_cell`, `excel_delete_cell`, `excel_create_new_file`, `excel_convert_to_pdf` |
-| Word | `word_read_file`, `word_create_new_file`, `word_write_to_file`, `word_convert_to_pdf` |
-| PDF | `pdf_read_file`, `pdf_convert_to_image`, `pdf_convert_to_word` |
-| OCR | `ocr_recognize_file` |
-| Shell | `shell` (Strands built-in) |
 
 ## Known Issues
 
@@ -284,4 +240,3 @@ These tasks have bugs in the ground truth and will always fail regardless of age
 ### Local testing limitations
 
 - PDF/Word conversion tools require LibreOffice (installed in Docker, not locally)
-- The `/testbed` symlink must be created manually for local tests

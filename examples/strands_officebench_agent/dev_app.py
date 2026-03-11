@@ -1,9 +1,5 @@
 import logging
-import os
 import time
-
-os.environ["BYPASS_TOOL_CONSENT"] = "true"
-os.environ["STRANDS_NON_INTERACTIVE"] = "true"
 
 from dotenv import load_dotenv
 from models import InvocationRequest
@@ -98,7 +94,7 @@ def invoke_agent(payload: dict):
     logger.info(f"Task: {user_input}")
 
     response = agent(user_input)
-    logger.info(f'Agent response: {response.message["content"][0]["text"]}')
+    logger.info(f"Agent response: {response.message['content'][0]['text']}")
 
     # Collect token data (only available with vLLMModel)
     rollout_data = {}
@@ -106,10 +102,7 @@ def invoke_agent(payload: dict):
         rollout_data = model.get_token_data()
 
     # Collect full conversation history
-    messages = [
-        {"role": msg.get("role", "unknown"), "content": msg.get("content", [])}
-        for msg in agent.messages
-    ]
+    messages = [{"role": msg.get("role", "unknown"), "content": msg.get("content", [])} for msg in agent.messages]
 
     # Evaluate reward
     reward = reward_fn(

@@ -37,10 +37,20 @@ def calendar_create_event(user: str, summary: str, time_start: str, time_end: st
         time_start: Start time in format '%Y-%m-%d %H:%M:%S'.
         time_end: End time in format '%Y-%m-%d %H:%M:%S'.
     """
-    return _run_app("calendar_app", "calendar_create_event", [
-        "--user", user, "--summary", summary,
-        "--time_start", time_start, "--time_end", time_end,
-    ])
+    return _run_app(
+        "calendar_app",
+        "calendar_create_event",
+        [
+            "--user",
+            user,
+            "--summary",
+            summary,
+            "--time_start",
+            time_start,
+            "--time_end",
+            time_end,
+        ],
+    )
 
 
 @tool
@@ -51,9 +61,16 @@ def calendar_delete_event(user: str, summary: str) -> str:
         user: The username.
         summary: The event summary to delete.
     """
-    return _run_app("calendar_app", "calendar_delete_event", [
-        "--user", user, "--summary", summary,
-    ])
+    return _run_app(
+        "calendar_app",
+        "calendar_delete_event",
+        [
+            "--user",
+            user,
+            "--summary",
+            summary,
+        ],
+    )
 
 
 @tool
@@ -79,10 +96,20 @@ def email_send_email(sender: str, recipient: str, subject: str, content: str) ->
         subject: Email subject line.
         content: Email body content.
     """
-    return _run_app("email_app", "email_send_email", [
-        "--sender", sender, "--recipient", recipient,
-        "--subject", subject, "--content", content,
-    ])
+    return _run_app(
+        "email_app",
+        "email_send_email",
+        [
+            "--sender",
+            sender,
+            "--recipient",
+            recipient,
+            "--subject",
+            subject,
+            "--content",
+            content,
+        ],
+    )
 
 
 @tool
@@ -103,9 +130,16 @@ def email_read_email(username: str, email_id: str) -> str:
         username: The username whose mailbox to read from.
         email_id: The email filename (e.g. 'Meeting Notes.eml').
     """
-    return _run_app("email_app", "email_read_email", [
-        "--username", username, "--email_id", email_id,
-    ])
+    return _run_app(
+        "email_app",
+        "email_read_email",
+        [
+            "--username",
+            username,
+            "--email_id",
+            email_id,
+        ],
+    )
 
 
 # ── Excel Tools ─────────────────────────────────────────────────────────────
@@ -136,8 +170,7 @@ def excel_set_cell(file_path: str, text: str, row_idx: int, column_idx: int, she
         column_idx: Column index (1-based).
         sheet_name: Optional sheet name. If empty, uses the active sheet.
     """
-    args = ["--file_path", file_path, "--text", str(text),
-            "--row_idx", str(row_idx), "--column_idx", str(column_idx)]
+    args = ["--file_path", file_path, "--text", str(text), "--row_idx", str(row_idx), "--column_idx", str(column_idx)]
     if sheet_name:
         args.extend(["--sheet_name", sheet_name])
     return _run_app("excel_app", "excel_set_cell", args)
@@ -153,8 +186,7 @@ def excel_delete_cell(file_path: str, row_idx: int, column_idx: int, sheet_name:
         column_idx: Column index (1-based).
         sheet_name: Optional sheet name.
     """
-    args = ["--file_path", file_path,
-            "--row_idx", str(row_idx), "--column_idx", str(column_idx)]
+    args = ["--file_path", file_path, "--row_idx", str(row_idx), "--column_idx", str(column_idx)]
     if sheet_name:
         args.extend(["--sheet_name", sheet_name])
     return _run_app("excel_app", "excel_delete_cell", args)
@@ -178,9 +210,16 @@ def excel_convert_to_pdf(excel_file_path: str, pdf_file_path: str) -> str:
         excel_file_path: Path to the source Excel file.
         pdf_file_path: Path for the output PDF file.
     """
-    return _run_app("excel_app", "excel_convert_to_pdf", [
-        "--excel_file_path", excel_file_path, "--pdf_file_path", pdf_file_path,
-    ])
+    return _run_app(
+        "excel_app",
+        "excel_convert_to_pdf",
+        [
+            "--excel_file_path",
+            excel_file_path,
+            "--pdf_file_path",
+            pdf_file_path,
+        ],
+    )
 
 
 # ── Word Tools ──────────────────────────────────────────────────────────────
@@ -215,9 +254,18 @@ def word_write_to_file(file_path: str, contents: str, style: str = "pure-text") 
         contents: The text content to append.
         style: Text style - 'pure-text' (paragraph), 'title', or 'subtitle'.
     """
-    return _run_app("word_app", "word_write_to_file", [
-        "--file_path", file_path, "--contents", contents, "--style", style,
-    ])
+    return _run_app(
+        "word_app",
+        "word_write_to_file",
+        [
+            "--file_path",
+            file_path,
+            "--contents",
+            contents,
+            "--style",
+            style,
+        ],
+    )
 
 
 @tool
@@ -228,9 +276,16 @@ def word_convert_to_pdf(word_file_path: str, pdf_file_path: str) -> str:
         word_file_path: Path to the source Word file.
         pdf_file_path: Path for the output PDF file.
     """
-    return _run_app("word_app", "word_convert_to_pdf", [
-        "--word_file_path", word_file_path, "--pdf_file_path", pdf_file_path,
-    ])
+    return _run_app(
+        "word_app",
+        "word_convert_to_pdf",
+        [
+            "--word_file_path",
+            word_file_path,
+            "--pdf_file_path",
+            pdf_file_path,
+        ],
+    )
 
 
 # ── PDF Tools ───────────────────────────────────────────────────────────────
@@ -254,9 +309,16 @@ def pdf_convert_to_image(pdf_file_path: str, image_file_path: str) -> str:
         pdf_file_path: Path to the source PDF file.
         image_file_path: Path for the output image file.
     """
-    return _run_app("pdf_app", "pdf_convert_to_image", [
-        "--pdf_file_path", pdf_file_path, "--image_file_path", image_file_path,
-    ])
+    return _run_app(
+        "pdf_app",
+        "pdf_convert_to_image",
+        [
+            "--pdf_file_path",
+            pdf_file_path,
+            "--image_file_path",
+            image_file_path,
+        ],
+    )
 
 
 @tool
@@ -267,9 +329,16 @@ def pdf_convert_to_word(pdf_file_path: str, word_file_path: str) -> str:
         pdf_file_path: Path to the source PDF file.
         word_file_path: Path for the output Word file.
     """
-    return _run_app("pdf_app", "pdf_convert_to_word", [
-        "--pdf_file_path", pdf_file_path, "--word_file_path", word_file_path,
-    ])
+    return _run_app(
+        "pdf_app",
+        "pdf_convert_to_word",
+        [
+            "--pdf_file_path",
+            pdf_file_path,
+            "--word_file_path",
+            word_file_path,
+        ],
+    )
 
 
 # ── OCR Tool ────────────────────────────────────────────────────────────────

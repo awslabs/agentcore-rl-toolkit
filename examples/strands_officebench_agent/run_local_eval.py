@@ -129,14 +129,16 @@ def run_single_task(task_id, subtask_id, model_id):
     # Collect full conversation history (all messages with tool calls)
     messages = []
     for msg in agent.messages:
-        messages.append({
-            "role": msg.get("role", "unknown"),
-            "content": msg.get("content", []),
-        })
+        messages.append(
+            {
+                "role": msg.get("role", "unknown"),
+                "content": msg.get("content", []),
+            }
+        )
 
     # Collect testbed file listing
     testbed_files = []
-    for root, dirs, files in os.walk(TESTBED_DIR):
+    for root, _dirs, files in os.walk(TESTBED_DIR):
         for f in files:
             path = os.path.join(root, f)
             testbed_files.append({"path": path, "size": os.path.getsize(path)})
@@ -165,18 +167,15 @@ def load_completed(result_path):
 
 
 def main():
-    global MODEL_ID
-
     parser = argparse.ArgumentParser(description="Run local OfficeBench evaluation")
     parser.add_argument("--model_id", type=str, default=MODEL_ID, help="Bedrock model ID")
     parser.add_argument("--exp_id", type=str, default="local_eval", help="Experiment ID for results folder")
-    parser.add_argument("--category", type=str, default=None, choices=["1", "2", "3"],
-                        help="Only evaluate a specific category")
+    parser.add_argument(
+        "--category", type=str, default=None, choices=["1", "2", "3"], help="Only evaluate a specific category"
+    )
     parser.add_argument("--limit", type=int, default=None, help="Limit number of tasks")
     parser.add_argument("--resume", action="store_true", help="Resume from existing results (skip completed)")
     args = parser.parse_args()
-
-    MODEL_ID = args.model_id
 
     # Setup results directory
     results_dir = os.path.join(os.path.dirname(__file__), "results", args.exp_id)
@@ -230,7 +229,7 @@ def main():
 
         start_time = time.time()
         try:
-            result = run_single_task(task_id, subtask_id, MODEL_ID)
+            result = run_single_task(task_id, subtask_id, args.model_id)
             elapsed = time.time() - start_time
 
             record["success"] = True
@@ -249,8 +248,7 @@ def main():
 
             status = "PASS" if is_pass else "FAIL"
             logger.info(
-                f"[{total_done}/{len(entries)}] {display_id} {status} "
-                f"(reward={result['reward']}, {elapsed:.1f}s)"
+                f"[{total_done}/{len(entries)}] {display_id} {status} (reward={result['reward']}, {elapsed:.1f}s)"
             )
 
         except Exception as e:
@@ -267,9 +265,11 @@ def main():
             f.write(json.dumps(record) + "\n")
 
     # Compute final stats (re-read all results for accurate stats when resuming)
-    final_stats = {"1": {"total": 0, "passed": 0, "failed": 0, "errored": 0},
-                   "2": {"total": 0, "passed": 0, "failed": 0, "errored": 0},
-                   "3": {"total": 0, "passed": 0, "failed": 0, "errored": 0}}
+    final_stats = {
+        "1": {"total": 0, "passed": 0, "failed": 0, "errored": 0},
+        "2": {"total": 0, "passed": 0, "failed": 0, "errored": 0},
+        "3": {"total": 0, "passed": 0, "failed": 0, "errored": 0},
+    }
 
     with open(result_path) as f:
         for line in f:
@@ -335,8 +335,7 @@ def main():
         s = final_stats[cat]
         rate = s["passed"] / s["total"] if s["total"] > 0 else 0
         logger.info(
-            f"  {cat}-app: {s['passed']}/{s['total']} ({rate:.1%}) "
-            f"[failed={s['failed']}, errored={s['errored']}]"
+            f"  {cat}-app: {s['passed']}/{s['total']} ({rate:.1%}) [failed={s['failed']}, errored={s['errored']}]"
         )
     logger.info(f"  Overall: {overall_passed}/{overall_total} ({overall_rate:.1%})")
     logger.info(f"  Total time: {total_time:.1f}s ({total_time / 60:.1f}m)")

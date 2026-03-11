@@ -56,9 +56,7 @@ def upload_task(
         logger.warning(f"Skipping {task_id}: no subtasks/ directory")
         return 0
 
-    subtask_files = sorted(
-        f for f in os.listdir(subtasks_dir) if f.endswith(".json")
-    )
+    subtask_files = sorted(f for f in os.listdir(subtasks_dir) if f.endswith(".json"))
     if not subtask_files:
         logger.warning(f"Skipping {task_id}: no subtask JSON files")
         return 0
@@ -194,7 +192,9 @@ def main():
         for task_id in task_ids:
             task_dir = os.path.join(tasks_dir, task_id)
             subtasks_dir = os.path.join(task_dir, "subtasks")
-            num_subtasks = len([f for f in os.listdir(subtasks_dir) if f.endswith(".json")]) if os.path.exists(subtasks_dir) else 0
+            num_subtasks = (
+                len([f for f in os.listdir(subtasks_dir) if f.endswith(".json")]) if os.path.exists(subtasks_dir) else 0
+            )
             has_testbed = os.path.exists(os.path.join(task_dir, "testbed"))
             logger.info(f"  {task_id}: {num_subtasks} subtasks (testbed: {has_testbed})")
         return
@@ -208,7 +208,9 @@ def main():
         if (i + 1) % 10 == 0:
             logger.info(f"Processed {i + 1}/{len(task_ids)} task dirs ({total_subtasks} subtasks)")
 
-    logger.info(f"Done! Uploaded {total_subtasks} subtasks from {len(task_ids)} tasks to s3://{args.s3_bucket}/{args.s3_prefix}/")
+    logger.info(
+        f"Done! Uploaded {total_subtasks} subtasks from {len(task_ids)} tasks to s3://{args.s3_bucket}/{args.s3_prefix}/"
+    )
 
     # Write manifest with all (task_id, subtask_id) entries
     manifest = {
