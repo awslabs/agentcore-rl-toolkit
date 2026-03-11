@@ -292,4 +292,12 @@ Note that all arguments can also be passed via CLI to override `config.toml` val
 
 Both `evaluate.py` (sync) and `evaluate_async.py` (async) can run multiple agent instances concurrently via `--max_concurrent`. The difference is that the sync script submits requests sequentially — a slow submission (e.g., ACR cold start) blocks the next one — while the async script dispatches submissions as concurrent tasks so cold starts don't block each other.
 
+#### Connection pool sizing
+
+Both scripts accept `--max_pool_connections` (default: 10) to control the urllib3 connection pool size for boto3 clients. If this value is smaller than `--max_concurrent`, you may see urllib3 warnings like `"Connection pool is full, discarding connection"`. This is **not an error** — requests still succeed, but excess connections are created and discarded instead of being reused from the pool, adding minor TCP/TLS handshake overhead. If you want to eliminate these warnings, you can set `--max_pool_connections` to match `--max_concurrent`:
+
+```bash
+python evaluate.py --exp_id my_eval --max_concurrent 50 --max_pool_connections 50
+```
+
 Results are saved as JSONL files under `results/` (e.g., `results/my_eval.jsonl`).

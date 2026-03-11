@@ -75,6 +75,16 @@ def main():
         help="Limit number of repositories to evaluate (for testing)",
     )
     parser.add_argument(
+        "--max_pool_connections",
+        type=int,
+        default=10,
+        help="Max urllib3 connection pool size for boto3 clients (default: 10). "
+        "If this value is smaller than --max_concurrent, you may see urllib3 warnings "
+        "'Connection pool is full, discarding connection'. This is not an error — "
+        "requests still succeed, but excess connections are created and discarded "
+        "instead of being reused from the pool, adding minor TCP/TLS overhead. ",
+    )
+    parser.add_argument(
         "--sampling_params",
         type=str,
         default=eval_config.get("sampling_params"),
@@ -134,7 +144,7 @@ def main():
         exp_id=args.exp_id,
         base_url=args.base_url,
         model_id=args.model_id,
-        max_pool_connections=args.max_concurrent,
+        max_pool_connections=args.max_pool_connections,
         sampling_params=sampling_params,
     )
 
