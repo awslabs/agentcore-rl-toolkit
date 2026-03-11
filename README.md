@@ -150,6 +150,7 @@ for f in futures:
 **How the future lifecycle works:**
 - **`client.invoke()`** sends the request to ACR and returns a `RolloutFuture` immediately — this means ACR has received the request and a background agent session is processing it.
 - **`future.result(timeout=...)`** blocks until the result appears in S3, polling with exponential backoff internally. It returns the complete rollout data (token IDs, rewards, etc.) once the agent finishes and writes to S3.
+- **Automatic session cleanup**: Once a result is fetched or a timeout is reached, the underlying ACR session is automatically cancelled — no manual cleanup needed.
 
 ### Batch Evaluation (`run_batch()`)
 
@@ -164,6 +165,33 @@ for item in client.run_batch(payloads, max_concurrent_sessions=100):
 ```
 
 See [`examples/strands_migration_agent/evaluate.py`](examples/strands_migration_agent/evaluate.py) for a full evaluation script.
+
+### Async API
+
+All client methods have async equivalents for use in `asyncio` event loops — cold starts on one request don't block submission of others:
+
+```python
+import asyncio
+from agentcore_rl_toolkit import RolloutClient
+
+client = RolloutClient(agent_runtime_arn="arn:...", s3_bucket="my-bucket", exp_id="exp-1")
+
+async def run():
+    # Fire all requests concurrently (cold starts don't block each other)
+    tasks = [asyncio.create_task(client.invoke_async(p)) for p in payloads]
+    futures = await asyncio.gather(*tasks)
+
+    # Wait for all results concurrently
+    results = await asyncio.gather(*[f.result_async(timeout=300) for f in futures])
+    # Or without timeout: results = await asyncio.gather(*futures)
+
+    # Or use run_batch_async for managed concurrency:
+    async for item in client.run_batch_async(payloads, max_concurrent_sessions=100):
+        if item.success:
+            process(item.result)
+```
+
+See [`examples/strands_migration_agent/evaluate_async.py`](examples/strands_migration_agent/evaluate_async.py) for a full async evaluation script.
 
 ## Start Training on Example Agents
 
