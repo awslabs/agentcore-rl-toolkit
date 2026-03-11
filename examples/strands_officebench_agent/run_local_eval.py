@@ -11,22 +11,8 @@ import traceback
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# Configure local paths BEFORE importing tools
-OFFICEBENCH_DIR = os.environ.get("OFFICEBENCH_DIR", os.path.expanduser("~/OfficeBench"))
+DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 TESTBED_DIR = "/tmp/testbed"
-
-os.environ["OFFICEBENCH_APPS_DIR"] = os.path.join(OFFICEBENCH_DIR, "apps")
-os.environ["OFFICEBENCH_TESTBED_DIR"] = TESTBED_DIR
-os.environ["BYPASS_TOOL_CONSENT"] = "true"
-
-from reward import OfficeBenchReward  # noqa: E402
-from strands import Agent  # noqa: E402
-from strands.agent.conversation_manager import NullConversationManager  # noqa: E402
-from strands.models import BedrockModel  # noqa: E402
-from strands_tools import shell  # noqa: E402
-from tools import ALL_TOOLS  # noqa: E402
-
-MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 SYSTEM_PROMPT = (
     "You are an AI office assistant for user {username}. "
@@ -40,12 +26,10 @@ SYSTEM_PROMPT = (
     "- When the task is complete, stop calling tools and summarize what you did."
 )
 
-reward_fn = OfficeBenchReward()
 
-
-def collect_all_subtasks(category=None):
+def collect_all_subtasks(officebench_dir, category=None):
     """Collect all (task_id, subtask_id) pairs, sorted."""
-    tasks_dir = os.path.join(OFFICEBENCH_DIR, "tasks")
+    tasks_dir = os.path.join(officebench_dir, "tasks")
     entries = []
     for task_dir_name in os.listdir(tasks_dir):
         if category and not task_dir_name.startswith(f"{category}-"):
@@ -94,64 +78,6 @@ def setup_local_testbed(task_dir):
         shutil.copytree(data_src, os.path.join(TESTBED_DIR, "cache", "data"))
 
 
-def run_single_task(task_id, subtask_id, model_id):
-    """Run a single task and return the result dict."""
-    task_dir = os.path.join(OFFICEBENCH_DIR, "tasks", task_id)
-    config_path = os.path.join(task_dir, "subtasks", f"{subtask_id}.json")
-
-    with open(config_path) as f:
-        task_config = json.load(f)
-
-    setup_local_testbed(task_dir)
-
-    model = BedrockModel(model_id=model_id)
-
-    system_prompt = SYSTEM_PROMPT.format(
-        username=task_config.get("username", "User"),
-        date=task_config.get("date", "unknown"),
-        weekday=task_config.get("weekday", "unknown"),
-        time=task_config.get("time", "unknown"),
-        testbed=TESTBED_DIR,
-    )
-
-    agent = Agent(
-        model=model,
-        tools=[shell, *ALL_TOOLS],
-        system_prompt=system_prompt,
-        conversation_manager=NullConversationManager(),
-    )
-
-    response = agent(task_config["task"])
-    response_text = response.message["content"][0]["text"]
-
-    reward = reward_fn(testbed_dir=TESTBED_DIR, evaluation_config=task_config["evaluation"])
-
-    # Collect full conversation history (all messages with tool calls)
-    messages = []
-    for msg in agent.messages:
-        messages.append(
-            {
-                "role": msg.get("role", "unknown"),
-                "content": msg.get("content", []),
-            }
-        )
-
-    # Collect testbed file listing
-    testbed_files = []
-    for root, _dirs, files in os.walk(TESTBED_DIR):
-        for f in files:
-            path = os.path.join(root, f)
-            testbed_files.append({"path": path, "size": os.path.getsize(path)})
-
-    return {
-        "task": task_config["task"],
-        "response": response_text,
-        "messages": messages,
-        "reward": reward,
-        "testbed_files": testbed_files,
-    }
-
-
 def load_completed(result_path):
     """Load already-completed task IDs from an existing results file."""
     completed = set()
@@ -168,7 +94,7 @@ def load_completed(result_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Run local OfficeBench evaluation")
-    parser.add_argument("--model_id", type=str, default=MODEL_ID, help="Bedrock model ID")
+    parser.add_argument("--model_id", type=str, default=DEFAULT_MODEL_ID, help="Bedrock model ID")
     parser.add_argument("--exp_id", type=str, default="local_eval", help="Experiment ID for results folder")
     parser.add_argument(
         "--category", type=str, default=None, choices=["1", "2", "3"], help="Only evaluate a specific category"
@@ -177,6 +103,71 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Resume from existing results (skip completed)")
     args = parser.parse_args()
 
+    # Configure local paths BEFORE importing tools (they read env at import time)
+    officebench_dir = os.environ.get("OFFICEBENCH_DIR", os.path.expanduser("~/OfficeBench"))
+    os.environ["OFFICEBENCH_APPS_DIR"] = os.path.join(officebench_dir, "apps")
+    os.environ["OFFICEBENCH_TESTBED_DIR"] = TESTBED_DIR
+    os.environ["BYPASS_TOOL_CONSENT"] = "true"
+
+    from reward import OfficeBenchReward
+    from strands import Agent
+    from strands.agent.conversation_manager import NullConversationManager
+    from strands.models import BedrockModel
+    from strands_tools import shell
+    from tools import ALL_TOOLS
+
+    reward_fn = OfficeBenchReward()
+
+    def run_single_task(task_id, subtask_id, model_id):
+        """Run a single task and return the result dict."""
+        task_dir = os.path.join(officebench_dir, "tasks", task_id)
+        config_path = os.path.join(task_dir, "subtasks", f"{subtask_id}.json")
+
+        with open(config_path) as f:
+            task_config = json.load(f)
+
+        setup_local_testbed(task_dir)
+
+        model = BedrockModel(model_id=model_id)
+
+        system_prompt = SYSTEM_PROMPT.format(
+            username=task_config.get("username", "User"),
+            date=task_config.get("date", "unknown"),
+            weekday=task_config.get("weekday", "unknown"),
+            time=task_config.get("time", "unknown"),
+            testbed=TESTBED_DIR,
+        )
+
+        agent = Agent(
+            model=model,
+            tools=[shell, *ALL_TOOLS],
+            system_prompt=system_prompt,
+            conversation_manager=NullConversationManager(),
+        )
+
+        response = agent(task_config["task"])
+        response_text = response.message["content"][0]["text"]
+
+        reward = reward_fn(testbed_dir=TESTBED_DIR, evaluation_config=task_config["evaluation"])
+
+        # Collect full conversation history (all messages with tool calls)
+        messages = [{"role": msg.get("role", "unknown"), "content": msg.get("content", [])} for msg in agent.messages]
+
+        # Collect testbed file listing
+        testbed_files = []
+        for root, _dirs, files in os.walk(TESTBED_DIR):
+            for f in files:
+                path = os.path.join(root, f)
+                testbed_files.append({"path": path, "size": os.path.getsize(path)})
+
+        return {
+            "task": task_config["task"],
+            "response": response_text,
+            "messages": messages,
+            "reward": reward,
+            "testbed_files": testbed_files,
+        }
+
     # Setup results directory
     results_dir = os.path.join(os.path.dirname(__file__), "results", args.exp_id)
     os.makedirs(results_dir, exist_ok=True)
@@ -184,7 +175,7 @@ def main():
     summary_path = os.path.join(results_dir, "summary.json")
 
     # Collect tasks
-    entries = collect_all_subtasks(category=args.category)
+    entries = collect_all_subtasks(officebench_dir, category=args.category)
     if args.limit:
         entries = entries[: args.limit]
 
@@ -203,7 +194,7 @@ def main():
 
     # Run evaluation
     benchmark_start = time.time()
-    category_stats = {}  # {cat: {"total": N, "passed": N, "failed": N, "errored": N}}
+    category_stats = {}
     total_done = len(completed)
 
     for task_id, subtask_id in entries:
@@ -213,9 +204,7 @@ def main():
         if category not in category_stats:
             category_stats[category] = {"total": 0, "passed": 0, "failed": 0, "errored": 0}
 
-        # Skip if already completed
         if display_id in completed:
-            # Still count toward category stats by re-reading the record
             continue
 
         category_stats[category]["total"] += 1
@@ -293,7 +282,7 @@ def main():
 
     # Build summary
     summary = {
-        "model_id": MODEL_ID,
+        "model_id": args.model_id,
         "exp_id": args.exp_id,
         "total_time_seconds": total_time,
         "categories": {},
