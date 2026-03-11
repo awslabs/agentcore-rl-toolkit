@@ -1,5 +1,6 @@
 """Tests for RolloutClient, RolloutFuture, and BatchResult."""
 
+import asyncio
 import io
 import json
 import time
@@ -467,6 +468,26 @@ class TestRolloutClient:
             future = client.invoke({"prompt": "test"}, input_id="my-input")
 
             assert future.input_id == "my-input"
+
+    def test_get_async_lock_recreated_for_new_event_loop(self):
+        """Lock is recreated when _get_async_lock() is called from a different event loop."""
+        with patch("agentcore_rl_toolkit.client.boto3"):
+            client = RolloutClient(
+                agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:agent/test",
+                s3_bucket="test-bucket",
+                exp_id="exp-001",
+            )
+
+        locks = []
+
+        async def capture_lock():
+            locks.append(client._get_async_lock())
+
+        asyncio.run(capture_lock())
+        asyncio.run(capture_lock())  # new event loop
+
+        assert len(locks) == 2
+        assert locks[0] is not locks[1]
 
     def test_run_batch_returns_batch_result(self):
         """Test run_batch() returns a BatchResult."""
