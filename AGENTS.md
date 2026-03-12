@@ -53,6 +53,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
+| `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
 
 ---
 
@@ -78,11 +79,20 @@ agentcore-rl-toolkit/
 │   │   └── pyproject.toml          # Example-specific dependencies
 │   ├── strands_migration_agent/    # Java migration example
 │   │   ├── dev_app.py              # RL-adapted migration agent
-│   │   ├── evaluate.py             # Batch evaluation script
+│   │   ├── evaluate.py             # Batch evaluation script (sync)
+│   │   ├── evaluate_async.py       # Batch evaluation script (async)
 │   │   ├── reward.py               # MigrationReward implementation
 │   │   └── pyproject.toml          # Example-specific dependencies
+│   └── strands_officebench_agent/  # OfficeBench example
+│       ├── dev_app.py              # RL-adapted office automation agent
+│       ├── evaluate.py             # Batch evaluation script
+│       ├── reward.py               # OfficeBenchReward implementation
+│       ├── tools.py                # Office automation tools
+│       └── pyproject.toml          # Example-specific dependencies
 ├── tests/
-│   └── test_rollout_entrypoint.py
+│   ├── test_rollout_entrypoint.py
+│   ├── test_client.py
+│   └── test_async_client.py
 ├── scripts/
 │   └── build_docker_image_and_push_to_ecr.sh
 ├── pyproject.toml
@@ -336,6 +346,7 @@ Both sync and async patterns share the same infrastructure:
 - **Rate limiting**: Handles ACR TPS limits (25)
 - **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
 - **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
+- **Automatic session cancellation**: Sessions are automatically cancelled after result fetch, timeout, or error — callers don't need to manage ACR session lifecycle
 
 **Async usage example:**
 
