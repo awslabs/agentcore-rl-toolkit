@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentcore-rl-toolkit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Toolkit for Seamlessly Enabling RL Training with Bedrock AgentCore."
 readme = "README.md"
 requires-python = ">=3.10"
