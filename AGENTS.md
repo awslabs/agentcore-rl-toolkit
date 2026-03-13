@@ -54,6 +54,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
+| `examples/strands_appworld/` | AppWorld API interaction agent example |
 
 ---
 
@@ -83,11 +84,19 @@ agentcore-rl-toolkit/
 │   │   ├── evaluate_async.py       # Batch evaluation script (async)
 │   │   ├── reward.py               # MigrationReward implementation
 │   │   └── pyproject.toml          # Example-specific dependencies
-│   └── strands_officebench_agent/  # OfficeBench example
-│       ├── dev_app.py              # RL-adapted office automation agent
-│       ├── evaluate.py             # Batch evaluation script
-│       ├── reward.py               # OfficeBenchReward implementation
-│       ├── tools.py                # Office automation tools
+│   ├── strands_officebench_agent/  # OfficeBench example
+│   │   ├── dev_app.py              # RL-adapted office automation agent
+│   │   ├── evaluate.py             # Batch evaluation script
+│   │   ├── reward.py               # OfficeBenchReward implementation
+│   │   ├── tools.py                # Office automation tools
+│   │   └── pyproject.toml          # Example-specific dependencies
+│   └── strands_appworld/           # AppWorld example
+│       ├── rl_app.py               # RL-adapted AppWorld agent
+│       ├── evaluate.py             # Batch evaluation script (sync)
+│       ├── evaluate_async.py       # Batch evaluation script (async)
+│       ├── reward.py               # AppWorldReward implementation
+│       ├── appworld_utils.py       # AppWorld executor and lifecycle management
+│       ├── deploy.py               # ACR deployment script
 │       └── pyproject.toml          # Example-specific dependencies
 ├── tests/
 │   ├── test_rollout_entrypoint.py
