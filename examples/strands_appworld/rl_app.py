@@ -4,7 +4,6 @@ import sys
 
 import yaml
 from appworld_utils import AppWorldExecutor, execute_appworld
-from compat import patch_botocore
 from dotenv import load_dotenv
 from reward import AppWorldReward
 from strands import Agent
@@ -21,9 +20,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-
-# Patch botocore to bypass freezegun (AppWorld freezes time, which breaks AWS request signing)
-patch_botocore()
 
 app = AgentCoreRLApp()
 

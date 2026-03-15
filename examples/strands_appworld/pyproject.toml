@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["rl_app", "reward", "appworld_utils", "managed_process", "compat"]
+py-modules = ["rl_app", "reward", "appworld_utils", "managed_process"]
 
 [tool.uv.sources]
 appworld = { git = "https://github.com/stonybrooknlp/appworld.git", rev = "11e8d1832ffd564d3a87d30d6ad9a1e5997afda1", lfs = true }

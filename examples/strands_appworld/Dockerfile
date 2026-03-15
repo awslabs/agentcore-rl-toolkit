@@ -34,10 +34,6 @@ RUN --mount=type=bind,from=toolkit,source=.,target=/toolkit \
 # Install OpenTelemetry for ACR observability
 RUN uv pip install aws-opentelemetry-distro==0.12.2
 
-# Overlay constants.py onto the installed appworld package to pin DATA_VERSION
-RUN APPWORLD_PKG=$(python -c "import appworld.common.constants; import os; print(os.path.dirname(appworld.common.constants.__file__))") && \
-    cp constants.py "$APPWORLD_PKG/constants.py"
-
 # Install AppWorld data at build time
 RUN appworld install && appworld download data
 
