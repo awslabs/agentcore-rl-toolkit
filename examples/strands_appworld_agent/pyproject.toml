@@ -1,0 +1,21 @@
+[project]
+name = "strands-appworld-agent-example"
+version = "0.1.0"
+description = "Example: Strands AppWorld Agent using Bedrock AgentCore RL Toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "bedrock-agentcore>=1.0.3",
+    "bedrock-agentcore-starter-toolkit>=0.2.0",
+    "boto3>=1.40.55",
+    "python-dotenv>=1.0.0",
+    "strands-agents[openai]>=1.18.0",
+    "appworld[mcp]",
+    "requests>=2.28.0",
+]
+
+[tool.setuptools]
+py-modules = ["rl_app", "reward"]
+
+[tool.uv.sources]
+appworld = { git = "https://github.com/StonyBrookNLP/appworld.git", rev = "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a", lfs = true }
