@@ -10,8 +10,7 @@ dependencies = [
     "boto3>=1.40.55",
     "python-dotenv>=1.0.0",
     "strands-agents[openai]>=1.18.0",
-    "appworld[mcp]",
-    "requests>=2.28.0",
+    "appworld",
 ]
 
 [tool.setuptools]
