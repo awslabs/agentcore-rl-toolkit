@@ -35,8 +35,8 @@ async def run_batch_mode(client, payloads, s3_folder_uris, result_path, max_conc
             succeeded += 1
             record["result"] = item.result
             record["elapsed"] = item.elapsed
-            rewards = item.result.get("rewards", [])
-            if rewards and rewards[0] == 1:
+            rewards = item.result.get("rewards")
+            if rewards == 1:
                 task_successes += 1
             logger.info(
                 f"[{completed}/{len(payloads)}] Index {item.index} completed in {item.elapsed:.1f}s - "
@@ -121,8 +121,8 @@ async def run_individual_mode(client, payloads, s3_folder_uris, result_path, tim
             record["success"] = True
             record["result"] = result
             record["elapsed"] = future.elapsed()
-            rewards = result.get("rewards", [])
-            if rewards and rewards[0] == 1:
+            rewards = result.get("rewards")
+            if rewards == 1:
                 task_successes += 1
             logger.info(
                 f"[{succeeded + failed}/{len(payloads)}] Index {idx} completed "

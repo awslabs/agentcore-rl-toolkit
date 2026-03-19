@@ -79,4 +79,4 @@ EXPOSE 8080
 
 # Use the full module path
 
-CMD ["opentelemetry-instrument", "python", "-m", "dev_app"]
+CMD ["opentelemetry-instrument", "python", "-m", "rl_app"]
