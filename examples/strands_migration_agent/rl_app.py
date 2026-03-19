@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from models import InvocationRequest, RepoMetaData
 from reward import MigrationReward
 from strands import Agent
-from strands.agent.conversation_manager import NullConversationManager
 from strands_tools import editor, shell
 from utils import load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
 
@@ -52,7 +51,6 @@ def invoke_agent(payload: dict):
         model=model,
         tools=[shell, editor],
         system_prompt=system_prompt,
-        conversation_manager=NullConversationManager(),
     )
 
     request = InvocationRequest(**payload)

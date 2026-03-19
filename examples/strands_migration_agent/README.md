@@ -130,7 +130,7 @@ vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct \
 ```bash
 # Terminal 2: Start the app server with hot reloading (from $MIGRATION_DIR)
 cd $MIGRATION_DIR
-uvicorn dev_app:app --port 8080 --reload --reload-dir ../..
+uvicorn rl_app:app --port 8080 --reload --reload-dir ../..
 ```
 
 ```bash
@@ -183,7 +183,7 @@ cp $MIGRATION_DIR/.env.example $MIGRATION_DIR/.env
 Then start the server as follows, and send the request.
 ```bash
 # Run with host network so the agent can access the locally hosted vLLM server
-docker run --network host --env-file $MIGRATION_DIR/.env migration:dev python -m dev_app
+docker run --network host --env-file $MIGRATION_DIR/.env migration:dev python -m rl_app
 
 # Submit request (same curl as above)
 ```

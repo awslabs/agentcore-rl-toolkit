@@ -171,9 +171,9 @@ def main():
             succeeded += 1
             record["result"] = item.result
             record["elapsed"] = item.elapsed
-            rewards = item.result.get("rewards", [])
+            rewards = item.result.get("rewards")
             # Check if task succeeded (reward = 1)
-            if rewards and rewards[0] == 1:
+            if rewards == 1:
                 task_successes += 1
             logger.info(
                 f"[{completed}/{len(payloads)}] Index {item.index} completed in {item.elapsed:.1f}s - "
