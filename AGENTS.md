@@ -78,7 +78,7 @@ agentcore-rl-toolkit/
 │   │   ├── reward.py               # GSM8KReward implementation
 │   │   └── pyproject.toml          # Example-specific dependencies
 │   ├── strands_migration_agent/    # Java migration example
-│   │   ├── dev_app.py              # RL-adapted migration agent
+│   │   ├── rl_app.py               # RL-adapted migration agent
 │   │   ├── evaluate.py             # Batch evaluation script (sync)
 │   │   ├── evaluate_async.py       # Batch evaluation script (async)
 │   │   ├── reward.py               # MigrationReward implementation
@@ -305,7 +305,7 @@ return {"rewards": rewards, "metrics": {"latency_ms": elapsed}}
 return {"summary": "...", "artifacts": {...}}
 ```
 
-Each example in `/examples` contains `basic_app.py` and `rl_app.py` (or `dev_app.py`) to demonstrate this adaptation.
+Each example in `/examples` contains `basic_app.py` and `rl_app.py` to demonstrate this adaptation.
 
 ### Deployment to ACR
 
