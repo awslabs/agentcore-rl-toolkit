@@ -1,7 +1,7 @@
 """Package OfficeBench tasks for S3 consumption.
 
 Uploads task configs and testbed data to S3 in a format
-that dev_app.py can consume during ACR invocations.
+that rl_app.py can consume during ACR invocations.
 
 Each task directory can contain multiple subtasks (0.json, 1.json, ...),
 and all subtasks share the same testbed. Each subtask is uploaded as a
