@@ -226,16 +226,14 @@ strands_officebench_agent/
 
 ## Known Issues
 
-### OfficeBench data issues (4 tasks)
+### OfficeBench data issues (2 tasks)
 
 These tasks have bugs in the ground truth and will always fail regardless of agent capability:
 
 | Task | Issue |
 |------|-------|
-| `1-10/3` | `evaluate_excel_cell_value` expects `201000` but source has `2000000` |
-| `1-14/2` | Filename typo: `salery.xlsx` should be `salary.xlsx` |
-| `1-15/1` | Keywords not in source file `sample_syllabus.docx` |
-| `1-15/2` | Keywords not in source file `project_report.docx` |
+| `1-10/3` | `evaluate_excel_cell_value` expects `201000` but correct answer is `2001000` (2000000 + 1000) |
+| `1-14/2` | Filename typo: eval references `salery.xlsx` but actual file is `salary.xlsx` |
 
 ### Local testing limitations
 
