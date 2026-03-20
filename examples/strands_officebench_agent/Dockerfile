@@ -52,4 +52,4 @@ EXPOSE 9000
 EXPOSE 8000
 EXPOSE 8080
 
-CMD ["opentelemetry-instrument", "python", "-m", "dev_app"]
+CMD ["opentelemetry-instrument", "python", "-m", "rl_app"]
