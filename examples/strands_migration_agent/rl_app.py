@@ -5,11 +5,11 @@ from dotenv import load_dotenv
 from models import InvocationRequest, RepoMetaData
 from reward import MigrationReward
 from strands import Agent
+from strands.models.openai import OpenAIModel
 from strands_tools import editor, shell
 from utils import load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
 
 from agentcore_rl_toolkit import AgentCoreRLApp
-from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def invoke_agent(payload: dict):
     model_id = payload["_rollout"]["model_id"]
     params = payload["_rollout"].get("sampling_params", {})
 
-    model = vLLMModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
+    model = OpenAIModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
 
     agent = Agent(
         model=model,
@@ -76,8 +76,6 @@ def invoke_agent(payload: dict):
 
     logger.info(f'Model response: {response.message["content"][0]["text"]}')
 
-    rollout_data = model.get_token_data()
-
     reward = reward_fn(
         repo_dir=repo_path,
         original_num_tests=metadata.num_test_cases,
@@ -85,7 +83,7 @@ def invoke_agent(payload: dict):
         require_maximal_migration=request.require_maximal_migration,
     )
 
-    return {"rollout_data": rollout_data, "rewards": reward}
+    return {"rewards": reward}
 
 
 if __name__ == "__main__":

@@ -6,12 +6,12 @@ from models import InvocationRequest
 from reward import OfficeBenchReward
 from strands import Agent
 from strands.models import BedrockModel
+from strands.models.openai import OpenAIModel
 from strands_tools import shell
 from tools import ALL_TOOLS
 from utils import load_task_from_s3, setup_testbed
 
 from agentcore_rl_toolkit import AgentCoreRLApp
-from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def invoke_agent(payload: dict):
 
     # Choose model based on config
     if rollout_config.get("base_url"):
-        model = vLLMModel(
+        model = OpenAIModel(
             client_args={"api_key": "EMPTY", "base_url": rollout_config["base_url"]},
             model_id=rollout_config["model_id"],
             params=rollout_config.get("sampling_params", {}),
@@ -94,11 +94,6 @@ def invoke_agent(payload: dict):
     response = agent(user_input)
     logger.info(f"Agent response: {response.message['content'][0]['text']}")
 
-    # Collect token data (only available with vLLMModel)
-    rollout_data = {}
-    if hasattr(model, "get_token_data"):
-        rollout_data = model.get_token_data()
-
     # Collect full conversation history
     messages = [{"role": msg.get("role", "unknown"), "content": msg.get("content", [])} for msg in agent.messages]
 
@@ -110,7 +105,6 @@ def invoke_agent(payload: dict):
     logger.info(f"Reward: {reward}")
 
     return {
-        "rollout_data": rollout_data,
         "messages": messages,
         "rewards": reward,
     }

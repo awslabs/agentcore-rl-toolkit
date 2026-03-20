@@ -48,7 +48,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | File | Purpose |
 |------|---------|
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
-| `src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py` | `vLLMModel` with token ID collection for RL training |
+| `src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py` | Legacy `vLLMModel` for client-side token ID collection (replaced by rllm-model-gateway) |
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
@@ -70,7 +70,7 @@ agentcore-rl-toolkit/
 │   └── frameworks/
 │       └── strands/
 │           ├── __init__.py
-│           └── vllm_model.py       # vLLMModel with token ID collection
+│           └── vllm_model.py       # Legacy vLLMModel (client-side token ID collection)
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
 │   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
@@ -227,11 +227,10 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 
 #### Utilities
 
-**vLLMModel** (`src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py`)
-- Extends Strands `OpenAIModel` for use with vLLM/SGLang inference servers
-- Collects token IDs (prompt and response) and logprobs directly from the inference server
-- Avoids retokenization issues that cause training instability
-- Use `model.get_token_data()` to retrieve collected token data after agent execution
+**vLLMModel** (`src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py`) — **Legacy**
+- Client-side token ID collection wrapper around Strands `OpenAIModel`
+- Replaced by [rllm-model-gateway](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway), which captures token IDs transparently at the HTTP layer as a proxy between the agent and inference server — no custom model wrapper needed in agent code
+- The file is retained for backward compatibility but examples now use standard `OpenAIModel`
 
 **RewardFunction** (`src/agentcore_rl_toolkit/reward_function.py`)
 - Base class for reward implementations
@@ -249,7 +248,6 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 ```diff
 - from bedrock_agentcore.runtime import BedrockAgentCoreApp
 + from agentcore_rl_toolkit import AgentCoreRLApp
-+ from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 + from reward import GSM8KReward
 
 - app = BedrockAgentCoreApp()
@@ -261,7 +259,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 
 - Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
 - Optional `sampling_params` (e.g., `max_completion_tokens`, `temperature`) can also be passed via `_rollout` for training-engine-controlled generation settings
-- `vLLMModel` collects token IDs directly from the inference server, avoiding retokenization
+- Use standard `OpenAIModel` — no custom model wrappers needed. For evaluation, `base_url` can point directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` directly
 - `api_key` is set to `"EMPTY"` — the standard vLLM convention for servers that don't require authentication
 - Model and agent are created per-invocation inside the entrypoint
 - This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
@@ -279,19 +277,19 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 +     base_url = payload["_rollout"]["base_url"]
 +     model_id = payload["_rollout"]["model_id"]
 +     params = payload["_rollout"].get("sampling_params", {})
-+     model = vLLMModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
++     model = OpenAIModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
 +     agent = Agent(model=model, tools=[calculator], system_prompt="...")
 +     response = agent(user_input)
 ```
 
-#### Step 3: Collect Token Data & Return Result
+#### Step 3: Compute Rewards & Return Result
 
 The `@rollout_entrypoint` decorator automatically:
 - Executes the function in the background (works with both sync and async functions)
 - Saves the returned dict to S3 with a predictable key
 - Handles errors and saves error results for client awareness
 
-The return value must be a JSON-serializable dict when S3 save is configured. Any dict structure is accepted — there are no required keys. `rollout_data` is optional (e.g., when the gateway collects it server-side).
+The return value must be a JSON-serializable dict when S3 save is configured. Any dict structure is accepted — there are no required keys. For training, return rewards; for evaluation, return whatever artifacts you need (metrics, conversation history, etc.). You can also persist raw data and run evaluation logic client-side.
 
 **Reserved keys**: The SDK injects metadata into the saved S3 JSON. Avoid using these keys in your return dict:
 - `status_code`, `stop_reason` — added only if not already present in your dict
@@ -299,9 +297,8 @@ The return value must be a JSON-serializable dict when S3 save is configured. An
 
 ```diff
 -   return response.message["content"][0]["text"]
-+   rollout_data = model.get_token_data()
 +   rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=answer)
-+   return {"rollout_data": rollout_data, "rewards": rewards}
++   return {"rewards": rewards}
 ```
 
 Other valid return patterns:
@@ -348,7 +345,7 @@ Users can evaluate agents before and after training using the same `rl_app.py`.
 - **`run_batch_async()`**: Like `run_batch()` but returns an async iterator with concurrent submission.
 - **`RolloutFuture`** supports `await future`, `future.result_async(timeout=...)`, and `future.done_async()`.
 
-Concretely, `invoke()` / `invoke_async()` sends the request to ACR and returns a `RolloutFuture` immediately — meaning ACR has received the request and a background agent session is processing it. Calling `future.result(timeout=...)` or `await future.result_async(timeout=...)` blocks/waits until the result appears in S3, polling with exponential backoff. It returns the complete rollout data (token IDs, rewards, etc.) once the agent finishes and writes to S3.
+Concretely, `invoke()` / `invoke_async()` sends the request to ACR and returns a `RolloutFuture` immediately — meaning ACR has received the request and a background agent session is processing it. Calling `future.result(timeout=...)` or `await future.result_async(timeout=...)` blocks/waits until the result appears in S3, polling with exponential backoff. It returns the result (rewards, metrics, etc.) once the agent finishes and writes to S3.
 
 Both sync and async patterns share the same infrastructure:
 - **Rate limiting**: Handles ACR TPS limits (25)
@@ -403,15 +400,17 @@ See `.env.example` for template. The build script sources `.env` for deployment 
 
 1. Create folder in `examples/{agent_name}/`
 2. Add `basic_app.py` (production version using `BedrockAgentCoreApp`)
-3. Add `rl_app.py` (RL-adapted version using `AgentCoreRLApp` + `vLLMModel`)
+3. Add `rl_app.py` (RL-adapted version using `AgentCoreRLApp` + `OpenAIModel`)
 4. Add `reward.py` with `RewardFunction` implementation
 5. Add `pyproject.toml` with example-specific dependencies
 6. Run `uv sync` in the example folder
 
 ### Adding Support for a New Framework
 
+Agents use their framework's native OpenAI-compatible model class (e.g., `OpenAIModel` for Strands), so framework-specific model wrappers are generally not needed. If other framework-specific utilities are needed:
+
 1. Create `src/agentcore_rl_toolkit/frameworks/{framework}/`
-2. Implement framework-specific model or utility (e.g., `vLLMModel` for Strands) that collects token IDs and rollout data
+2. Implement the utility
 3. Export in the framework's `__init__.py`
 
 ### Running Tests
@@ -457,7 +456,7 @@ uv sync  # Creates .venv in this folder
 source .venv/bin/activate
 ```
 
-To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unreleased changes like `vLLMModel`):
+To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unreleased changes):
 ```bash
 uv pip install -e ../../ --force-reinstall --no-deps
 ```
@@ -486,7 +485,7 @@ uv run pre-commit install
 
 - Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
-- Use `vLLMModel.get_token_data()` to collect token IDs instead of hook-based rollout collection
+- Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)
 - Implement reward functions as classes inheriting `RewardFunction`
 
 ### Symlink Note
@@ -498,7 +497,7 @@ uv run pre-commit install
 ## Known Limitations & TODOs
 
 ### Design Improvements
-- **Model gateway**: `vLLMModel` is currently framework specific under `frameworks/strands/`. In the future, we want to eliminate the need for a customized model to collect token ids. Instead, a gateway server will be used to direct model inference calls, automatically intercept the token ids, and persist to databases so that users don't have to manually collect them. This will also better reveal the status of a rollout session and preserve partial rollouts.
+- **Model gateway (in preview)**: [rllm-model-gateway](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) replaces the need for `vLLMModel` client-side token collection. The gateway proxies inference requests and captures token IDs + logprobs transparently at the HTTP layer. Integration with rllm training backends is under active development. The legacy `vLLMModel` under `frameworks/strands/` is retained for backward compatibility.
 
 ---
 
@@ -511,3 +510,4 @@ uv run pre-commit install
 - **Runtime SDK Overview**: https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html
 - **HTTP Protocol Contract**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http
 - **rLLM SDK (reference)**: https://rllm-project.readthedocs.io/en/latest/core-concepts/sdk/#1-define-your-agent-function
+- **rllm-model-gateway** (token capture proxy for RL training): https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway

@@ -1,9 +1,9 @@
 from reward import GSM8KReward
 from strands import Agent
+from strands.models.openai import OpenAIModel
 from strands_tools import calculator
 
 from agentcore_rl_toolkit import AgentCoreRLApp
-from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 
 app = AgentCoreRLApp()
 
@@ -28,15 +28,15 @@ def invoke_agent(payload: dict):
 
     The @rollout_entrypoint decorator automatically:
     - Executes the function in the background for non-blocking processing
-    - Saves rollout data to S3 with a predictable key
-    - Handles errors and saves error rollouts for client awareness
+    - Saves results to S3 with a predictable key
+    - Handles errors and saves error results for client awareness
     - Works with both sync and async functions
     """
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
     params = payload["_rollout"].get("sampling_params", {})
 
-    model = vLLMModel(
+    model = OpenAIModel(
         client_args={"api_key": "EMPTY", "base_url": base_url},
         model_id=model_id,
         params=params,
@@ -55,15 +55,10 @@ def invoke_agent(payload: dict):
 
     response = agent(user_input)
 
-    # Collect token data (prompt IDs, response IDs, logprobs) from the model
-    rollout_data = model.get_token_data()
-
     # Compute rewards
     rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=answer)
 
-    # Return expected structure (dict with `rollout_data` and `rewards` keys)
-    # Framework validates and normalizes values automatically
-    return {"rollout_data": rollout_data, "rewards": rewards}
+    return {"rewards": rewards}
 
 
 if __name__ == "__main__":
