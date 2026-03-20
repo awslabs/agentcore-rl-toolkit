@@ -121,8 +121,6 @@ curl -X POST http://localhost:8080/invocations \
 You should see the rollout and reward saved to `s3://agentcore-rl/test/prompt_123_session_123.json`.
 
 > **Note:** The `_rollout` config must include `base_url` and `model_id`, which tell the agent which inference server to use. The remaining fields (`exp_id`, `s3_bucket`, `session_id`, `input_id`) control S3 result storage and are optional — if omitted, S3 save will be skipped. During training, the full `_rollout` config is injected automatically by the training engine. We recommend testing the full flow locally.
->
-> During RL training, `base_url` can point to [rllm-model-gateway](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) for automatic token capture. For evaluation, `base_url` points directly to any OpenAI-compatible inference endpoint (vLLM, SGLang, LiteLLM, etc.).
 
 
 ## Run RL App Hosted on ACR

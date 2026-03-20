@@ -26,10 +26,6 @@ def invoke_agent(payload: dict):
     - answer: ground truth (str)
     - _rollout: rollout config with base_url and model_id
 
-    During RL training, base_url can point to rllm-model-gateway for automatic
-    token capture. For evaluation, base_url points directly to any
-    OpenAI-compatible inference endpoint (vLLM, SGLang, LiteLLM, etc.).
-
     The @rollout_entrypoint decorator automatically:
     - Executes the function in the background for non-blocking processing
     - Saves results to S3 with a predictable key
