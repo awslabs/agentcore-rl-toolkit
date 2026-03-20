@@ -4,9 +4,9 @@ import logging
 from appworld.environment import AppWorld, AppWorldServers
 from reward import AppWorldReward
 from strands import Agent, tool
+from strands.models.openai import OpenAIModel
 
 from agentcore_rl_toolkit import AgentCoreRLApp
-from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ Example: apis.spotify.login(username="user@email.com", password="pass123")
 def invoke_agent(payload: dict):
     rollout_config = payload.get("_rollout", {})
 
-    model = vLLMModel(
+    model = OpenAIModel(
         client_args={"api_key": "EMPTY", "base_url": rollout_config["base_url"]},
         model_id=rollout_config["model_id"],
         params=rollout_config.get("sampling_params", {}),
@@ -130,10 +130,9 @@ def invoke_agent(payload: dict):
             world.save()
             test_tracker = world.evaluate()
 
-    rollout_data = model.get_token_data()
     reward = reward_fn(test_tracker=test_tracker)
 
-    return {"rollout_data": rollout_data, "rewards": reward}
+    return {"rewards": reward}
 
 
 if __name__ == "__main__":

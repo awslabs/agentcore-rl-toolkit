@@ -5,12 +5,12 @@ Toolkit to Seamlessly Enable RL Training on Any Agent with Bedrock AgentCore.
 
 ## Overview
 
-**AgentCore RL Toolkit (ART)** is an SDK that helps developers adapt their production LLM agents for online RL training with **AWS Bedrock AgentCore Runtime (ACR)**. It extends [bedrock-agentcore-sdk-python](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main) so most of your production agent code can be directly reused.
+**AgentCore RL Toolkit (ART)** is an SDK that helps developers adapt their production LLM agents for RL training with **AWS Bedrock AgentCore Runtime (ACR)**. It extends [bedrock-agentcore-sdk-python](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main) so most of your production agent code can be directly reused.
 
 LLM agent rollouts are long-running — an agent may run for minutes or hours making tool calls. The toolkit manages this with an async-first design:
 
-- **Agent Adaptation** (`AgentCoreRLApp`, `vLLMModel`): Adapt your production agent for RL training inside ACR — the `@rollout_entrypoint` decorator runs your agent in the background with fire-and-forget semantics, collecting token-level data, computing rewards, and saving results to S3.
-- **Simplified Rollout Collection** (`RolloutClient`, `RolloutFuture`): Submit rollout requests and collect results asynchronously with a future-based API, built-in concurrency control, rate limiting, and S3 polling — for both training loops and batch evaluation.
+- **Agent Adaptation** (`AgentCoreRLApp`, `@rollout_entrypoint`): A decorator swap turns your production agent into an async, fire-and-forget service — the agent runs in the background and saves results to S3. Return any JSON-serializable artifacts: rewards for RL training, evaluation metrics, conversation history, or custom data.
+- **Rollout Collection** (`RolloutClient`, `RolloutFuture`): Submit requests and collect results asynchronously with a future-based API, built-in concurrency control, rate limiting, and S3 polling — for both training loops and batch evaluation.
 
 Both components use S3 as their data layer, but the complexity is fully abstracted — your code never reads from or writes to S3 directly.
 
@@ -40,8 +40,8 @@ While session routing is valuable for multi-turn production agents, RL rollouts 
 
 ## Key Features
 
-- **Minimal code changes**: Adapt your production agent with a decorator swap (`@app.entrypoint` → `@app.rollout_entrypoint`) and model replacement — most of your agent code stays the same
-- **Token-accurate rollout data**: `vLLMModel` collects token IDs and logprobs directly from the inference server, avoiding retokenization issues that cause training instability
+- **Minimal code changes**: Adapt your production agent with a decorator swap (`@app.entrypoint` → `@app.rollout_entrypoint`) — most of your agent code stays the same
+- **No custom model wrappers**: Your agent uses standard framework models (e.g., `OpenAIModel`). Token capture for RL training is handled at the infrastructure layer, not in your agent code
 - **Async end-to-end**: Fire-and-forget server + future-based client — no long-lived TCP connections needed for long-running agent rollouts
 - **Simplified rollout collection**: `RolloutClient` manages concurrency, rate limiting, and S3 result polling out of the box for both training loops and batch evaluation
 - **Production parity**: Direct code reuse from production agents ensures training behavior matches real deployment
@@ -79,8 +79,8 @@ if __name__ == "__main__":
 Starting from a deployment-ready agent like above, here are the changes needed for RL training (see [`rl_app.py`](examples/strands_math_agent/rl_app.py) for full example):
 ```python
 from agentcore_rl_toolkit import AgentCoreRLApp
-from agentcore_rl_toolkit.frameworks.strands.vllm_model import vLLMModel
 from strands import Agent
+from strands.models.openai import OpenAIModel
 
 app = AgentCoreRLApp()
 reward_fn = GSM8KReward()  # user-defined reward function
@@ -89,23 +89,45 @@ reward_fn = GSM8KReward()  # user-defined reward function
 def invoke_agent(payload: dict):
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
-    model = vLLMModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id)
+    model = OpenAIModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id)
     agent = Agent(model=model, tools=[...], system_prompt="...")
 
     response = agent(payload.get("prompt"))
-    rollout_data = model.get_token_data()
     rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=payload.get("answer"))
-    return {"rollout_data": rollout_data, "rewards": rewards}
+    return {"rewards": rewards}
 ```
 
 **Key changes:**
 1. `BedrockAgentCoreApp` → `AgentCoreRLApp` (framework-agnostic)
-2. `BedrockModel` → `vLLMModel` created inside the entrypoint with `base_url`/`model_id` from `_rollout` payload
+2. `BedrockModel` → `OpenAIModel` created inside the entrypoint with `base_url`/`model_id` from `_rollout` payload
 3. `@app.entrypoint` → `@app.rollout_entrypoint`
-4. Use `model.get_token_data()` to collect token IDs directly (avoids retokenization)
-5. Return `{"rollout_data": ..., "rewards": ...}` instead of text
+4. Return a dict instead of text (`rewards` key required for training)
+
+> **Note:** The return value is flexible — any JSON-serializable dict works. This example returns rewards for training, but for evaluation you might return rewards, conversation history, or other artifacts. You can also persist raw data to S3 and run evaluation logic client-side.
 
 **Why create model and agent inside the entrypoint?** During RL training, the training engine can pass runtime configuration—such as inference server address, sampling parameters, and system prompt—via the `_rollout` payload, giving flexibility to accommodate different learning scenarios. This is safe because RL rollouts are single-invocation: the agent doesn't need persistent conversation history across requests, so there's no need to define model and agent as global variables.
+
+### Background: Token Capture for RL Training
+
+> **Note:** This section is background knowledge — you don't need to configure any of this yourself. Token capture is managed by the training infrastructure.
+
+RL for LLMs trains on token sequences, so trainers need the exact token IDs sampled by the model. But agents communicate via OpenAI-compatible APIs that return text, not tokens. Re-tokenizing that text back into IDs causes **retokenization drift** — the reconstructed IDs may differ from what the model actually generated, leading to off-policy updates that destabilize training. This drift has [three common sources](https://vllm.ai/blog/agent-lightning): (1) non-unique tokenization (e.g., `H`+`AVING` retokenizes as `HAV`+`ING`), (2) tool-call serialization changes (whitespace/formatting shifts during parsing and re-rendering), and (3) chat template misalignment across frameworks.
+
+The solution is to capture token IDs directly from the inference server, avoiding retokenization entirely. [rllm-model-gateway](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) does this as a transparent HTTP proxy between agents and the inference server:
+
+```
+Agent  ──►  rllm-model-gateway  ──►  Inference Server (vLLM/SGLang)
+                    │
+                    └─► captures token IDs + logprobs, scoped by session
+```
+
+The gateway intercepts OpenAI-compatible API responses and extracts token data directly from the server. Crucially, it scopes captured data by session ID — so when hundreds of concurrent agent sessions hit the same gateway, each rollout's token trace is correctly associated with its trajectory. Agents use a standard `OpenAIModel` and are completely unaware of the capture.
+
+In practice, this is infrastructure managed by the training framework:
+- **During training**: the training engine points `base_url` through the gateway automatically
+- **During evaluation**: `base_url` points directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` via the Bedrock API — no gateway involved
+
+The gateway is currently in preview. See the [rllm-model-gateway repo](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) for details.
 
 ## Client-Side: Invoking Agents and Collecting Results
 
@@ -149,8 +171,8 @@ for f in futures:
 
 **How the future lifecycle works:**
 - **`client.invoke()`** sends the request to ACR and returns a `RolloutFuture` immediately — this means ACR has received the request and a background agent session is processing it.
-- **`future.result(timeout=...)`** blocks until the result appears in S3, polling with exponential backoff internally. It returns the complete rollout data (token IDs, rewards, etc.) once the agent finishes and writes to S3.
-- **Automatic session cleanup**: Once a result is fetched or a timeout is reached, the underlying ACR session is automatically cancelled — no manual cleanup needed.
+- **`future.result(timeout=...)`** blocks until the result appears in S3, polling with exponential backoff internally. It returns the result (rewards, metrics, etc.) once the agent finishes and writes to S3.
+- **Automatic session cleanup**: Once a result is fetched or a timeout is reached, the underlying ACR session is automatically cancelled to avoid wasteful idle time — no manual cleanup needed.
 
 ### Batch Evaluation (`run_batch()`)
 
@@ -207,10 +229,14 @@ The training architecture follows a **decoupled design** where agent rollouts an
 │       │     (e.g., veRL)    │    │    (vLLM/SGLang)    │       │
 │       └───────┬─────────────┘    └───────▲─────────────┘       │
 │               │                          │                     │
+│               │                  ┌───────┴─────────────┐       │
+│               │                  │ rllm-model-gateway  │       │
+│               │                  │ (token capture)     │       │
+│               │                  └───────▲─────────────┘       │
 └───────────────┼──────────────────────────┼─────────────────────┘
                 │ 1. Submit N prompts      │                        ◄── ART Client-Side (1): RolloutClient
-                │    to ACR                │ 2. Model inference     ◄── ART Agent-Side (2): vLLMModel
-                ▼                          │    calls from agents
+                │    to ACR                │ 2. Model inference
+                ▼                          │    via standard OpenAI API
 ┌────────────────────────────────────────────────────────────────┐
 │                  AWS Bedrock AgentCore Runtime                 │
 │        ┌───────────┐  ┌───────────┐       ┌───────────┐        │
@@ -219,28 +245,29 @@ The training architecture follows a **decoupled design** where agent rollouts an
 │        └─────┬─────┘  └─────┬─────┘       └─────┬─────┘        │
 │              │              │                   │              │
 │              └──────────────┴───────────────────┘              │
-│                             │ 3. Save rollouts + rewards       │  ◄── ART Agent-Side (3): @rollout_entrypoint
+│                             │ 3. Save rewards to S3            │  ◄── ART Agent-Side (3): @rollout_entrypoint
 │                             ▼                                  │
 │                   ┌───────────────────┐                        │
-│                   │  S3 (rollouts)    │                        │
+│                   │    S3 (results)   │                        │
 │                   └─────────┬─────────┘                        │
 └─────────────────────────────┼──────────────────────────────────┘
                               │ 4. Poll S3 HEAD for results         ◄── ART Client-Side (4): RolloutFuture
                               ▼
-                  Training Engine receives
-                  rollouts for policy update
+                  Training Engine reads tokens
+                  from gateway + rewards from S3
+                  for policy update
 ```
 
 **Workflow:**
 1. **Prompt submission**: Training engine uses `RolloutClient` to submit N prompts to ACR — it injects rollout configs (`input_id`, `s3_bucket`, etc.) and handles rate limiting and concurrency, while ACR auto-scales N parallel agent sessions
-2. **Agent execution**: Each agent session runs the `@rollout_entrypoint`, which launches the agent loop asynchronously (reporting `/ping` as busy) and calls the inference server via `vLLMModel` for model responses
-3. **Rollout collection**: When the agent finishes, `@rollout_entrypoint` saves rollouts and rewards to S3 and reports `/ping` as idle so ACR can reclaim the session
-4. **Policy update**: Training engine uses `RolloutFuture` to poll S3 for completed rollouts and updates the model
+2. **Agent execution**: Each agent session runs the `@rollout_entrypoint`, which launches the agent loop asynchronously (reporting `/ping` as busy) and calls the inference server via standard OpenAI-compatible API (through the gateway during training)
+3. **Result collection**: When the agent finishes, `@rollout_entrypoint` saves rewards to S3 and reports `/ping` as idle so ACR can reclaim the session
+4. **Policy update**: Training engine collects token data from the gateway and rewards from S3 to update the model
 
 This architecture enables parallel and highly efficient rollouts with secure execution during RL training. The decoupled design means training libraries only need the agent's container image to start training—agent code and dependencies stay completely separate from the training library.
 
 **Supported Training Libraries:**
-- To be announced.
+- [rllm](https://github.com/rllm-org/rllm) integration coming soon (supports multiple backends: veRL, Tinker, and more)
 
 ### Prepare Your Agent Container
 
