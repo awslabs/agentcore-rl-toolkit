@@ -24,4 +24,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["dev_app", "reward", "models", "utils", "tools"]
+py-modules = ["rl_app", "reward", "models", "utils", "tools"]

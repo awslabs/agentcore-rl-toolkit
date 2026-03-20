@@ -207,7 +207,7 @@ OFFICEBENCH_DIR=/path/to/OfficeBench python run_local_eval.py --exp_id local_tes
 
 ```
 strands_officebench_agent/
-├── dev_app.py          # AgentCoreRLApp with @rollout_entrypoint (runs in ACR)
+├── rl_app.py           # AgentCoreRLApp with @rollout_entrypoint (runs in ACR)
 ├── tools.py            # 20 Strands @tool wrappers for OfficeBench apps
 ├── reward.py           # OfficeBenchReward with 9 evaluation functions
 ├── models.py           # Pydantic request models
