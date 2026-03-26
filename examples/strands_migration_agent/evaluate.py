@@ -90,6 +90,24 @@ def main():
         default=eval_config.get("sampling_params"),
         help="Sampling parameters as JSON string (e.g. '{\"temperature\": 0.7}')",
     )
+    parser.add_argument(
+        "--require_maximal_migration",
+        action="store_true",
+        default=False,
+        help="Whether a repository is evaluated under maximal migration",
+    )
+    parser.add_argument(
+        "--apply_static_update",
+        action="store_true",
+        default=False,
+        help="Whether to apply static update on JDK and dependency versions",
+    )
+    parser.add_argument(
+        "--use_dependency_search_tool",
+        action="store_true",
+        default=False,
+        help="Whether to allow dependency search tool for agent",
+    )
 
     args = parser.parse_args()
 
@@ -114,7 +132,10 @@ def main():
     logger.info(f"Found {len(s3_folder_uris)} repositories to evaluate")
 
     # Prepare payloads
-    payloads = [prepare_payload(uri) for uri in s3_folder_uris]
+    payloads = [
+        prepare_payload(uri, args.require_maximal_migration, args.apply_static_update, args.use_dependency_search_tool)
+        for uri in s3_folder_uris
+    ]
 
     # Setup results directory and file
     results_dir = Path(__file__).parent / "results"
@@ -197,7 +218,7 @@ def main():
     logger.info("=" * 50)
     logger.info(f"Evaluation complete: {succeeded} succeeded, {failed} failed")
     logger.info(f"Task success rate: {task_successes}/{total_repos} ({success_rate:.1%})")
-    logger.info(f"Total benchmark time: {total_time:.1f}s ({total_time/60:.1f}m)")
+    logger.info(f"Total benchmark time: {total_time:.1f}s ({total_time / 60:.1f}m)")
     logger.info(f"Results saved to: {result_path}")
 
 

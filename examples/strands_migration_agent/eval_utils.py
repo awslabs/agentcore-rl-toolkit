@@ -40,7 +40,12 @@ def get_s3_folder_uris(s3_uri: str) -> list[str]:
     return folder_uris
 
 
-def prepare_payload(folder_uri: str) -> dict:
+def prepare_payload(
+    folder_uri: str,
+    require_maximal_migration: bool = False,
+    apply_static_update: bool = False,
+    use_dependency_search_tool: bool = False,
+) -> dict:
     """
     Prepare a single payload for a repository folder.
 
@@ -60,7 +65,9 @@ def prepare_payload(folder_uri: str) -> dict:
         "prompt": "Please help migrate this repo: {repo_path}. There are {num_tests} test cases in it.",
         "repo_uri": repo_uri,
         "metadata_uri": metadata_uri,
-        "require_maximal_migration": False,
+        "require_maximal_migration": require_maximal_migration,
+        "apply_static_update": apply_static_update,
+        "use_dependency_search_tool": use_dependency_search_tool,
     }
 
 

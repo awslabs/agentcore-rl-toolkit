@@ -12,10 +12,12 @@ dependencies = [
     "strands-agents[openai]>=1.18.0",
     "strands-agents-tools>=0.2.16",
     "migrationbench",
+    "java-migration-agent",
 ]
 
 [tool.setuptools]
 py-modules = ["rl_app", "reward", "models", "utils"]
 
 [tool.uv.sources]
-migrationbench = { git = "https://github.com/amazon-science/MigrationBench.git", rev = "354a7858567efd63583224080586371db48e7388" }
+migrationbench = { git = "https://github.com/amazon-science/MigrationBench.git" }
+java-migration-agent = { git = "https://github.com/amazon-science/JavaMigration.git", subdirectory = "java_migration_agent" }

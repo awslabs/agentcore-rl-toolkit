@@ -6,6 +6,8 @@ class InvocationRequest(BaseModel):
     repo_uri: str
     metadata_uri: str
     require_maximal_migration: bool
+    use_dependency_search_tool: bool = False
+    apply_static_update: bool = False
 
 
 class RepoMetaData(BaseModel):

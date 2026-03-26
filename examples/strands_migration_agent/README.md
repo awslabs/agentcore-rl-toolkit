@@ -1,6 +1,8 @@
 # Strands Migration Agent
 
-This agent migrates repos written in Java 8 to use Java 17. This example is under active development alongside the `agentcore-rl-toolkit` library.
+This agent tackles the problem of code migration from Java 8 to Java 17 as introduced in [MigrationBench](https://github.com/amazon-science/MigrationBench).
+It builds upon the official [JavaMigrationAgent](https://github.com/amazon-science/JavaMigration/tree/main/java_migration_agent) with open source LLMs.
+This example is under active development alongside the `agentcore-rl-toolkit` library.
 
 ## Basic Setup
 
@@ -139,9 +141,11 @@ curl -X POST http://localhost:8080/invocations \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Please help migrate this repo: {repo_path}. There are {num_tests} test cases in it.",
-    "repo_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/15093015999__EJServer.tar.gz",
-    "metadata_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/metadata.json",
+    "repo_uri": "s3://my-migration-bench-data/tars/test/15093015999__EJServer/15093015999__EJServer.tar.gz",
+    "metadata_uri": "s3://my-migration-bench-data/tars/test/15093015999__EJServer/metadata.json",
     "require_maximal_migration": false,
+    "use_dependency_search_tool": true,
+    "apply_static_update": true,
     "_rollout": {
         "exp_id": "dev",
         "s3_bucket": "agentcore-rl",
@@ -301,3 +305,17 @@ python evaluate.py --exp_id my_eval --max_concurrent 50 --max_pool_connections 5
 ```
 
 Results are saved as JSONL files under `results/` (e.g., `results/my_eval.jsonl`).
+
+## 📚 Citation
+If you use our work on code migration, please cite
+```bibtex
+@misc{liu2025migrationbenchrepositorylevelcodemigration,
+      title={MigrationBench: Repository-Level Code Migration Benchmark from Java 8},
+      author={Linbo Liu and Xinle Liu and Qiang Zhou and Lin Chen and Yihan Liu and Hoan Nguyen and Behrooz Omidvar-Tehrani and Xi Shen and Jun Huan and Omer Tripp and Anoop Deoras},
+      year={2025},
+      eprint={2505.09569},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2505.09569},
+}
+```

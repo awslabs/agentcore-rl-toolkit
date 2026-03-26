@@ -6,6 +6,7 @@ import subprocess
 import tarfile
 
 import boto3
+from java_migration_agent.preprocessing import update_dependency_version, update_jdk_related
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def load_metadata_from_s3(s3_uri: str) -> dict:
     return json.loads(content)
 
 
-def setup_repo_environment(repo_path: str):
+def setup_repo_environment(repo_path: str, apply_static_update: bool = False):
     """
     1. Pre-warm Maven caches (best-effort)
     2. Make sure git works.
@@ -57,6 +58,10 @@ def setup_repo_environment(repo_path: str):
         capture_output=True,
     )
     logger.info("git working properly!")
+    if apply_static_update:
+        logger.info("Apply static update on jdk and dependency versions")
+        update_jdk_related(repo_path)
+        update_dependency_version(repo_path)
 
 
 def load_repo_from_s3(s3_uri: str) -> str:

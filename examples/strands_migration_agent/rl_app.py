@@ -2,6 +2,7 @@ import logging
 import time
 
 from dotenv import load_dotenv
+from java_migration_agent.tools.dependency_tools import search_dependency_version
 from models import InvocationRequest, RepoMetaData
 from reward import MigrationReward
 from strands import Agent
@@ -33,7 +34,7 @@ system_prompt = (
     + "Example: mvn -ntp clean verify 2>&1 | tail -n 100\n"
     + "- If you need to see earlier output, run a separate command with `head -n 100`.\n"
     + "- When you have finished the task, generate a paragraph summarizing the changes you made "
-    + "without using any tools."
+    + "without using any tools.\n"
 )
 
 reward_fn = MigrationReward()
@@ -44,16 +45,44 @@ def invoke_agent(payload: dict):
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
     params = payload["_rollout"].get("sampling_params", {})
+    tools = [shell, editor]
+
+    request = InvocationRequest(**payload)
+    prompt = system_prompt
+    if request.require_maximal_migration:
+        prompt += (
+            "\nYou should make sure all dependencies in the `pom.xml` file "
+            "are updated to their latest versions that support Java 17."
+        )
+
+    if request.apply_static_update:
+        prompt += (
+            "\nDependencies in the `pom.xml` file have been updated to their "
+            "latest versions that support Java 17, but these changes might introduce "
+            "compatibility issues in the codebase. Please fix any such issues in your "
+            "migration. Do not downgrade the dependency versions back to their JDK 8 "
+            "compatible versions."
+        )
+
+    if request.use_dependency_search_tool:
+        prompt += (
+            "\nYou have access to a dependency version lookup tool. When updating dependencies "
+            "in pom.xml:\n"
+            "1. Use the search_dependency_version tool to look up the recommended Java 17 "
+            "compatible version for each dependency\n"
+            "2. If a dependency is not found in the database, use your knowledge to select "
+            "an appropriate version\n"
+        )
+        tools.append(search_dependency_version)
 
     model = OpenAIModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
 
     agent = Agent(
         model=model,
-        tools=[shell, editor],
-        system_prompt=system_prompt,
+        tools=tools,
+        system_prompt=prompt,
     )
 
-    request = InvocationRequest(**payload)
     metadata = RepoMetaData(**load_metadata_from_s3(request.metadata_uri))
 
     start_time = time.time()
@@ -62,7 +91,7 @@ def invoke_agent(payload: dict):
     logger.info(f"Loaded repo into: {repo_path} (took {load_duration:.2f}s)")
 
     start_time = time.time()
-    setup_repo_environment(repo_path)
+    setup_repo_environment(repo_path, request.use_dependency_search_tool)
     setup_duration = time.time() - start_time
     logger.info(f"Finished repo setup for: {repo_path} (took {setup_duration:.2f}s)")
 
