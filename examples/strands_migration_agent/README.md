@@ -141,10 +141,11 @@ curl -X POST http://localhost:8080/invocations \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Please help migrate this repo: {repo_path}. There are {num_tests} test cases in it.",
-    "repo_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/15093015999__EJServer.tar.gz",
-    "metadata_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/metadata.json",
+    "repo_uri": "s3://my-migration-bench-data/tars/test/15093015999__EJServer/15093015999__EJServer.tar.gz",
+    "metadata_uri": "s3://my-migration-bench-data/tars/test/15093015999__EJServer/metadata.json",
     "require_maximal_migration": false,
-    "prompt_type": "baseline",
+    "use_dependency_search_tool": true,
+    "apply_static_update": true,
     "_rollout": {
         "exp_id": "dev",
         "s3_bucket": "agentcore-rl",

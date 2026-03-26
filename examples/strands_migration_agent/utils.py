@@ -30,7 +30,7 @@ def load_metadata_from_s3(s3_uri: str) -> dict:
     return json.loads(content)
 
 
-def setup_repo_environment(repo_path: str, prompt_type: str = "baseline"):
+def setup_repo_environment(repo_path: str, apply_static_update: bool = False):
     """
     1. Pre-warm Maven caches (best-effort)
     2. Make sure git works.
@@ -58,8 +58,8 @@ def setup_repo_environment(repo_path: str, prompt_type: str = "baseline"):
         capture_output=True,
     )
     logger.info("git working properly!")
-    if prompt_type == "hybrid":
-        logger.info("static update on jdk and dependency versions")
+    if apply_static_update:
+        logger.info("Apply static update on jdk and dependency versions")
         update_jdk_related(repo_path)
         update_dependency_version(repo_path)
 

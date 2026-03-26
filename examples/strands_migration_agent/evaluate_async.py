@@ -224,11 +224,16 @@ async def main():
         help="Whether a repository is evaluated under maximal migration",
     )
     parser.add_argument(
-        "--prompt_type",
-        type=str,
-        default="baseline",
-        choices=["baseline", "rag", "hybrid"],
-        help="Specify Java migration prompt type",
+        "--apply_static_update",
+        action="store_true",
+        default=False,
+        help="Whether to apply static update on JDK and dependency versions",
+    )
+    parser.add_argument(
+        "--use_dependency_search_tool",
+        action="store_true",
+        default=False,
+        help="Whether to allow dependency search tool for agent",
     )
 
     args = parser.parse_args()
@@ -255,7 +260,10 @@ async def main():
     logger.info(f"Found {len(s3_folder_uris)} repositories to evaluate")
 
     # Prepare payloads
-    payloads = [prepare_payload(uri, args.require_maximal_migration, args.prompt_type) for uri in s3_folder_uris]
+    payloads = [
+        prepare_payload(uri, args.require_maximal_migration, args.apply_static_update, args.use_dependency_search_tool)
+        for uri in s3_folder_uris
+    ]
 
     # Setup results directory and file
     results_dir = Path(__file__).parent / "results"
