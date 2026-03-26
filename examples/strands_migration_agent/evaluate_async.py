@@ -7,7 +7,12 @@ import logging
 import time
 from pathlib import Path
 
-from eval_utils import append_result_to_file, get_s3_folder_uris, load_config, prepare_payload
+from eval_utils import (
+    append_result_to_file,
+    get_s3_folder_uris,
+    load_config,
+    prepare_payload,
+)
 
 from agentcore_rl_toolkit import RolloutClient
 
@@ -217,6 +222,19 @@ async def main():
         default=eval_config.get("sampling_params"),
         help="Sampling parameters as JSON string (e.g. '{\"temperature\": 0.7}')",
     )
+    parser.add_argument(
+        "--require_maximal_migration",
+        action="store_true",
+        default=False,
+        help="Whether a repository is evaluated under maximal migration",
+    )
+    parser.add_argument(
+        "--agent_type",
+        type=str,
+        default="baseline",
+        choices=["baseline", "rag", "hybrid"],
+        help="Specify Java migration agent type",
+    )
 
     args = parser.parse_args()
 
@@ -242,7 +260,7 @@ async def main():
     logger.info(f"Found {len(s3_folder_uris)} repositories to evaluate")
 
     # Prepare payloads
-    payloads = [prepare_payload(uri) for uri in s3_folder_uris]
+    payloads = [prepare_payload(uri, args.require_maximal_migration, args.agent_type) for uri in s3_folder_uris]
 
     # Setup results directory and file
     results_dir = Path(__file__).parent / "results"
