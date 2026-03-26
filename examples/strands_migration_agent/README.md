@@ -1,7 +1,7 @@
 # Strands Migration Agent
 
 This agent tackles the problem of code migration from Java 8 to Java 17 as introduced in [MigrationBench](https://github.com/amazon-science/MigrationBench).
-It is a re-implementation of the [JavaMigrationAgent](https://github.com/amazon-science/JavaMigration/tree/main/java_migration_agent) with open source LLMs.
+It builds upon the official [JavaMigrationAgent](https://github.com/amazon-science/JavaMigration/tree/main/java_migration_agent) with open source LLMs.
 This example is under active development alongside the `agentcore-rl-toolkit` library.
 
 ## Basic Setup
@@ -144,7 +144,7 @@ curl -X POST http://localhost:8080/invocations \
     "repo_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/15093015999__EJServer.tar.gz",
     "metadata_uri": "s3://{BUCKET}/tars/test/15093015999__EJServer/metadata.json",
     "require_maximal_migration": false,
-    "agent_type": "baseline",
+    "prompt_type": "baseline",
     "_rollout": {
         "exp_id": "dev",
         "s3_bucket": "agentcore-rl",

@@ -40,7 +40,7 @@ def get_s3_folder_uris(s3_uri: str) -> list[str]:
     return folder_uris
 
 
-def prepare_payload(folder_uri: str, require_maximal_migration: bool = False, agent_type: str = "baseline") -> dict:
+def prepare_payload(folder_uri: str, require_maximal_migration: bool = False, prompt_type: str = "baseline") -> dict:
     """
     Prepare a single payload for a repository folder.
 
@@ -61,7 +61,7 @@ def prepare_payload(folder_uri: str, require_maximal_migration: bool = False, ag
         "repo_uri": repo_uri,
         "metadata_uri": metadata_uri,
         "require_maximal_migration": require_maximal_migration,
-        "agent_type": agent_type,
+        "prompt_type": prompt_type,
     }
 
 
