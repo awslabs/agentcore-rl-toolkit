@@ -12,6 +12,32 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 _S3_CONFIG_FIELDS = ("exp_id", "input_id", "s3_bucket")
 
 
+def _extract_partial_rollout(exc: BaseException) -> list | None:
+    """Extract partial token data from a model object when an agent session fails.
+
+    When an agent function raises (e.g., max_tokens, context overflow, tool errors),
+    the vLLMModel instance still holds token data from successful LLM calls before
+    the failure. This function walks the exception traceback frames to find that
+    model and collect the data, so it can be saved for RL training (with reward=0)
+    as negative contrast signal for GRPO.
+
+    Note: this does NOT work for timeout/cancellation where the container is
+    force-killed (SIGKILL) by AgentCore — the handler never gets to run.
+
+    Returns:
+        List of token data dicts if data exists, None otherwise.
+    """
+    tb = exc.__traceback__
+    while tb is not None:
+        val = tb.tb_frame.f_locals.get("model")
+        if val is not None and hasattr(val, "get_token_data"):
+            token_data = val.get_token_data()
+            if token_data:
+                return token_data
+        tb = tb.tb_next
+    return None
+
+
 @dataclass
 class RolloutConfig:
     """Rollout configuration for rollout collection and storage."""
@@ -170,18 +196,35 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 # that can arise from task cancellation or deep async generator unwinding.
                 if result_key:
                     try:
-                        error_result = {
-                            "status_code": 500,
-                            "stop_reason": str(e),
-                            "traceback": traceback.format_exc(),
-                        }
+                        # Try to extract partial rollout data from the model object.
+                        # This preserves token data from successful LLM calls before
+                        # the failure, enabling RL training with reward=0 as negative
+                        # contrast signal (critical for GRPO).
+                        partial_rollout = _extract_partial_rollout(e)
+                        if partial_rollout:
+                            error_result = {
+                                "status_code": 500,
+                                "stop_reason": str(e) or type(e).__name__,
+                                "rollout_data": partial_rollout,
+                                "rewards": 0.0,
+                            }
+                            logging.warning(
+                                f"Agent failed but saved partial rollout data "
+                                f"({len(partial_rollout)} steps, reward=0.0) for: {func.__name__}: {e}"
+                            )
+                        else:
+                            error_result = {
+                                "status_code": 500,
+                                "stop_reason": str(e) or type(e).__name__,
+                                "traceback": traceback.format_exc(),
+                            }
+                            logging.error(f"Error result saved for function: {func.__name__}: {e}")
                         self.save_result(
                             result=error_result,
                             rollout_config=rollout_dict,
                             payload=payload,
                             result_key=result_key,
                         )
-                        logging.error(f"Error result saved for function: {func.__name__}: {e}")
                     except Exception:
                         logging.error(f"Failed to save error result for function: {func.__name__}", exc_info=True)
                 raise
