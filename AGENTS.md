@@ -17,7 +17,6 @@ This document provides context, patterns, and guidelines for AI coding assistant
 - [Environment Variables](#environment-variables)
 - [Common Tasks](#common-tasks)
 - [Development Tips](#development-tips)
-- [Known Limitations & TODOs](#known-limitations--todos)
 - [External References](#external-references)
 
 ---
@@ -494,13 +493,6 @@ uv run pre-commit install
 
 ---
 
-## Known Limitations & TODOs
-
-### Design Improvements
-- **Model gateway (in preview)**: [rllm-model-gateway](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) replaces the need for `vLLMModel` client-side token collection. The gateway proxies inference requests and captures token IDs + logprobs transparently at the HTTP layer. Integration with rllm training backends is under active development. The legacy `vLLMModel` under `frameworks/strands/` is retained for backward compatibility.
-
----
-
 ## External References
 
 - **ACR Documentation**: https://docs.aws.amazon.com/bedrock-agentcore/
@@ -510,4 +502,5 @@ uv run pre-commit install
 - **Runtime SDK Overview**: https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html
 - **HTTP Protocol Contract**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http
 - **rLLM SDK (reference)**: https://rllm-project.readthedocs.io/en/latest/core-concepts/sdk/#1-define-your-agent-function
-- **rllm-model-gateway** (token capture proxy for RL training): https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway
+- **rllm-model-gateway** (token capture proxy for RL training): https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway | [PyPI](https://pypi.org/project/rllm-model-gateway/)
+- **AgentCore math training example** (rllm + Tinker backend): https://github.com/rllm-org/rllm/blob/main/examples/agentcore_math/train_agentcore_math_tinker.sh
