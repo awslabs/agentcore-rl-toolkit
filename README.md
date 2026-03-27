@@ -127,7 +127,7 @@ In practice, this is infrastructure managed by the training framework:
 - **During training**: the training engine points `base_url` through the gateway automatically
 - **During evaluation**: `base_url` points directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` via the Bedrock API — no gateway involved
 
-The gateway is currently in preview. See the [rllm-model-gateway repo](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) for details.
+The gateway is [available on PyPI](https://pypi.org/project/rllm-model-gateway/) (`pip install rllm-model-gateway`). See the [rllm-model-gateway repo](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway) for details.
 
 ## Client-Side: Invoking Agents and Collecting Results
 
@@ -267,7 +267,8 @@ The training architecture follows a **decoupled design** where agent rollouts an
 This architecture enables parallel and highly efficient rollouts with secure execution during RL training. The decoupled design means training libraries only need the agent's container image to start training—agent code and dependencies stay completely separate from the training library.
 
 **Supported Training Libraries:**
-- [rllm](https://github.com/rllm-org/rllm) integration coming soon (supports multiple backends: veRL, Tinker, and more)
+- [rLLM](https://github.com/rllm-org/rllm) — supports multiple backends (veRL, Tinker, and more)
+  - [Math Agent](examples/strands_math_agent/): [Tinker](https://github.com/rllm-org/rllm/blob/main/examples/agentcore_math/train_agentcore_math_tinker.sh)
 
 ### Prepare Your Agent Container
 
