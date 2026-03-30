@@ -1,7 +1,7 @@
-import json
 import logging
 
 from appworld.environment import AppWorld, AppWorldServers
+from few_shot_example import build_example_messages
 from reward import AppWorldReward
 from strands import Agent, tool
 
@@ -14,42 +14,81 @@ logger = logging.getLogger(__name__)
 app = AgentCoreRLApp()
 reward_fn = AppWorldReward()
 
-MAX_TOOL_OUTPUT_LENGTH = 7200
+MAX_TOOL_OUTPUT_LENGTH = 12000
 
+# Create system prompt and key instructions following
+# https://github.com/StonyBrookNLP/appworld/blob/main/experiments/prompts/react_code_agent/instructions.txt
+
+# ────── System prompt──────
 SYSTEM_PROMPT = """\
-You are an AI assistant that completes tasks by writing Python code.
-You interact with apps (e.g., spotify, venmo, gmail) through their APIs using a Python environment.
-In each step, write Python code and the environment will execute it and return the output.
-Use print() to see results. Variables persist across calls.
+I am your supervisor, and you are an AI Assistant whose job is to complete my \
+day-to-day tasks fully autonomously.
 
-## Discovering APIs
+To do this, you will need to interact with app(s) (e.g., spotify, venmo etc) \
+using their associated APIs on my behalf. For this you will undertake a \
+*multi-step conversation* using a python REPL environment. That is, you will \
+write python code using the `execute` tool, the environment will execute it \
+and show you the result, based on which, you will write python code for the \
+next step and so on, until you've achieved the goal.
 
-You have three key functions to discover available APIs:
+Here are three key APIs that you need to know to get more information:
 
 1. List all available apps:
    print(apis.api_docs.show_app_descriptions())
 
-2. List APIs for a specific app:
-   print(apis.api_docs.show_api_descriptions(app_name="spotify"))
+2. List APIs for a specific app, e.g. spotify:
+   print(apis.api_docs.show_api_descriptions(app_name='spotify'))
 
-3. Get full specification of an API (parameters, response schema):
-   print(apis.api_docs.show_api_doc(app_name="spotify", api_name="login"))
+3. Get the specification of a particular API, e.g. spotify login:
+   print(apis.api_docs.show_api_doc(app_name='spotify', api_name='login'))
 
-## Calling APIs
+Each code execution will produce an output that you can use in subsequent calls."""
 
-Call APIs directly: apis.<app_name>.<api_name>(**arguments)
-Example: apis.spotify.login(username="user@email.com", password="pass123")
+# ────── Key Instructions (included in user message) ──────
+KEY_INSTRUCTIONS = """\
+The above conversation you see is a demonstration example. Now start doing the real task.
 
-## Key instructions
+**Key instructions**:
 
-- Use the "supervisor" app to get account credentials (passwords, etc.).
-- Use the "phone" app to look up contact information for friends and family.
-- Always check API specifications (show_api_doc) before calling an API.
-- Write small chunks of code, one chunk per step. Verify results before making irreversible changes.
-- Many APIs return paginated results. Loop over page_index to get all results.
-- When the task is complete, call apis.supervisor.complete_task().
-  If the task asks for information, pass it as: apis.supervisor.complete_task(answer=<answer>).
-  If no answer is needed, just call: apis.supervisor.complete_task()"""
+A. General instructions:
+- Act fully on your own. You must make all decisions yourself and never ask \
+me or anyone else to confirm or clarify.
+- Never invent or guess values. For example, if I ask you to play a song, \
+do not assume the ID is 123. Instead, look it up properly through the right API.
+- Never leave placeholders; don't output things like "your_username". Always \
+fill in the real value by retrieving it via APIs (e.g., Supervisor app for \
+credentials).
+- Avoid collateral damage. Only perform what I explicitly ask for.
+
+B. App-specific instructions:
+- All my personal information (credentials, addresses, cards) is stored in \
+the Supervisor app, accessible via its APIs.
+- Any reference to my friends, family or any other person refers to the \
+people in my phone's contacts list.
+- Paginated APIs: Always process all results, looping through the page_index. \
+Don't stop at the first page.
+
+C. Code-operation instructions:
+- Remember you can use the variables in your code in subsequent calls.
+- Remember that the email addresses, access tokens and variables in the \
+demonstration example above are not valid anymore.
+- Always look at API specifications (using apis.api_docs.show_api_doc) \
+before calling an API.
+- Write small chunks of code and only one chunk of code in every step. \
+Make sure everything is working correctly before making any irreversible changes.
+- The provided API documentation has both the input arguments and the output \
+JSON format. Use this information when making API calls and parsing their outputs.
+
+D. Task-completion instructions:
+- You must call `apis.supervisor.complete_task()` after completing the task.
+- If an answer is needed, call it with the appropriate answer argument value.
+- If no answer is required, omit the answer argument (or set it to None).
+- Keep answers minimal. Return only the entity, number, or direct value \
+requested - not full sentences.
+- Numbers must be numeric and not in words (e.g., return "10", not "ten")."""
+
+
+# ── Entrypoint ───────────────────────────────────────────────────────────────
 
 
 @app.rollout_entrypoint
@@ -90,27 +129,20 @@ def invoke_agent(payload: dict):
                 """
                 try:
                     output = world.execute(code)
-                    result = json.dumps(
-                        {
-                            "output": output,
-                            "task_completed": world.task_completed(),
-                        }
-                    )
                 except Exception as e:
-                    result = json.dumps(
-                        {
-                            "error": f"{type(e).__name__}: {e}",
-                        }
-                    )
-                if len(result) > MAX_TOOL_OUTPUT_LENGTH:
-                    result = result[: MAX_TOOL_OUTPUT_LENGTH - len("... (truncated)")] + "... (truncated)"
-                return result
+                    output = f"Error: {type(e).__name__}: {e}"
+                if len(output) > MAX_TOOL_OUTPUT_LENGTH:
+                    output = output[: MAX_TOOL_OUTPUT_LENGTH - len("... (truncated)")] + "... (truncated)"
+                if world.task_completed():
+                    output += "\n\n[TASK COMPLETED] Stop and do not call any more tools."
+                return output
 
             # Build user message with task context
             task = world.task
             supervisor = task.supervisor
             user_message = (
-                f"Today's date is: {task.datetime.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"{KEY_INSTRUCTIONS}\n\n"
+                f"Using the available APIs, now generate code to solve the actual task:\n\n"
                 f"My name is: {supervisor.first_name} {supervisor.last_name}. "
                 f"My personal email is {supervisor.email} "
                 f"and phone number is {supervisor.phone_number}.\n"
@@ -121,6 +153,7 @@ def invoke_agent(payload: dict):
                 model=model,
                 tools=[execute],
                 system_prompt=SYSTEM_PROMPT,
+                messages=build_example_messages(),
             )
 
             response = agent(user_message)
