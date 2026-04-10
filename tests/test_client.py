@@ -481,7 +481,7 @@ class TestRolloutClient:
         locks = []
 
         async def capture_lock():
-            locks.append(client._get_async_lock())
+            locks.append(client._rate_limiter._get_async_lock())
 
         asyncio.run(capture_lock())
         asyncio.run(capture_lock())  # new event loop
