@@ -91,7 +91,7 @@ def invoke_agent(payload: dict):
     logger.info(f"Loaded repo into: {repo_path} (took {load_duration:.2f}s)")
 
     start_time = time.time()
-    setup_repo_environment(repo_path, request.use_dependency_search_tool)
+    setup_repo_environment(repo_path, apply_static_update=request.apply_static_update)
     setup_duration = time.time() - start_time
     logger.info(f"Finished repo setup for: {repo_path} (took {setup_duration:.2f}s)")
 
