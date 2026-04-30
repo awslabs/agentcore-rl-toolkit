@@ -1,0 +1,45 @@
+---
+title: AgentCore RL Toolkit
+description: RL training on top of Bedrock AgentCore Runtime.
+template: splash
+hero:
+  tagline: Seamlessly enable RL training on any agent with Bedrock AgentCore Runtime.
+  actions:
+    - text: Overview
+      link: /agentcore-rl-toolkit/guides/overview/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/awslabs/agentcore-rl-toolkit
+      icon: external
+      variant: minimal
+  image:
+    html: |
+      <pre class="hero-code"><code><span class="ln"><span style="color:#c586c0">from</span> agentcore_rl_toolkit <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">AgentCoreRLApp</span></span>
+      <span class="ln"><span style="color:#c586c0">from</span> strands <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">Agent</span></span>
+      <span class="ln"><span style="color:#c586c0">from</span> strands.models.openai <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">OpenAIModel</span></span>
+      <span class="ln"></span>
+      <span class="ln">app = <span style="color:#4ec9b0">AgentCoreRLApp</span>()</span>
+      <span class="ln"></span>
+      <span class="ln"><span style="color:#c586c0;font-style:italic">@app.rollout_entrypoint</span></span>
+      <span class="ln"><span style="color:#c586c0">def</span> <span style="color:#dcdcaa">invoke_agent</span>(payload: <span style="color:#4ec9b0">dict</span>):</span>
+      <span class="ln">    cfg = payload[<span style="color:#ce9178">"_rollout"</span>]</span>
+      <span class="ln">    model = <span style="color:#4ec9b0">OpenAIModel</span>(base_url=cfg[<span style="color:#ce9178">"base_url"</span>], model_id=cfg[<span style="color:#ce9178">"model_id"</span>])</span>
+      <span class="ln">    agent = <span style="color:#4ec9b0">Agent</span>(model=model, tools=[...])</span>
+      <span class="ln">    response = agent(payload[<span style="color:#ce9178">"prompt"</span>])</span>
+      <span class="ln">    <span style="color:#c586c0">return</span> {<span style="color:#ce9178">"rewards"</span>: reward_fn(response)}</span></code></pre>
+---
+
+**Reuse production code** — [one decorator swap](/agentcore-rl-toolkit/guides/agent-adaptation/); no custom model wrappers.
+
+**Isolated, auto-scaling rollouts** — every rollout runs in its own ACR microVM; thousands in parallel without contending for your machine.
+
+**Decoupled environments** — agent container ships its own dependencies, fully separate from the training library.
+
+**Training-ready** — **token IDs, logits, and expert masks** captured via `rllm-model-gateway`; results via S3.
+
+New here? Start with the [math agent example](/agentcore-rl-toolkit/examples/strands-math-agent/)
+or read the [overview](/agentcore-rl-toolkit/guides/overview/). Already have an agent?
+Jump straight to [prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/) and
+pick a training backend: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) ·
+[rllm + tinker/verl](/agentcore-rl-toolkit/guides/rllm-backend-setup/) ·
+[verl](/agentcore-rl-toolkit/guides/verl-backend-setup/).
