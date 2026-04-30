@@ -1,0 +1,21 @@
+# Toolkit + slime backend settings for the rollout function.
+# Copy to config.yaml (gitignored) and fill in your deployment values.
+#
+#   cp config.yaml.example config.yaml
+#   # edit agent_runtime_arn + s3_bucket
+#
+# Passed to slime via --custom-config-path config.yaml.
+# All keys become attributes on slime's args namespace.
+
+# ACR deployment pointers (from `bedrock-agentcore-starter-toolkit launch`)
+agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
+s3_bucket: "your-s3-bucket-name"
+
+# Toolkit tunables
+exp_id: "gsm8k-grpo-train"
+gateway_port: 9090                  # rllm-model-gateway port
+acr_timeout: 900                    # per-session ACR invocation timeout (s)
+model_id: "default"                 # OpenAI model id served to the agent
+acr_tps_limit: 25                   # ACR service TPS quota
+max_concurrent: 100                 # max concurrent ACR sessions (eval batching)
+reward_postprocessing: "grpo"       # "grpo" or "identity"

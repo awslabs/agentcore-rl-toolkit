@@ -36,6 +36,12 @@ dev = [
     "mypy>=1.0",
     "pre-commit>=3.0",
 ]
+slime = [
+    # Proxy that sits between the agent and SGLang during training, capturing
+    # token IDs and logprobs into TraceRecords that slime consumes as Samples.
+    # Required by agentcore_rl_toolkit.backends.slime.{gateway,rollout,traces}.
+    "rllm-model-gateway>=0.1.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
