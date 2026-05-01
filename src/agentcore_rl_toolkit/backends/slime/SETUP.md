@@ -41,6 +41,29 @@ pre-installed at `/root/slime` and `/root/Megatron-LM` — use those paths
 for `SLIME_DIR` / `MEGATRON_DIR` in step 3.4. For a bare-metal install,
 point at wherever you cloned slime + Megatron-LM.
 
+### Tested versions
+
+For reproducibility, here's the exact environment this integration was
+validated against:
+
+| Component | Version / SHA |
+|---|---|
+| Instance type | AWS `p5.48xlarge` (8 × NVIDIA H100 80GB HBM3) |
+| NVIDIA driver | `580.105.08` |
+| CUDA (host + container) | `12.9` |
+| PyTorch | `2.9.1+cu129` |
+| Docker image | `slimerl/slime@sha256:0100c933f1f63e7c4acdb9ec575e769839d59de4a648551e09e3fe0e7885631b` (built 2026-04-28) |
+| slime | commit `f3e7bd7f3091d3be05c20977eefb31a785d6221d` (2026-04-28) |
+| SGLang | `v0.5.9` |
+| Megatron-LM | commit `3714d81d418c9f1bca4594fc35f9e8289f652862` ⚠️ see note |
+
+> **Megatron-LM pin.** The image bundles Megatron-LM at `1dcf0dafa` (~500
+> commits ahead of slime's stable pin), which breaks 32B training — see
+> [Common Problems & Fixes](#common-problems--fixes). We downgrade to
+> `3714d81d` (slime's documented stable sha) via `git checkout` inside
+> `/root/Megatron-LM`. The tested-versions table above reflects the
+> downgraded sha, not the one baked into the image.
+
 ---
 
 ## Part 2 — Install ART + slime backend
