@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven settings pointing all Maven traffic at an AWS CodeArtifact mirror.
+  CodeArtifact caches Maven Central artifacts inside AWS, eliminating the
+  public Maven Central per-IP HTTP 429 rate limit.
+  Prerequisites and AWS CLI setup commands are in the aws_maven_mirror
+  Dockerfile header; see also entrypoint.sh which populates
+  CODEARTIFACT_AUTH_TOKEN at container startup.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <servers>
+    <server>
+      <id>aws-codeartifact</id>
+      <username>aws</username>
+      <password>${env.CODEARTIFACT_AUTH_TOKEN}</password>
+    </server>
+  </servers>
+
+  <mirrors>
+    <mirror>
+      <id>aws-codeartifact</id>
+      <name>AWS CodeArtifact Maven Central cache</name>
+      <!-- Update domain/repo/account/region here if you use different names -->
+      <url>https://migration-aws-maven-mirror-{your-aws-account-number}.d.codeartifact.us-west-2.amazonaws.com/maven/maven-central-cache/</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>
+  </mirrors>
+
+  <profiles>
+    <profile>
+      <id>aws-codeartifact</id>
+      <repositories>
+        <repository>
+          <id>aws-codeartifact</id>
+          <url>https://migration-aws-maven-mirror-{your-aws-account-number}.d.codeartifact.us-west-2.amazonaws.com/maven/maven-central-cache/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>aws-codeartifact</id>
+          <url>https://migration-aws-maven-mirror-{your-aws-account-number}.d.codeartifact.us-west-2.amazonaws.com/maven/maven-central-cache/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+
+  <activeProfiles>
+    <activeProfile>aws-codeartifact</activeProfile>
+  </activeProfiles>
+
+</settings>
