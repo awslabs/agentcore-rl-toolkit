@@ -13,6 +13,10 @@ build/
 
 # Environment variables
 .env
+.wandb.env
+
+# Local slime backend config (contains ARN/bucket; commit config.yaml.example only)
+src/agentcore_rl_toolkit/backends/slime/examples/**/config.yaml
 
 # Config files
 config.toml
