@@ -168,7 +168,7 @@ Build the docker image:
 docker buildx build \
   --build-context toolkit=$TOOLKIT_ROOT \
   -t migration:dev --load \
-  -f $MIGRATION_DIR/Dockerfile \
+  -f $MIGRATION_DIR/.bedrock_agentcore/public_maven/Dockerfile \
   $MIGRATION_DIR
 ```
 
@@ -207,11 +207,56 @@ cp .env.example .env
 # Make sure this is configured (e.g., run `aws configure`) before proceeding.
 
 ./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=$MIGRATION_DIR/Dockerfile \
+  --dockerfile=$MIGRATION_DIR/.bedrock_agentcore/public_maven/Dockerfile \
   --tag=dev \
   --context=$MIGRATION_DIR \
   --additional-context=toolkit=$TOOLKIT_ROOT
 ```
+
+### Maven Mirror
+
+The docker file `$MIGRATION_DIR/.bedrock_agentcore/public_maven/Dockerfile` in above commands uses public maven [source](https://repo.maven.apache.org/) to download Java dependencies. While it works reliably at most scenarios, we found sometimes in RL training, public maven source may restrict Internet acess as too many AgentCore Runtime sessions are downloading from maven at the same time, causing these sessions fail due to timeout. If you meet the same issue, please use the docker file `$MIGRATION_DIR/.bedrock_agentcore/aws_maven_mirror/Dockerfile` to build Migration agent instead. It creates a maven download mirror source at AWS CodeArtifact, which caches all downloaded Java dependencies so AgentCore Runtime sessions can directly fetch them instead of always downloading them from public maven.
+
+First run the following commands to setup your AWS CodeArtifact repo for maven mirror source:
+```bash
+aws codeartifact create-domain --domain migration-aws-maven-mirror --region us-west-2
+aws codeartifact create-repository --domain migration-aws-maven-mirror --repository maven-central-cache --region us-west-2
+aws codeartifact associate-external-connection \
+    --domain migration-aws-maven-mirror --repository maven-central-cache \
+    --external-connection public:maven-central --region us-west-2
+# Grant the AgentCoreRuntime IAM role codeartifact:GetAuthorizationToken
+# and codeartifact:ReadFromRepository:
+aws iam put-role-policy \
+    --role-name AgentCoreRuntime \
+    --policy-name CodeArtifactReadAccess \
+    --policy-document '{
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "CodeArtifactRead",
+                "Effect": "Allow",
+                "Action": [
+                    "codeartifact:GetAuthorizationToken",
+                    "codeartifact:ReadFromRepository",
+                    "codeartifact:GetRepositoryEndpoint"
+                ],
+                "Resource": "*"
+            },
+            {
+                "Sid": "STSServiceBearerToken",
+                "Effect": "Allow",
+                "Action": "sts:GetServiceBearerToken",
+                "Resource": "*",
+                "Condition": {
+                    "StringEquals": {
+                        "sts:AWSServiceName": "codeartifact.amazonaws.com"
+                    }
+                }
+            }
+        ]
+    }'
+```
+Then follow the same commands above to build Migration agent, just changing the docker file path.
 
 ## Deploy
 
