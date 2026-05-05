@@ -11,6 +11,44 @@ from java_migration_agent.preprocessing import update_dependency_version, update
 logger = logging.getLogger(__name__)
 
 
+def configure_codeartifact_token():
+    domain = os.environ.get("CODEARTIFACT_DOMAIN")
+    owner = os.environ.get("CODEARTIFACT_OWNER")
+    repo = os.environ.get("CODEARTIFACT_REPO")
+    if not domain or not owner or not repo:
+        return
+    ca = boto3.client("codeartifact")
+    token = ca.get_authorization_token(domain=domain, domainOwner=owner)["authorizationToken"]
+    url = ca.get_repository_endpoint(domain=domain, domainOwner=owner, repository=repo, format="maven")[
+        "repositoryEndpoint"
+    ]
+    os.environ["CODEARTIFACT_AUTH_TOKEN"] = token
+
+    m2_dir = os.path.join(os.path.expanduser("~"), ".m2")
+    os.makedirs(m2_dir, exist_ok=True)
+    with open(os.path.join(m2_dir, "settings.xml"), "w") as f:
+        f.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<settings>\n"
+            "  <servers>\n"
+            "    <server>\n"
+            "      <id>codeartifact</id>\n"
+            "      <username>aws</username>\n"
+            f"      <password>{token}</password>\n"
+            "    </server>\n"
+            "  </servers>\n"
+            "  <mirrors>\n"
+            "    <mirror>\n"
+            "      <id>codeartifact</id>\n"
+            f"      <url>{url}</url>\n"
+            "      <mirrorOf>central</mirrorOf>\n"
+            "    </mirror>\n"
+            "  </mirrors>\n"
+            "</settings>\n"
+        )
+    logger.info("CodeArtifact mirror configured: %s", url)
+
+
 def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
     if not s3_uri.startswith("s3://"):
         raise ValueError(f"{s3_uri} does not start with s3://")

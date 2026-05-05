@@ -8,7 +8,7 @@ from reward import MigrationReward
 from strands import Agent
 from strands.models.openai import OpenAIModel
 from strands_tools import editor, shell
-from utils import load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
+from utils import configure_codeartifact_token, load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
 
 from agentcore_rl_toolkit import AgentCoreRLApp
 
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 app = AgentCoreRLApp()
 
 load_dotenv()
+configure_codeartifact_token()
 
 system_prompt = (
     "You are a coding agent that helps to migrate repos written in Java8 to Java17. "

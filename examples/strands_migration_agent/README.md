@@ -168,7 +168,7 @@ Build the docker image:
 docker buildx build \
   --build-context toolkit=$TOOLKIT_ROOT \
   -t migration:dev --load \
-  -f $MIGRATION_DIR/.bedrock_agentcore/public_maven/Dockerfile \
+  -f $MIGRATION_DIR/Dockerfile \
   $MIGRATION_DIR
 ```
 
@@ -207,56 +207,82 @@ cp .env.example .env
 # Make sure this is configured (e.g., run `aws configure`) before proceeding.
 
 ./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=$MIGRATION_DIR/.bedrock_agentcore/public_maven/Dockerfile \
+  --dockerfile=$MIGRATION_DIR/Dockerfile \
   --tag=dev \
   --context=$MIGRATION_DIR \
   --additional-context=toolkit=$TOOLKIT_ROOT
 ```
 
-### Maven Mirror
+## CodeArtifact Mirror (Optional)
 
-The docker file `$MIGRATION_DIR/.bedrock_agentcore/public_maven/Dockerfile` in above commands uses public maven [source](https://repo.maven.apache.org/) to download Java dependencies. While it works reliably at most scenarios, we found sometimes in RL training, public maven source may restrict Internet acess as too many AgentCore Runtime sessions are downloading from maven at the same time, causing these sessions fail due to timeout. If you meet the same issue, please use the docker file `$MIGRATION_DIR/.bedrock_agentcore/aws_maven_mirror/Dockerfile` to build Migration agent instead. It creates a maven download mirror source at AWS CodeArtifact, which caches all downloaded Java dependencies so AgentCore Runtime sessions can directly fetch them instead of always downloading them from public maven.
+When running RL training or evaluation with many concurrent containers, Maven Central may return HTTP 429 (rate limit) errors. You can set up an AWS CodeArtifact repository as a caching proxy to avoid this.
 
-First run the following commands to setup your AWS CodeArtifact repo for maven mirror source:
+### 1. Create CodeArtifact resources
+
 ```bash
-aws codeartifact create-domain --domain migration-aws-maven-mirror --region us-west-2
-aws codeartifact create-repository --domain migration-aws-maven-mirror --repository maven-central-cache --region us-west-2
+# Create domain
+aws codeartifact create-domain --domain migration-aws-maven-mirror
+
+# Create repository and connect it to Maven Central
+aws codeartifact create-repository \
+  --domain migration-aws-maven-mirror \
+  --repository maven-central-cache
+
 aws codeartifact associate-external-connection \
-    --domain migration-aws-maven-mirror --repository maven-central-cache \
-    --external-connection public:maven-central --region us-west-2
-# Grant the AgentCoreRuntime IAM role codeartifact:GetAuthorizationToken
-# and codeartifact:ReadFromRepository:
-aws iam put-role-policy \
-    --role-name AgentCoreRuntime \
-    --policy-name CodeArtifactReadAccess \
-    --policy-document '{
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "CodeArtifactRead",
-                "Effect": "Allow",
-                "Action": [
-                    "codeartifact:GetAuthorizationToken",
-                    "codeartifact:ReadFromRepository",
-                    "codeartifact:GetRepositoryEndpoint"
-                ],
-                "Resource": "*"
-            },
-            {
-                "Sid": "STSServiceBearerToken",
-                "Effect": "Allow",
-                "Action": "sts:GetServiceBearerToken",
-                "Resource": "*",
-                "Condition": {
-                    "StringEquals": {
-                        "sts:AWSServiceName": "codeartifact.amazonaws.com"
-                    }
-                }
-            }
-        ]
-    }'
+  --domain migration-aws-maven-mirror \
+  --repository maven-central-cache \
+  --external-connection public:maven-central
 ```
-Then replace all `{your-aws-account-number}` in maven-setting.xml, entrypoint.sh and .bedrock_agentcore/aws_maven_mirror/Dockerfile with your AWS account number, finally follow the same commands but changing the docker file path in above sections to build Migration agent.
+
+### 2. Add IAM permissions to the ACR execution role
+
+Add the following policy to the IAM execution role your ACR agent runs as (replace `REGION`, `ACCOUNT`, and `YOUR_EXECUTION_ROLE`):
+
+```bash
+aws iam put-role-policy \
+  --role-name YOUR_EXECUTION_ROLE \
+  --policy-name CodeArtifactAccess \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "codeartifact:GetAuthorizationToken",
+          "codeartifact:GetRepositoryEndpoint"
+        ],
+        "Resource": [
+          "arn:aws:codeartifact:REGION:ACCOUNT:domain/migration-aws-maven-mirror",
+          "arn:aws:codeartifact:REGION:ACCOUNT:repository/migration-aws-maven-mirror/maven-central-cache"
+        ]
+      },
+      {
+        "Effect": "Allow",
+        "Action": "sts:GetServiceBearerToken",
+        "Resource": "*",
+        "Condition": {
+          "StringEquals": {
+            "sts:AWSServiceName": "codeartifact.amazonaws.com"
+          }
+        }
+      }
+    ]
+  }'
+```
+
+### 3. Set environment variables
+
+Add to your `.env` file (picked up by `deploy.py`):
+
+```
+CODEARTIFACT_DOMAIN=migration-aws-maven-mirror
+CODEARTIFACT_OWNER=123456789012
+CODEARTIFACT_REPO=maven-central-cache
+```
+
+These are picked up automatically by `--env-file` when running Docker locally, and by `deploy.py` when deploying to ACR.
+
+When these environment variables are not set, the agent uses Maven Central directly (default behavior). At startup, `configure_codeartifact_token()` fetches an auth token via boto3 and generates `~/.m2/settings.xml` automatically.
 
 ## Deploy
 
