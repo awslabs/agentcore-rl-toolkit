@@ -80,7 +80,6 @@ ray job submit --address="http://127.0.0.1:8265" \
   --tensor-model-parallel-size ${TP_SIZE} \
   --rollout-num-gpus-per-engine ${ROLLOUT_GPUS_PER_ENGINE} \
   --input-key prompt \
-  --label-key label \
   --rollout-batch-size 32 \
   --n-samples-per-prompt 8 \
   --rollout-max-response-len 1024 \

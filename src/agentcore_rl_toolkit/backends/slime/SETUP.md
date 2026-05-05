@@ -112,10 +112,21 @@ ds = load_dataset('openai/gsm8k', 'main', split='train')
 with open('/path/to/gsm8k_tiny.jsonl', 'w') as f:
     for i, row in enumerate(ds):
         if i >= 64: break
+        question = row['question']
         answer = row['answer'].split('####')[-1].strip()
-        f.write(json.dumps({'prompt': row['question'], 'label': answer}) + '\n')
+        # Top-level 'prompt' is read by slime (tokenization, length filter).
+        # 'metadata' is the agent payload verbatim — shape it however the agent expects.
+        f.write(json.dumps({
+            'prompt': question,
+            'metadata': {'prompt': question, 'answer': answer},
+        }) + '\n')
 "
 ```
+
+The agent-visible payload is exactly the contents of ``metadata``, so
+different agents can use different payload shapes (e.g. ``{'task_id': ...}``
+for AppWorld, ``{'repo_uri': ..., 'metadata_uri': ..., ...}`` for
+migration) without any slime-side changes.
 
 ### 3.3 Configure deployment settings
 

@@ -209,52 +209,20 @@ def _ensure_initialized(args: Namespace):
 
 
 def _sample_to_payload(sample) -> dict:
-    """Convert a slime Sample to an ART invocation payload.
+    """The agent payload is the JSONL row's ``metadata`` dict, verbatim.
 
-    Extracts all non-None public fields from the Sample into the payload.
-    The agent's @rollout_entrypoint receives this dict as `payload`.
+    slime's Dataset reads the JSONL row's ``metadata`` field into
+    ``Sample.metadata``; we hand that dict to the agent unchanged. The JSONL's
+    top-level ``prompt`` field is for slime (tokenization, length filtering);
+    the agent's payload shape is entirely defined by whatever the data author
+    put in ``metadata``. A shallow copy isolates the agent's view from
+    downstream mutations to ``Sample.metadata`` (e.g. ``task_metadata``
+    injection in ``_process_one_episode``).
     """
-    payload = {}
-
-    if hasattr(sample, "prompt") and sample.prompt:
-        payload["prompt"] = sample.prompt
-    if hasattr(sample, "label") and sample.label is not None:
-        payload["answer"] = sample.label
-    if hasattr(sample, "metadata") and sample.metadata:
-        payload["metadata"] = sample.metadata
-
-    if hasattr(sample, "to_dict"):
-        for key, value in sample.to_dict().items():
-            if (
-                key not in payload
-                and value is not None
-                and key
-                not in (
-                    "tokens",
-                    "rollout_log_probs",
-                    "loss_mask",
-                    "teacher_log_probs",
-                    "rollout_routed_experts",
-                    "multimodal_inputs",
-                    "multimodal_train_inputs",
-                    "group_index",
-                    "index",
-                    "status",
-                    "session_id",
-                    "spec_info",
-                    "prefix_cache_info",
-                    "response_length",
-                    "response",
-                    "weight_versions",
-                    "remove_sample",
-                    "non_generation_time",
-                    "generate_function_path",
-                    "train_metadata",
-                )
-            ):
-                payload[key] = value
-
-    return payload
+    metadata = getattr(sample, "metadata", None)
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    return {}
 
 
 # ---------------------------------------------------------------------------
