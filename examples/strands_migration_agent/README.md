@@ -236,28 +236,38 @@ aws codeartifact associate-external-connection \
 
 ### 2. Add IAM permissions to the ACR execution role
 
-```json
-{
-  "Effect": "Allow",
-  "Action": [
-    "codeartifact:GetAuthorizationToken",
-    "codeartifact:GetRepositoryEndpoint"
-  ],
-  "Resource": [
-    "arn:aws:codeartifact:REGION:ACCOUNT:domain/migration-aws-maven-mirror",
-    "arn:aws:codeartifact:REGION:ACCOUNT:repository/migration-aws-maven-mirror/maven-central-cache"
-  ]
-},
-{
-  "Effect": "Allow",
-  "Action": "sts:GetServiceBearerToken",
-  "Resource": "*",
-  "Condition": {
-    "StringEquals": {
-      "sts:AWSServiceName": "codeartifact.amazonaws.com"
-    }
-  }
-}
+Add the following policy to the IAM execution role your ACR agent runs as (replace `REGION`, `ACCOUNT`, and `YOUR_EXECUTION_ROLE`):
+
+```bash
+aws iam put-role-policy \
+  --role-name YOUR_EXECUTION_ROLE \
+  --policy-name CodeArtifactAccess \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "codeartifact:GetAuthorizationToken",
+          "codeartifact:GetRepositoryEndpoint"
+        ],
+        "Resource": [
+          "arn:aws:codeartifact:REGION:ACCOUNT:domain/migration-aws-maven-mirror",
+          "arn:aws:codeartifact:REGION:ACCOUNT:repository/migration-aws-maven-mirror/maven-central-cache"
+        ]
+      },
+      {
+        "Effect": "Allow",
+        "Action": "sts:GetServiceBearerToken",
+        "Resource": "*",
+        "Condition": {
+          "StringEquals": {
+            "sts:AWSServiceName": "codeartifact.amazonaws.com"
+          }
+        }
+      }
+    ]
+  }'
 ```
 
 ### 3. Set environment variables
