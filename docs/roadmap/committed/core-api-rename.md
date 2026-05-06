@@ -1,8 +1,8 @@
 ---
-title: "Core API rename: rollout-server / rollout-launcher / rollout-config"
+title: "Core API rename: rollout-executor / rollout-launcher / rollout-config"
 description: "ART's public surface uses generic names (app.py, client.py,"
 ---
-# Core API rename: rollout-server / rollout-launcher / rollout-config
+# Core API rename: rollout-executor / rollout-launcher / rollout-config
 
 ## Summary
 
@@ -27,7 +27,7 @@ unchanged.
 
 | Today | Renamed |
 |---|---|
-| `app.py` | `rollout_server.py` |
+| `app.py` | `rollout_executor.py` |
 | `client.py` | `rollout_launcher.py` |
 | `reward_function.py` | `reward.py` |
 
@@ -82,11 +82,14 @@ files. Coherence requires a single pass.
 
 > ART has two sides of one wire.
 >
-> The **rollout side** runs on ACR: an `AgentCoreRLApp` with a
-> `@rollout_entrypoint` handler (in `rollout_server.py`). It reads
-> per-rollout settings from `payload["rollout_config"]` (`base_url`,
-> `model_id`, `api_key`, `sampling_params`), runs the agent,
-> computes a reward, returns a dict. Results save to S3.
+> The **executor side** is the agent code packaged into an
+> `AgentCoreRLApp` with a `@rollout_entrypoint` handler (in
+> `rollout_executor.py`). It isn't a multi-request server — the ACR
+> runtime loads the app and executes it once per session to produce
+> one rollout. It reads per-rollout settings from
+> `payload["rollout_config"]` (`base_url`, `model_id`, `api_key`,
+> `sampling_params`), runs the agent, computes a reward, returns a
+> dict. Results save to S3.
 >
 > The **launcher side** runs in your trainer or evaluator: a
 > `RolloutLauncher` submits rollouts and collects results (in
@@ -101,7 +104,7 @@ files. Coherence requires a single pass.
 
 ```
 __init__.py
-rollout_server.py       # AgentCoreRLApp
+rollout_executor.py       # AgentCoreRLApp
 rollout_launcher.py     # RolloutLauncher, RolloutFuture, RolloutBatch, ...
 reward.py               # RewardFunction
 backends/
@@ -109,9 +112,10 @@ frameworks/
 ```
 
 Class-level asymmetry (`App` vs `Launcher`) is kept deliberately:
-the App subclasses an AWS-managed runtime; the Launcher is a plain
-Python object. File-level symmetry (`rollout_server.py` vs
-`rollout_launcher.py`) shows the pairing on `ls`.
+the App subclasses an AWS-managed runtime and is *executed* per
+session; the Launcher is a plain Python object that *submits* work.
+File-level pairing (`rollout_executor.py` vs `rollout_launcher.py`)
+shows the two sides on `ls`.
 
 ## Migration
 
@@ -176,7 +180,7 @@ Not integrated in-tree or out-of-tree today. When integration work starts, the a
 ## Task checklist (single PR, 0.2.0)
 
 **Core renames**
-- [ ] `git mv src/agentcore_rl_toolkit/app.py → rollout_server.py`
+- [ ] `git mv src/agentcore_rl_toolkit/app.py → rollout_executor.py`
       (keeps `AgentCoreRLApp`).
 - [ ] `git mv src/agentcore_rl_toolkit/client.py → rollout_launcher.py`
       and rename `RolloutClient` → `RolloutLauncher`,
@@ -220,7 +224,7 @@ Not integrated in-tree or out-of-tree today. When integration work starts, the a
 - [ ] New imports resolve (`from agentcore_rl_toolkit import
       RolloutLauncher`).
 - [ ] Old imports fail loudly (`ImportError`, not silent alias).
-- [ ] `payload["rollout_config"]` round-trips launcher → server.
+- [ ] `payload["rollout_config"]` round-trips launcher → executor.
 - [ ] Missing `api_key` raises a clear `KeyError`, not defaults to
       `"EMPTY"` silently.
 
