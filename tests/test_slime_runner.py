@@ -17,32 +17,24 @@ REQUIRED_KWARGS = dict(
 )
 
 
-def test_build_runtime_env_has_required_keys():
-    """PYTHONPATH (for megatron) and CUDA_DEVICE_MAX_CONNECTIONS (for Megatron TP)
-    are required — they mirror train.sh's inline python snippet and breaking them
-    breaks every downstream Ray worker."""
+def test_build_runtime_env_required_keys_and_wandb_opt_in():
+    """PYTHONPATH + CUDA_DEVICE_MAX_CONNECTIONS are always present; wandb keys
+    are opt-in, forwarded only when set in the parent env."""
     runner = SlimeRunner(**REQUIRED_KWARGS, megatron_dir="/opt/megatron")
 
     with patch.dict("os.environ", {}, clear=True):
-        env = runner._build_runtime_env()
-
-    assert env == {
+        env_no_wandb = runner._build_runtime_env()
+    assert env_no_wandb == {
         "env_vars": {
             "PYTHONPATH": "/opt/megatron",
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
         }
     }
 
-
-def test_build_runtime_env_forwards_wandb_when_set():
-    """Wandb keys are opt-in: absent from env → not in runtime_env."""
-    runner = SlimeRunner(**REQUIRED_KWARGS)
-
     with patch.dict("os.environ", {"WANDB_API_KEY": "abc", "WANDB_ENTITY": "me"}, clear=True):
-        env = runner._build_runtime_env()
-
-    assert env["env_vars"]["WANDB_API_KEY"] == "abc"
-    assert env["env_vars"]["WANDB_ENTITY"] == "me"
+        env_with_wandb = runner._build_runtime_env()
+    assert env_with_wandb["env_vars"]["WANDB_API_KEY"] == "abc"
+    assert env_with_wandb["env_vars"]["WANDB_ENTITY"] == "me"
 
 
 def test_from_yaml_round_trips(tmp_path: Path):
