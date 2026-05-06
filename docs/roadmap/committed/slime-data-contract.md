@@ -450,6 +450,27 @@ Recommend (2) for one release, then remove in the next minor.
       → `{"task_id": "x"}`.
 - [ ] Unit: `_sample_to_payload(Sample(metadata={}))` → `{}`.
 - [ ] Unit: `_sample_to_payload(Sample())` (no metadata attr) → `{}`.
+- [ ] Unit: returned dict is a shallow copy — mutating it does not
+      leak into `Sample.metadata`.
+
+**Required pre-PR smoke test**
+
+Unit tests cover the contract in isolation; they can't catch an
+integration bug that would hit users on the first run. Before
+opening the PR, run an end-to-end training smoke test against a
+real ACR deployment and paste the evidence into the PR body:
+
+- [ ] Regenerate `gsm8k_tiny.jsonl` with the new `{prompt, metadata}`
+      shape.
+- [ ] Run `bash train.sh` with `NUM_ROLLOUT=10` on Qwen2.5-3B-Instruct.
+- [ ] Confirm:
+      - at least one rollout step completes (`rollout/raw_reward` is
+        non-trivial, i.e. > 0)
+      - `train/loss`, `train/grad_norm`, `train/step` appear in logs
+      - no `Exception`, `Traceback`, or `FAILED` session status
+- [ ] Capture the rollout-0 metrics line + a few sample rewards in
+      the PR description so reviewers can see the contract worked
+      end-to-end.
 
 **Release**
 
