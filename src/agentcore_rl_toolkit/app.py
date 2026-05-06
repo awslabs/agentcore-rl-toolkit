@@ -9,6 +9,10 @@ from functools import wraps
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
+from .logging import configure_logging
+
+logger = logging.getLogger(__name__)
+
 _S3_CONFIG_FIELDS = ("exp_id", "input_id", "s3_bucket")
 
 
@@ -36,6 +40,7 @@ class RolloutConfig:
 class AgentCoreRLApp(BedrockAgentCoreApp):
     def __init__(self):
         super().__init__()
+        configure_logging()
         self.s3_client = boto3.client("s3")
 
     def save_result(self, result: dict, rollout_config: dict, result_key: str, payload: dict = None):
@@ -67,7 +72,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         try:
             config = RolloutConfig.from_dict(rollout_config)
         except ValueError as e:
-            logging.error(f"Invalid rollout configuration: {e}")
+            logger.error(f"Invalid rollout configuration: {e}")
             raise
 
         if "status_code" not in result:
@@ -93,9 +98,9 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                 Body=json.dumps(result, indent=2),
                 ContentType="application/json",
             )
-            logging.info(f"Stored complete results at {result_key}")
+            logger.info(f"Stored complete results at {result_key}")
         except Exception as e:
-            logging.error(f"Failed to store results in S3: {e}")
+            logger.error(f"Failed to store results in S3: {e}")
             raise
 
     def rollout_entrypoint(self, func):
@@ -160,7 +165,7 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                         payload=payload,
                         result_key=result_key,
                     )
-                    logging.info(f"Result saved for function: {func.__name__}")
+                    logger.info(f"Result saved for function: {func.__name__}")
 
                 return result
 
@@ -181,9 +186,9 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
                             payload=payload,
                             result_key=result_key,
                         )
-                        logging.error(f"Error result saved for function: {func.__name__}: {e}")
+                        logger.error(f"Error result saved for function: {func.__name__}: {e}")
                     except Exception:
-                        logging.error(f"Failed to save error result for function: {func.__name__}", exc_info=True)
+                        logger.error(f"Failed to save error result for function: {func.__name__}", exc_info=True)
                 raise
             finally:
                 # Complete the async task for logging and ping status

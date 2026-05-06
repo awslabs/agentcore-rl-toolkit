@@ -1,8 +1,13 @@
+import logging
+
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from dotenv import load_dotenv
 from strands import Agent
 from strands.models import BedrockModel
 from strands_tools import calculator
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = BedrockAgentCoreApp()
 
@@ -28,7 +33,7 @@ def invoke_agent(payload):
     """
     user_input = payload.get("prompt")
 
-    print("User input:", user_input)
+    logger.info("User input: %s", user_input)
 
     response = agent(user_input)
 

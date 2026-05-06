@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import tempfile
@@ -6,6 +7,8 @@ from migration_bench.common import eval_utils, hash_utils, maven_utils, utils
 from migration_bench.lang.java.eval.parse_repo import same_repo_test_files
 
 from agentcore_rl_toolkit import RewardFunction
+
+logger = logging.getLogger(__name__)
 
 
 class MigrationReward(RewardFunction):
@@ -33,10 +36,10 @@ class MigrationReward(RewardFunction):
             shutil.copytree(repo_dir, temp_repo_dir)
 
             if self.eval_build_success(repo_dir=temp_repo_dir, require_maximal_migration=require_maximal_migration):
-                print("build succeeded!")
+                logger.info("build succeeded!")
                 reward += 0.5
             else:
-                print("build failed!")
+                logger.info("build failed!")
                 return reward
 
             if self.eval_test_equivalence(
@@ -44,10 +47,10 @@ class MigrationReward(RewardFunction):
                 original_num_tests=original_num_tests,
                 original_commit_id=original_commit_id,
             ):
-                print("test equivalence check passed!")
+                logger.info("test equivalence check passed!")
                 reward += 0.5
             else:
-                print("test equivalence check failed!")
+                logger.info("test equivalence check failed!")
 
         return reward
 

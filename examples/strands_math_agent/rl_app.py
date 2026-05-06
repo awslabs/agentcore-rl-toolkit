@@ -1,9 +1,14 @@
+import logging
+
 from reward import GSM8KReward
 from strands import Agent
 from strands.models.openai import OpenAIModel
 from strands_tools import calculator
 
 from agentcore_rl_toolkit import AgentCoreRLApp
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = AgentCoreRLApp()
 
@@ -51,7 +56,7 @@ def invoke_agent(payload: dict):
     user_input = payload.get("prompt")
     answer = payload.get("answer")  # used for computing reward
 
-    print("User input:", user_input)
+    logger.info("User input: %s", user_input)
 
     response = agent(user_input)
 
