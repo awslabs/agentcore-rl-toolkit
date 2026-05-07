@@ -15,9 +15,10 @@ def configure_codeartifact_token():
     domain = os.environ.get("CODEARTIFACT_DOMAIN")
     owner = os.environ.get("CODEARTIFACT_OWNER")
     repo = os.environ.get("CODEARTIFACT_REPO")
+    region = os.environ.get("AWS_REGION", "us-west-2")
     if not domain or not owner or not repo:
         return
-    ca = boto3.client("codeartifact")
+    ca = boto3.client("codeartifact", region_name=region)
     token = ca.get_authorization_token(domain=domain, domainOwner=owner)["authorizationToken"]
     url = ca.get_repository_endpoint(domain=domain, domainOwner=owner, repository=repo, format="maven")[
         "repositoryEndpoint"
