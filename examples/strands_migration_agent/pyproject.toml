@@ -19,5 +19,5 @@ dependencies = [
 py-modules = ["rl_app", "reward", "models", "utils"]
 
 [tool.uv.sources]
-migrationbench = { git = "https://github.com/amazon-science/MigrationBench.git" }
+migrationbench = { git = "https://github.com/amazon-science/MigrationBench.git", rev = "d764faaf0b77c7f17a8e82e05aebd8a5ff664662" }
 java-migration-agent = { git = "https://github.com/amazon-science/JavaMigration.git", subdirectory = "java_migration_agent" }
