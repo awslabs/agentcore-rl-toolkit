@@ -12,7 +12,7 @@ rewiring the agent for RL.
 
 The AgentCore RL Toolkit's goal: **the agent you train is the agent
 you deploy**. Keep your Bedrock AgentCore agent, swap one decorator,
-and any training backend (slime, rllm + Tinker, or verl) can drive
+and any training backend (slime, rllm, or verl) can drive
 it.
 
 ## Why AgentCore Runtime
@@ -45,7 +45,7 @@ properties matter, all available in AgentCore Runtime without bespoke infrastruc
 AgentCore Runtime handles hosting; the toolkit wires the
 **training-data pipeline** that makes an agent trainable.
 
-<figure class="art-diagram" role="img" aria-label="Training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via rllm-model-gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
+<figure class="art-diagram" role="img" aria-label="Training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via model-gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
   <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="dg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -90,7 +90,7 @@ AgentCore Runtime handles hosting; the toolkit wires the
     {/* ── Center column — shared data plane ── */}
     {/* Gateway — top */}
     <rect class="dg-node dg-node-accent" x="340" y="100" width="220" height="60" rx="4" />
-    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">rllm-model-gateway</text>
+    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">model-gateway</text>
     <text class="dg-sublabel" x="450" y="145" text-anchor="middle">v1/chat proxy + capture</text>
 
     {/* Rollout Data — middle */}
@@ -118,7 +118,7 @@ AgentCore Runtime handles hosting; the toolkit wires the
 
     <rect class="dg-node" x="640" y="100" width="220" height="80" rx="4" />
     <text class="dg-label" x="750" y="136" text-anchor="middle">Inference Servers</text>
-    <text class="dg-sublabel" x="750" y="156" text-anchor="middle">vLLM · SGLang · Tinker</text>
+    <text class="dg-sublabel" x="750" y="156" text-anchor="middle">vLLM · SGLang</text>
 
     <rect class="dg-node" x="640" y="320" width="220" height="80" rx="4" />
     <text class="dg-label" x="750" y="356" text-anchor="middle">Training Engine</text>
@@ -158,7 +158,7 @@ The diagram has three parts, left to right:
   ends in an `Evaluate` step. Your code lives here, unchanged from
   deployment.
 - **Shared data plane** (center) —
-  [`rllm-model-gateway`](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway)
+  [`model-gateway`](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway)
   is what lets the agent on AgentCore Runtime keep using the
   **standard OpenAI chat interface** with no awareness of training.
   The agent makes plain `v1/chat` calls; the gateway transparently
@@ -175,5 +175,5 @@ The diagram has three parts, left to right:
 Start with [Prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/),
 then pick a backend:
 [Slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) ·
-[rllm + Tinker](/agentcore-rl-toolkit/guides/rllm-backend-setup/) ·
+[rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/) ·
 [verl](/agentcore-rl-toolkit/guides/verl-backend-setup/).
