@@ -1,6 +1,6 @@
 ---
 title: rllm backend setup
-description: Runbook for training via rllm + Thinking Machines Tinker (managed LoRA fine-tuning).
+description: Runbook for training via rllm (managed LoRA fine-tuning).
 ---
 
 :::caution[Preview]
@@ -12,10 +12,10 @@ Track progress in the
 
 8-section outline (from roadmap §6):
 
-1. When to choose rllm + Tinker.
-2. Prerequisites (`rllm-model-gateway`, Tinker API key).
-3. Configure Tinker access (env vars, LoRA knobs).
-4. How the data plane works (gateway between agent and Tinker).
+1. When to choose rllm.
+2. Prerequisites (`model-gateway`).
+3. Configure access (env vars, LoRA knobs).
+4. How the data plane works (gateway between agent and inference servers).
 5. Deploy the agent to ACR (cross-link to slime guide).
 6. Run training.
 7. Run evaluation.
