@@ -1,5 +1,5 @@
 ---
-title: Slime troubleshooting
+title: slime troubleshooting
 description: Known issues and fixes when training with the slime backend.
 ---
 

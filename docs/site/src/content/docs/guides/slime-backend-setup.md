@@ -13,7 +13,7 @@ class (for launching training) and the two SGLang
 
 For known issues (Megatron-LM regression on 32B, norm-epsilon
 mismatch, etc.) see
-[Slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
+[slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ mismatch, etc.) see
   [Prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/)
   guide. Save the resulting **runtime ARN** — required `SlimeRunner` arguments below for Agent rollouts.
 
-## Slime environment
+## slime environment
 
 Follow
 [slime's own installation docs](https://github.com/THUDM/slime#installation)
@@ -172,7 +172,7 @@ was validated against:
 :::caution[Megatron-LM pin]
 The image bundles Megatron-LM at `1dcf0dafa` (~500 commits ahead of
 slime's stable pin), which breaks 32B training — see
-[Slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
+[slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
 We downgrade to `3714d81d` (slime's documented stable sha) via
 `git checkout` inside `/root/Megatron-LM`. The table above reflects
 the downgraded sha, not the one baked into the image.
