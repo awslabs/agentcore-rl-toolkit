@@ -11,9 +11,6 @@ export default defineConfig({
 			title: 'ART',
 			description: 'RL training on top of Bedrock AgentCore Runtime.',
 			customCss: ['./src/styles/custom.css'],
-			components: {
-				Banner: './src/components/StagingBanner.astro',
-			},
 			head: [
 				{
 					tag: 'script',
