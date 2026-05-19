@@ -1,0 +1,585 @@
+/* Architecture diagrams drawn as inline SVG.
+   Monochrome palette: grays + one accent (Starlight's --sl-color-accent,
+   same color as the hero CTA button). All styling lives here (not in an
+   SVG-level <style>) because MDX paragraph-wraps inline <style> blocks. */
+.art-diagram {
+  margin: 1.5rem 0 2rem;
+}
+.art-diagram svg {
+  width: 100%;
+  height: auto;
+  max-width: 900px;
+  display: block;
+  border-radius: 0.5rem;
+  padding: 1rem 0.75rem 0.5rem;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 50%, transparent);
+  border: 1px solid var(--sl-color-gray-5);
+  color: var(--sl-color-gray-3);
+}
+.art-diagram figcaption {
+  color: var(--sl-color-gray-2);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  margin-top: 0.75rem;
+  max-width: 760px;
+}
+.art-diagram figcaption code {
+  font-size: inherit;
+}
+
+/* Text — sized ~1.25x larger than before to match body readability. */
+.art-diagram .dg-group-label {
+  fill: var(--sl-color-text);
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--sl-font);
+}
+.art-diagram .dg-note {
+  fill: var(--sl-color-gray-2);
+  font-size: 14px;
+  font-family: var(--sl-font);
+}
+.art-diagram .dg-label {
+  fill: var(--sl-color-text);
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--sl-font);
+}
+.art-diagram .dg-label-accent {
+  fill: var(--sl-color-accent-high, var(--sl-color-accent));
+}
+.art-diagram .dg-sublabel {
+  fill: var(--sl-color-gray-2);
+  font-size: 14px;
+  font-family: var(--sl-font);
+}
+.art-diagram .dg-edge-label {
+  fill: var(--sl-color-gray-2);
+  font-size: 13.5px;
+  font-family: var(--sl-font);
+}
+
+/* Group container — the two columns that wrap AgentCore and Backend */
+.art-diagram .dg-group {
+  fill: none;
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+/* Nodes — neutral fill, thin border. One shared style. */
+.art-diagram .dg-node {
+  fill: var(--sl-color-bg, var(--sl-color-gray-6));
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 1.25;
+}
+/* Highlighted node — single accent color, sparingly used */
+.art-diagram .dg-node-accent {
+  fill: color-mix(in srgb, var(--sl-color-accent) 14%, var(--sl-color-bg));
+  stroke: var(--sl-color-accent);
+  stroke-width: 1.25;
+}
+
+/* Rollout-card stack (subtle depth hint for "N parallel rollouts") */
+.art-diagram .dg-card {
+  fill: color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 1;
+}
+.art-diagram .dg-card-shadow {
+  fill: color-mix(in srgb, var(--sl-color-gray-5) 35%, transparent);
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+/* Horizontal rule inside the Rollout Data box, under the title */
+.art-diagram .dg-divider {
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 1;
+}
+
+/* Edges */
+.art-diagram .dg-edge {
+  fill: none;
+  stroke: var(--sl-color-gray-3);
+  stroke-width: 1.25;
+  color: var(--sl-color-gray-3);
+}
+.art-diagram .dg-edge-dashed {
+  stroke-dasharray: 3 3;
+}
+
+/* Force monospace on all code — inline and block — just in case any
+   theme rule or inherited font leaks through. */
+code,
+pre,
+kbd,
+samp,
+tt,
+.expressive-code,
+.expressive-code code,
+.expressive-code pre {
+  font-family: var(--sl-font-mono, ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace) !important;
+}
+
+/* Hero code snippet — mimics an editor pane so the splash hero has
+   visual weight on the right side. Uses Starlight's CSS vars so the
+   colors stay consistent with the site theme in both light and dark
+   modes. */
+.hero-code-label {
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  color: var(--sl-color-gray-3);
+  margin-bottom: 0.25rem;
+  margin-top: 0.75rem;
+  text-align: left;
+}
+
+.hero-code-label:first-child {
+  margin-top: 0;
+}
+
+.hero-steps {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.hero-steps-nav {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  padding-top: 4rem;
+  margin-bottom: 0.75rem;
+  background: none;
+  align-items: center;
+}
+
+.hero-step-btn {
+  font-family: var(--sl-font);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.6rem 1.25rem 0.6rem 1.5rem;
+  background: var(--sl-color-gray-6);
+  border: none;
+  border-radius: 0;
+  color: var(--sl-color-gray-3);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  white-space: nowrap;
+  text-align: center;
+  position: relative;
+  clip-path: polygon(0 0, calc(100% - 0.75rem) 0, 100% 50%, calc(100% - 0.75rem) 100%, 0 100%, 0.75rem 50%);
+}
+
+.hero-step-btn:first-of-type {
+  clip-path: polygon(0 0, calc(100% - 0.75rem) 0, 100% 50%, calc(100% - 0.75rem) 100%, 0 100%);
+}
+
+.hero-step-btn:hover {
+  color: var(--sl-color-gray-1);
+  background: var(--sl-color-gray-5);
+}
+
+.hero-step-btn.active {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-4);
+}
+
+.hero-steps-nav .hero-step-arrow {
+  display: none;
+}
+
+.hero-step-panel {
+  display: none;
+  animation: stepFadeIn 0.3s ease;
+}
+
+.hero-step-panel.active {
+  display: block;
+}
+
+.hero-step-panel .hero-code {
+  height: 32em;
+  overflow-y: auto;
+}
+
+@keyframes stepFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hero-code {
+  margin: 0;
+  padding: 1.5rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-5);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.35);
+  font-family: var(--sl-font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-2);
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  white-space: normal;
+  tab-size: 4;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.hero-code code {
+  display: block;
+  width: 100%;
+  font-family: inherit;
+  background: none;
+  color: inherit;
+  /* Line-number gutter driven by CSS counters. Each .ln increments
+     the counter; ::before renders the number in the gutter. */
+  counter-reset: hero-line;
+  padding-left: 3.5ch;
+}
+
+.hero-code .ln {
+  display: block;
+  counter-increment: hero-line;
+  /* Preserve internal indentation (leading spaces) and allow wrap. */
+  white-space: pre-wrap;
+  min-height: 1em;
+}
+
+.hero-code .ln:empty::after {
+  content: "\00a0";
+}
+
+.hero-code .ln::before {
+  content: counter(hero-line);
+  display: inline-block;
+  width: 2.5ch;
+  margin-left: -3.5ch;
+  margin-right: 1ch;
+  text-align: right;
+  color: var(--sl-color-gray-4, #6b7280);
+  user-select: none;
+}
+
+.hero-code .hk {
+  color: var(--sl-color-accent-high);
+}
+.hero-code .cls {
+  color: var(--sl-color-green-high);
+}
+.hero-code .fn {
+  color: var(--sl-color-blue-high);
+}
+.hero-code .str {
+  color: var(--sl-color-orange-high);
+}
+.hero-code .mod {
+  color: var(--sl-color-text);
+}
+.hero-code .dec {
+  color: var(--sl-color-purple-high);
+  font-style: italic;
+}
+
+/* Highlights the lines / pieces that ART adds on top of a plain
+   BedrockAgentCoreApp. Uses a subtle green tint + left-border to
+   keep it legible on the dark pane. */
+.hero-code .add {
+  background: color-mix(in srgb, var(--sl-color-green-high, #4ade80) 12%, transparent);
+  border-left: 2px solid var(--sl-color-green-high, #4ade80);
+  padding-left: 0.5ch;
+  margin-left: -0.5ch;
+  border-radius: 2px;
+}
+
+/* Override Starlight's built-in hero-html constraints (25rem cap, 7fr/4fr grid). */
+.hero > .hero-html {
+  max-width: none;
+  width: 100% !important;
+}
+
+/* Tone down Starlight's default hero typography — the stock sizes
+   read as marketing-page huge, which is too much for a docs landing. */
+.hero h1 {
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  font-weight: 700;
+  margin: 0;
+}
+
+.hero .tagline {
+  font-size: clamp(1rem, 1.6vw, 1.125rem);
+  line-height: 1.5;
+}
+
+/* Make tagline and actions sit on the same line. */
+[data-has-hero] .hero .copy {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.75rem;
+}
+
+[data-has-hero] .hero .tagline {
+  max-width: none;
+}
+
+[data-has-hero] .hero .actions {
+  display: inline-flex;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+/* Inline page h1 (non-splash pages) — also a touch smaller. */
+.sl-markdown-content h1,
+main h1:not(.hero h1) {
+  font-size: clamp(1.375rem, 2vw, 1.625rem);
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Shrink the top-bar site title. Starlight's default is ~1.25rem
+   with heavy weight which reads loud next to the slim sidebar. */
+.site-title,
+header .site-title span,
+a.site-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Sidebar section labels and link text — tighten a touch. */
+starlight-menu-button,
+.sidebar-content .group-label span,
+.sidebar-content ul a {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+/* --- Global tighter typography --- */
+/* Docs pages tend to ship a little loose by default. Bring base font
+   size and line-height down uniformly. Scoped to Starlight's content
+   and navigation surfaces so marketing-template-ish elements aren't
+   affected by side effects. */
+:root {
+  --sl-text-base: 0.9375rem;          /* was 1rem-ish */
+  --sl-line-height: 1.55;             /* was ~1.75 */
+  --sl-line-height-headings: 1.2;     /* was ~1.3 */
+}
+
+body {
+  font-size: var(--sl-text-base);
+  line-height: var(--sl-line-height);
+}
+
+/* Content headings — shrink each step slightly and reduce top margin
+   so sections feel tighter without losing hierarchy. */
+.sl-markdown-content h2 {
+  font-size: 1.25rem;
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+  line-height: var(--sl-line-height-headings);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+.sl-markdown-content h3 {
+  font-size: 1.0625rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0.375rem;
+  line-height: var(--sl-line-height-headings);
+  font-weight: 600;
+}
+.sl-markdown-content h4 {
+  font-size: 0.9375rem;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+  line-height: var(--sl-line-height-headings);
+  font-weight: 600;
+  color: var(--sl-color-gray-2);
+}
+.sl-markdown-content h5,
+.sl-markdown-content h6 {
+  font-size: 0.875rem;
+  margin-top: 0.875rem;
+  margin-bottom: 0.25rem;
+  line-height: var(--sl-line-height-headings);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sl-color-gray-3);
+}
+
+/* Paragraph + list density. */
+.sl-markdown-content p,
+.sl-markdown-content li {
+  font-size: var(--sl-text-base);
+  line-height: var(--sl-line-height);
+}
+.sl-markdown-content ul,
+.sl-markdown-content ol {
+  padding-left: 1.25rem;
+}
+.sl-markdown-content li + li {
+  margin-top: 0.25rem;
+}
+
+/* Code blocks a touch smaller to balance with body text. */
+.expressive-code,
+.sl-markdown-content pre {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.sl-markdown-content :not(pre) > code {
+  font-size: 0.8125rem;
+}
+
+/* Tighten the right-hand "On this page" table of contents too. */
+starlight-toc a,
+.right-sidebar a {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+/* Breadcrumb / page metadata. */
+.content-panel header {
+  font-size: 0.8125rem;
+}
+
+/* --- Splash landing: hero text/prose on the left, code on the right ---
+
+   Actual DOM (from Starlight splash template):
+     main
+       .content-panel
+         .sl-container
+           .hero
+             .stack   (title + copy/tagline + actions)
+             .hero-html  (our code block)
+           .sl-markdown-content  (paragraph + h2 + list)
+
+   Grid the .sl-container so .hero children and .sl-markdown-content
+   all become grid items via display: contents on .hero. */
+[data-has-hero] main > .content-panel {
+  padding: 4rem 12% 5rem;
+}
+
+@media (max-width: 1200px) {
+  [data-has-hero] main > .content-panel {
+    padding: 3rem 6% 4rem;
+  }
+}
+
+@media (max-width: 900px) {
+  [data-has-hero] main > .content-panel {
+    padding: 2rem 2rem 3rem;
+  }
+}
+
+[data-has-hero] main > .content-panel > .sl-container {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  column-gap: 2rem;
+  max-width: none;
+}
+
+[data-has-hero] .hero {
+  display: contents;
+}
+
+[data-has-hero] .hero > .stack {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  padding-top: 0.5rem;
+}
+
+[data-has-hero] .hero .actions {
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+[data-has-hero] .hero > .hero-html {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+[data-has-hero] .hero > .hero-html .hero-code-label {
+  margin-top: 0;
+}
+
+[data-has-hero] .hero > .hero-html .hero-code {
+  min-height: auto;
+  width: 100%;
+}
+
+[data-has-hero] main > .content-panel > .sl-container > .sl-markdown-content {
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 0;
+  max-width: none;
+  min-width: 0;
+}
+
+[data-has-hero] .sl-markdown-content > p:first-of-type {
+  max-width: 52ch;
+  margin-bottom: 1rem;
+}
+
+[data-has-hero] .sl-markdown-content h2 {
+  font-size: 1.125rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+[data-has-hero] .sl-markdown-content ul {
+  margin: 0;
+}
+
+[data-has-hero] .sl-markdown-content li + li {
+  margin-top: 0.125rem;
+}
+
+/* Hide pagination and footer on the splash landing page. */
+[data-has-hero] .pagination-links,
+[data-has-hero] footer {
+  display: none;
+}
+
+/* Collapse to single column on narrow screens. */
+@media (max-width: 900px) {
+  [data-has-hero] main > .content-panel > .sl-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    row-gap: 1.5rem;
+  }
+  [data-has-hero] .hero > .stack {
+    grid-row: 1;
+  }
+  [data-has-hero] .hero > .hero-html {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  [data-has-hero] main > .content-panel > .sl-container > .sl-markdown-content {
+    grid-row: 3;
+  }
+}

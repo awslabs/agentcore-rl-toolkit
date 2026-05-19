@@ -1,0 +1,29 @@
+---
+title: Examples
+description: End-to-end example projects using agentcore-rl-toolkit.
+---
+
+Each example is a standalone `uv` project under
+[`examples/`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/examples)
+with its own `pyproject.toml`, `rl_app.py`, `reward.py`, and
+`evaluate.py`.
+
+- **[Strands Math Agent](/agentcore-rl-toolkit/examples/strands-math-agent/)** — GSM8K
+  grade-school math. Start here; covers local vLLM, ACR deploy, and
+  evaluation.
+- **[Strands AppWorld Agent](/agentcore-rl-toolkit/examples/strands-appworld-agent/)** —
+  multi-tool AppWorld benchmark with few-shot prompting and Docker
+  build.
+- **[Strands Migration Agent](/agentcore-rl-toolkit/examples/strands-migration-agent/)** —
+  code migration reward + async evaluation pipeline.
+- **[Strands OfficeBench Agent](/agentcore-rl-toolkit/examples/strands-officebench-agent/)** —
+  OfficeBench tool-use harness with local test and benchmark scripts.
+
+## Choosing an example
+
+- **New to the toolkit?** Start with the math agent — the smallest
+  end-to-end example.
+- **Building a benchmark harness?** Read the OfficeBench or AppWorld
+  example.
+- **Designing a custom reward?** The migration agent is the clearest
+  template.
