@@ -1,5 +1,5 @@
 ---
-title: AgentCore RL Toolkit
+title: AgentCore RL Toolkit - ART
 description: RL training on top of Bedrock AgentCore Runtime.
 template: splash
 hero:
@@ -8,13 +8,23 @@ hero:
     - text: Overview
       link: /agentcore-rl-toolkit/guides/overview/
       icon: right-arrow
+      variant: minimal
     - text: View on GitHub
       link: https://github.com/awslabs/agentcore-rl-toolkit
       icon: external
       variant: minimal
   image:
     html: |
-      <pre class="hero-code"><code><span class="ln"><span style="color:#c586c0">from</span> agentcore_rl_toolkit <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">AgentCoreRLApp</span></span>
+      <div class="hero-steps">
+        <div class="hero-steps-nav">
+          <button class="hero-step-btn active" data-step="1">1. Adapt agent</button>
+          <span class="hero-step-arrow">▶</span>
+          <button class="hero-step-btn" data-step="2">2. Deploy to AgentCore</button>
+          <span class="hero-step-arrow">▶</span>
+          <button class="hero-step-btn" data-step="3">3. Kick off RL with any backend</button>
+        </div>
+        <div class="hero-step-panel active" data-panel="1">
+          <pre class="hero-code"><code><span class="ln"><span style="color:#c586c0">from</span> agentcore_rl_toolkit <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">AgentCoreRLApp</span></span>
       <span class="ln"><span style="color:#c586c0">from</span> strands <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">Agent</span></span>
       <span class="ln"><span style="color:#c586c0">from</span> strands.models.openai <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">OpenAIModel</span></span>
       <span class="ln"></span>
@@ -23,23 +33,84 @@ hero:
       <span class="ln"><span style="color:#c586c0;font-style:italic">@app.rollout_entrypoint</span></span>
       <span class="ln"><span style="color:#c586c0">def</span> <span style="color:#dcdcaa">invoke_agent</span>(payload: <span style="color:#4ec9b0">dict</span>):</span>
       <span class="ln">    cfg = payload[<span style="color:#ce9178">"_rollout"</span>]</span>
-      <span class="ln">    model = <span style="color:#4ec9b0">OpenAIModel</span>(base_url=cfg[<span style="color:#ce9178">"base_url"</span>], model_id=cfg[<span style="color:#ce9178">"model_id"</span>])</span>
+      <span class="ln">    model = <span style="color:#4ec9b0">OpenAIModel</span>(</span>
+      <span class="ln">        base_url=cfg[<span style="color:#ce9178">"base_url"</span>],</span>
+      <span class="ln">        model_id=cfg[<span style="color:#ce9178">"model_id"</span>],</span>
+      <span class="ln">    )</span>
       <span class="ln">    agent = <span style="color:#4ec9b0">Agent</span>(model=model, tools=[...])</span>
       <span class="ln">    response = agent(payload[<span style="color:#ce9178">"prompt"</span>])</span>
       <span class="ln">    <span style="color:#c586c0">return</span> {<span style="color:#ce9178">"rewards"</span>: reward_fn(response)}</span></code></pre>
+        </div>
+        <div class="hero-step-panel" data-panel="2">
+          <pre class="hero-code"><code><span class="ln"><span style="color:#6a9955"># Install the AgentCore CLI</span></span>
+      <span class="ln">pip install bedrock-agentcore-starter-toolkit</span>
+      <span class="ln"></span>
+      <span class="ln"><span style="color:#6a9955"># Configure and deploy</span></span>
+      <span class="ln">agentcore configure \</span>
+      <span class="ln">    --entrypoint rl_app.py \</span>
+      <span class="ln">    --name my_rl_agent \</span>
+      <span class="ln">    --deployment-type container \</span>
+      <span class="ln">    --non-interactive</span>
+      <span class="ln"></span>
+      <span class="ln">agentcore deploy --agent my_rl_agent</span>
+      <span class="ln"></span>
+      <span class="ln"><span style="color:#6a9955"># → arn:aws:bedrock-agentcore:us-west-2:...</span></span></code></pre>
+        </div>
+        <div class="hero-step-panel" data-panel="3">
+          <pre class="hero-code"><code><span class="ln"><span style="color:#c586c0">from</span> agentcore_rl_toolkit.backends.slime <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">SlimeRunner</span></span>
+      <span class="ln"></span>
+      <span class="ln"><span style="color:#4ec9b0">SlimeRunner</span>(</span>
+      <span class="ln">    exp_id=<span style="color:#ce9178">"gsm8k-3b"</span>,</span>
+      <span class="ln">    agent_runtime_arn=<span style="color:#ce9178">"arn:aws:bedrock-agentcore:..."</span>,</span>
+      <span class="ln">    s3_bucket=<span style="color:#ce9178">"my-bucket"</span>,</span>
+      <span class="ln">    model_dir=<span style="color:#ce9178">"/path/to/Qwen2.5-3B-Instruct"</span>,</span>
+      <span class="ln">    data_path=<span style="color:#ce9178">"/path/to/gsm8k.jsonl"</span>,</span>
+      <span class="ln">    model_type=<span style="color:#ce9178">"qwen2.5-3B"</span>,</span>
+      <span class="ln">).train()</span></code></pre>
+        </div>
+      </div>
+      <script>
+      (function() {
+        const nav = document.querySelector('.hero-steps-nav');
+        if (!nav) return;
+        var current = 1;
+        var timer;
+        function show(step) {
+          current = step;
+          document.querySelectorAll('.hero-step-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.hero-step-panel').forEach(p => p.classList.remove('active'));
+          document.querySelector('[data-step="' + step + '"]').classList.add('active');
+          document.querySelector('[data-panel="' + step + '"]').classList.add('active');
+        }
+        function startRotation() {
+          timer = setInterval(function() {
+            current = current % 3 + 1;
+            show(current);
+          }, 5000);
+        }
+        nav.addEventListener('click', function(e) {
+          var btn = e.target.closest('.hero-step-btn');
+          if (!btn) return;
+          clearInterval(timer);
+          show(parseInt(btn.dataset.step));
+          startRotation();
+        });
+        startRotation();
+      })();
+      </script>
 ---
 
-**Reuse production code** — [one decorator swap](/agentcore-rl-toolkit/guides/agent-adaptation/); no custom model wrappers.
+**Reuse production code** — [one decorator & model endpoint swap](/agentcore-rl-toolkit/guides/agent-adaptation/); no custom Agent code just for RL.
 
-**Isolated, auto-scaling rollouts** — every rollout runs in its own ACR microVM; thousands in parallel without contending for your machine.
+**Isolated, auto-scaling rollouts** — every rollout runs in its own [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) microVM with its own dependencies; thousands in parallel without contending for your machine.
 
-**Decoupled environments** — agent container ships its own dependencies, fully separate from the training library.
+**Framework-agnostic training** — works with verl, rllm, or slime; `model-gateway` captures token IDs, logprobs, and expert masks transparently while the agent keeps its original chat interface.
 
-**Training-ready** — **token IDs, logits, and expert masks** captured via `model-gateway`; results via S3.
+**Any agent framework** — [Strands](https://strandsagents.com/), [LangGraph](https://langchain-ai.github.io/langgraph/), or custom. The agent's runtime is independent of the training library.
 
 New here? Start with the [math agent example](/agentcore-rl-toolkit/examples/strands-math-agent/)
 or read the [overview](/agentcore-rl-toolkit/guides/overview/). Already have an agent?
 Jump straight to [prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/) and
-pick a training backend: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) ·
+Kick off RL with any training backend: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) ·
 [rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/) ·
 [verl](/agentcore-rl-toolkit/guides/verl-backend-setup/).

@@ -128,6 +128,95 @@ tt,
    visual weight on the right side. Uses Starlight's CSS vars so the
    colors stay consistent with the site theme in both light and dark
    modes. */
+.hero-code-label {
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  color: var(--sl-color-gray-3);
+  margin-bottom: 0.25rem;
+  margin-top: 0.75rem;
+  text-align: left;
+}
+
+.hero-code-label:first-child {
+  margin-top: 0;
+}
+
+.hero-steps {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.hero-steps-nav {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  padding-top: 4rem;
+  margin-bottom: 0.75rem;
+  background: none;
+  align-items: center;
+}
+
+.hero-step-btn {
+  font-family: var(--sl-font);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.6rem 1.25rem 0.6rem 1.5rem;
+  background: var(--sl-color-gray-6);
+  border: none;
+  border-radius: 0;
+  color: var(--sl-color-gray-3);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  white-space: nowrap;
+  text-align: center;
+  position: relative;
+  clip-path: polygon(0 0, calc(100% - 0.75rem) 0, 100% 50%, calc(100% - 0.75rem) 100%, 0 100%, 0.75rem 50%);
+}
+
+.hero-step-btn:first-of-type {
+  clip-path: polygon(0 0, calc(100% - 0.75rem) 0, 100% 50%, calc(100% - 0.75rem) 100%, 0 100%);
+}
+
+.hero-step-btn:hover {
+  color: var(--sl-color-gray-1);
+  background: var(--sl-color-gray-5);
+}
+
+.hero-step-btn.active {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-4);
+}
+
+.hero-steps-nav .hero-step-arrow {
+  display: none;
+}
+
+.hero-step-panel {
+  display: none;
+  animation: stepFadeIn 0.3s ease;
+}
+
+.hero-step-panel.active {
+  display: block;
+}
+
+.hero-step-panel .hero-code {
+  height: 32em;
+  overflow-y: auto;
+}
+
+@keyframes stepFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .hero-code {
   margin: 0;
   padding: 1.5rem 1rem;
@@ -140,15 +229,12 @@ tt,
   line-height: 1.65;
   color: var(--sl-color-gray-2);
   text-align: left;
-  height: 100%;
   display: flex;
   align-items: flex-start;
-  /* Lines are now block-level .ln spans; .hero-code itself renders
-     normal HTML flow (no pre-wrap) so the literal newlines between
-     spans collapse to whitespace. */
   white-space: normal;
   tab-size: 4;
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .hero-code code {
@@ -217,10 +303,10 @@ tt,
   border-radius: 2px;
 }
 
-/* Keep the hero image cell from collapsing on narrow screens and
-   from stretching absurdly wide on ultra-wide. */
+/* Override Starlight's built-in hero-html constraints (25rem cap, 7fr/4fr grid). */
 .hero > .hero-html {
-  max-width: 560px;
+  max-width: none;
+  width: 100% !important;
 }
 
 /* Tone down Starlight's default hero typography — the stock sizes
@@ -238,13 +324,22 @@ tt,
   line-height: 1.5;
 }
 
-/* Hero action buttons — Starlight's default is chunky. Slim them
-   down to match the tighter typography we've set elsewhere. */
-.hero .actions a,
-.hero .sl-link-button {
-  font-size: 0.875rem;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
+/* Make tagline and actions sit on the same line. */
+[data-has-hero] .hero .copy {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.75rem;
+}
+
+[data-has-hero] .hero .tagline {
+  max-width: none;
+}
+
+[data-has-hero] .hero .actions {
+  display: inline-flex;
+  gap: 0.75rem;
+  margin: 0;
 }
 
 /* Inline page h1 (non-splash pages) — also a touch smaller. */
@@ -377,28 +472,26 @@ starlight-toc a,
    Grid the .sl-container so .hero children and .sl-markdown-content
    all become grid items via display: contents on .hero. */
 [data-has-hero] main > .content-panel {
-  padding: 4rem 15% 5rem;
+  padding: 4rem 12% 5rem;
 }
 
 @media (max-width: 1200px) {
   [data-has-hero] main > .content-panel {
-    padding: 3rem 8% 4rem;
+    padding: 3rem 6% 4rem;
   }
 }
 
 @media (max-width: 900px) {
   [data-has-hero] main > .content-panel {
-    padding: 2rem 1.5rem 3rem;
+    padding: 2rem 2rem 3rem;
   }
 }
 
 [data-has-hero] main > .content-panel > .sl-container {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  grid-template-rows: auto 1fr;
-  align-items: stretch;
-  column-gap: 0.75rem;
-  row-gap: 3rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  column-gap: 2rem;
   max-width: none;
 }
 
@@ -425,14 +518,17 @@ starlight-toc a,
   grid-column: 2;
   grid-row: 1 / span 2;
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  gap: 0.25rem;
   min-width: 0;
 }
 
+[data-has-hero] .hero > .hero-html .hero-code-label {
+  margin-top: 0;
+}
+
 [data-has-hero] .hero > .hero-html .hero-code {
-  flex: 1;
   min-height: auto;
-  height: 100%;
   width: 100%;
 }
 
@@ -461,6 +557,12 @@ starlight-toc a,
 
 [data-has-hero] .sl-markdown-content li + li {
   margin-top: 0.125rem;
+}
+
+/* Hide pagination and footer on the splash landing page. */
+[data-has-hero] .pagination-links,
+[data-has-hero] footer {
+  display: none;
 }
 
 /* Collapse to single column on narrow screens. */

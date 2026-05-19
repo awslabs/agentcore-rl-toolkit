@@ -16,17 +16,18 @@ export default defineConfig({
 			},
 			head: [
 				{
-					// Force dark theme as the default. Runs before
-					// Starlight's theme-provider, so users who haven't
-					// explicitly chosen a theme land in dark mode.
-					// Still respects a user's saved preference.
 					tag: 'script',
+					attrs: { is: 'inline' },
 					content: `
 						try {
 							if (!localStorage.getItem('starlight-theme')) {
-								document.documentElement.dataset.theme = 'dark';
+								localStorage.setItem('starlight-theme', 'dark');
 							}
-						} catch {}
+							document.documentElement.dataset.theme =
+								localStorage.getItem('starlight-theme') || 'dark';
+						} catch {
+							document.documentElement.dataset.theme = 'dark';
+						}
 					`,
 				},
 			],

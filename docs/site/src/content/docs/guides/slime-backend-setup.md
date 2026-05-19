@@ -3,7 +3,7 @@ title: SLIME training backend setup
 description: Train an AgentCore Runtime-deployed agent with the SLIME training backend.
 ---
 
-How to train an AgentCore Runtime-deployed agent with the
+This doc describes how to train an AgentCore Runtime-deployed agent with the
 [slime](https://github.com/THUDM/slime) training backend. The public
 user surface is exactly two things: the
 [`SlimeRunner`](/agentcore-rl-toolkit/api/backends/slime/runner/)
@@ -26,7 +26,10 @@ mismatch, etc.) see
   read/write an S3 bucket.
 - An AgentCore Runtime deployment of your agent — follow the
   [Prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/)
-  guide. Save the resulting **runtime ARN** — required `SlimeRunner` arguments below for Agent rollouts.
+  guide. Save the resulting **runtime ARN** — required as the
+  `agent_runtime_arn` argument on `SlimeRunner` below for Agent rollouts.
+- An S3 bucket for rollout result delivery — required as the
+  `s3_bucket` argument on `SlimeRunner` below.
 
 ## slime environment
 
@@ -69,52 +72,22 @@ python -m agentcore_rl_toolkit.backends.slime.patches.verify_sglang_token_ids \
 ## Prepare data
 
 The training dataset is a JSONL file where each line is one rollout
-request. Every line has the same shape:
+request. Every line has the shape:
 
 ```json
-{"prompt": "...dummy placeholder", "metadata": { /* whatever your agent expects */ }}
+{"prompt": "...", "metadata": { /* whatever your agent expects */ }}
 ```
 
-- **`prompt`** — a top-level string used by slime for **length filtering** only.
-- **`metadata`** — an object copied **verbatim** into the body of
-  the AgentCore Runtime invocation. Every field you put here lands
-  directly in the `payload` dict your `@rollout_entrypoint`
-  function receives — the slime backend does no filtering,
-  renaming, or schema validation on it. Put every per-rollout
-  config the agent needs in here: the user prompt, ground-truth
-  answers, task IDs, repo URIs, tool-specific settings — anything.
-  Each example can carry different keys.
+- **`prompt`** — top-level string, used by slime for **length filtering** only.
+- **`metadata`** — copied **verbatim** as the `payload` dict your
+  `@rollout_entrypoint` function receives. Put every per-rollout
+  config the agent needs here (user prompt, ground-truth answer,
+  task IDs, repo URIs, etc.).
 
-Because `metadata` is forwarded as-is, each agent declares its own
-payload shape without any slime-side changes. A few illustrative
-shapes from the examples in this repo:
+Example (GSM8K):
 
 ```json
-// math — question + ground-truth answer
-{"prompt": "How many ...?",
- "metadata": {"prompt": "How many ...?", "answer": "42"}}
-
-// migration — repo pointers + per-run switches
-{"prompt": "Migrate this Java 8 repo to Java 17.",
- "metadata": {"repo_uri": "s3://...", "metadata_uri": "s3://...",
-              "apply_static_update": true}}
-```
-
-A concrete script (building a 64-row GSM8K JSONL) might look like:
-
-```python
-from datasets import load_dataset
-import json
-
-ds = load_dataset("openai/gsm8k", "main", split="train")
-with open("/path/to/gsm8k_tiny.jsonl", "w") as f:
-    for i, row in enumerate(ds):
-        question = row["question"]
-        answer = row["answer"].split("####")[-1].strip()
-        f.write(json.dumps({
-            "prompt": question,
-            "metadata": {"prompt": question, "answer": answer},
-        }) + "\n")
+{"prompt": "How many ...?", "metadata": {"prompt": "How many ...?", "answer": "42"}}
 ```
 
 ## Launch training with `SlimeRunner`
@@ -153,27 +126,3 @@ shape, training hyperparameters, per-rollout ACR limits,
 See the
 [API reference](/agentcore-rl-toolkit/api/backends/slime/runner/) or
 `help(SlimeRunner)` for the full list.
-
-## Tested versions
-
-For reproducibility, here's the exact environment this integration
-was validated against:
-
-| Component | Version / SHA |
-|---|---|
-| Instance type | 8 × NVIDIA H100 80GB HBM3 |
-| CUDA | `12.9` |
-| PyTorch | `2.9.1+cu129` |
-| Docker image | `slimerl/slime@sha256:0100c933f1f63e7c4acdb9ec575e769839d59de4a648551e09e3fe0e7885631b` (built 2026-04-28) |
-| slime | commit `f3e7bd7f3091d3be05c20977eefb31a785d6221d` (2026-04-28) |
-| SGLang | `v0.5.9` |
-| Megatron-LM | commit `3714d81d418c9f1bca4594fc35f9e8289f652862` ⚠ see note |
-
-:::caution[Megatron-LM pin]
-The image bundles Megatron-LM at `1dcf0dafa` (~500 commits ahead of
-slime's stable pin), which breaks 32B training — see
-[slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
-We downgrade to `3714d81d` (slime's documented stable sha) via
-`git checkout` inside `/root/Megatron-LM`. The table above reflects
-the downgraded sha, not the one baked into the image.
-:::

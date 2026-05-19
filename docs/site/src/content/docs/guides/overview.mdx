@@ -11,8 +11,8 @@ trainer needs (token IDs, logprobs, rewards), and doing it without
 rewiring the agent for RL.
 
 The AgentCore RL Toolkit's goal: **the agent you train is the agent
-you deploy**. Keep your Bedrock AgentCore agent, swap one decorator,
-and any training backend (slime, rllm, or verl) can drive
+you deploy**. Keep your [Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) agent, swap [one decorator](/agentcore-rl-toolkit/guides/agent-adaptation/),
+and any training backend ([slime](/agentcore-rl-toolkit/guides/slime-backend-setup/), [rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/), or [verl](/agentcore-rl-toolkit/guides/verl-backend-setup/)) can drive
 it.
 
 ## Why AgentCore Runtime
@@ -35,8 +35,8 @@ properties matter, all available in AgentCore Runtime without bespoke infrastruc
 - **Extended execution time** — real-time interactions and
   long-running workloads up to **8 hours** — wide enough for
   multi-turn tool-using rollouts.
-- **Framework agnostic** — any agent framework (LangGraph, Strands,
-  CrewAI, or custom) and any foundation model. The agent's runtime
+- **Framework agnostic** — any agent framework ([LangGraph](https://langchain-ai.github.io/langgraph/), [Strands](https://strandsagents.com/),
+  or custom) and any foundation model. The agent's runtime
   environment is independent of the training library's, so the two
   evolve separately.
 
