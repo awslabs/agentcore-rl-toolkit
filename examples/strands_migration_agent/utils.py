@@ -79,15 +79,21 @@ def setup_repo_environment(repo_path: str, apply_static_update: bool = False):
     # fetching Node.js) that `dependency:go-offline` would miss.
     # The build will likely fail (repo is still Java 8), but that's fine —
     # the goal is to cache downloads so the agent's later `mvn clean verify` is quieter.
-    result = subprocess.run(
-        ["mvn", "clean", "verify"],
-        cwd=repo_path,
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        logger.info("Pre-warm build succeeded")
-    else:
-        logger.info("Pre-warm build failed (expected — repo not yet migrated)")
+    # Bound the wall-clock at 300s to match `migration_bench.common.maven_utils.MVN_TIMEOUT_SECONDS`
+    # — some repos hang indefinitely on integration tests or embedded servers during pre-warm.
+    try:
+        result = subprocess.run(
+            ["mvn", "clean", "verify"],
+            cwd=repo_path,
+            capture_output=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            logger.info("Pre-warm build succeeded")
+        else:
+            logger.info("Pre-warm build failed (expected — repo not yet migrated)")
+    except subprocess.TimeoutExpired:
+        logger.warning("Pre-warm build timed out after 300s — continuing without warmed cache")
 
     # ensure git works
     subprocess.run(
