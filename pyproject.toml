@@ -42,9 +42,24 @@ slime = [
     # Required by agentcore_rl_toolkit.backends.slime.{gateway,rollout,traces}.
     "rllm-model-gateway>=0.1.0",
 ]
+rllm = [
+    # rllm training framework. Not on PyPI — installed from GitHub.
+    # rllm pulls in rllm-model-gateway transitively for trajectory capture.
+    # Users still need to install a training backend (verl or Tinker)
+    # separately per rllm's instructions.
+    #
+    # NOTE: do not depend on rllm's own [agentcore] extra here — it pulls
+    # in agentcore-rl-toolkit, which would create a circular dependency.
+    "rllm @ git+https://github.com/rllm-org/rllm.git",
+]
 
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
+
+[tool.hatch.metadata]
+# Required so the [rllm] optional extra can pin rllm via a git URL
+# (PEP 508 direct reference). Hatchling rejects these by default.
+allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
 include = ["src/"]
