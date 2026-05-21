@@ -39,8 +39,8 @@ Supported types: str, int, float, bool, None, list, dict.
 Non-serializable values (custom objects, bytes, datetime, numpy arrays, etc.)
 will trigger the error path and an error file will be saved to S3.
 
-Reserved keys: ``save_result`` injects SDK metadata into the saved JSON.
-See ``save_result`` docstring for the full list of reserved keys.
+Reserved keys: `save_result` injects SDK metadata into the saved JSON.
+See `save_result` docstring for the full list of reserved keys.
 
 **Parameters**
 
@@ -59,12 +59,13 @@ Any JSON-serializable dict is accepted — there are no required keys.
 
 Reserved keys — the SDK injects the following keys into the saved JSON.
 Avoid using these in your return dict to prevent unexpected overwrites:
-    - ``status_code``: Set to 200 if not already present in the user dict.
-    - ``stop_reason``: Set to ``"end_turn"`` if not already present.
-    - ``input_id``: Always overwritten with the value from rollout config.
-    - ``s3_bucket``: Always overwritten with the value from rollout config.
-    - ``result_key``: Always overwritten with the computed S3 key.
-    - ``payload``: Always overwritten with the original request payload.
+
+- `status_code`: Set to 200 if not already present in the user dict.
+- `stop_reason`: Set to `"end_turn"` if not already present.
+- `input_id`: Always overwritten with the value from rollout config.
+- `s3_bucket`: Always overwritten with the value from rollout config.
+- `result_key`: Always overwritten with the computed S3 key.
+- `payload`: Always overwritten with the original request payload.
 
 **Parameters**
 
