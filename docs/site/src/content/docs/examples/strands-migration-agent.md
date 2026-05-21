@@ -1,5 +1,5 @@
 ---
-title: Strands Migration Agent
+title: Strands MigrationBench Agent
 description: An RL-trainable code-migration agent that upgrades Java 8 projects to Java 17 using shell + editor tools.
 ---
 

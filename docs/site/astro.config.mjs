@@ -60,7 +60,7 @@ export default defineConfig({
 							items: [
 								{ label: 'Math', slug: 'examples/strands-math-agent' },
 								{ label: 'AppWorld', slug: 'examples/strands-appworld-agent' },
-								{ label: 'Migration', slug: 'examples/strands-migration-agent' },
+								{ label: 'MigrationBench', slug: 'examples/strands-migration-agent' },
 								{ label: 'OfficeBench', slug: 'examples/strands-officebench-agent' },
 							],
 						},
