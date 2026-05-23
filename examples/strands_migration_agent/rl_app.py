@@ -104,7 +104,13 @@ def invoke_agent(payload: dict):
 
     response = agent(user_input)
 
-    logger.info(f'Model response: {response.message["content"][0]["text"]}')
+    # Strands ends the loop on stop_reason=end_turn even when message.content is empty
+    # (model emits <|im_end|> as its only output token — rare but valid). Pick the first
+    # text block if any, otherwise fall back to a placeholder so logging doesn't crash.
+    content_blocks = response.message.get("content", [])
+    texts = [c["text"] for c in content_blocks if "text" in c]
+    response_text = texts[0] if texts else "(empty assistant turn)"
+    logger.info(f"Model response: {response_text}")
 
     reward = reward_fn(
         repo_dir=repo_path,
