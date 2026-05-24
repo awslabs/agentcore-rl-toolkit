@@ -25,3 +25,8 @@ config.toml
 .claude/
 
 .bedrock_agentcore.yaml
+
+# Roadmap drafts and ad-hoc doc scratchpads — only docs/roadmap/committed/ is tracked
+docs/roadmap/draft/
+docs/pr/
+docs/superpowers/
