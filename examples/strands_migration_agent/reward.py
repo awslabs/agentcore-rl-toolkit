@@ -30,6 +30,13 @@ class MigrationReward(RewardFunction):
         """
 
         reward = 0
+        # The agent occasionally `rm -rf`'s its own workspace (giving up after a failed
+        # build, then hallucinating a successful migration in its summary message).
+        # Score that as a normal failed migration instead of letting copytree raise.
+        if not os.path.isdir(repo_dir):
+            logger.warning("repo_dir missing — agent likely deleted it: %s", repo_dir)
+            return reward
+
         with tempfile.TemporaryDirectory() as temp_dir:
             # copy repo_dir to a temp dir for evaluation. Skip node_modules
             # (frontend-maven-plugin's npm tree contains symlinks like
