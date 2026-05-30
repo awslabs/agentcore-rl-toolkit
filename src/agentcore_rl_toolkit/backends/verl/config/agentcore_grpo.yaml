@@ -1,0 +1,58 @@
+# AgentCore GRPO Training Configuration
+#
+# Inherits the full official verl ppo_trainer config and
+# layers AgentCore-specific overrides on top:
+#   - rollout config target swapped to AgentCoreRolloutConfig (adds the
+#     `agentcore` field that verl's stock RolloutConfig doesn't know about)
+#   - dataset class swapped to AgentCoreDataset (returns raw rows)
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+# Nested-interpolation lookup table: `${_agentcore_actor_targets.${model_engine}}`
+# resolves to the right AgentCore actor subclass based on the active model_engine.
+_agentcore_actor_targets:
+  megatron: agentcore_rl_toolkit.backends.verl.config.AgentCoreMcoreActorConfig
+  dp: agentcore_rl_toolkit.backends.verl.config.AgentCoreFSDPActorConfig
+
+actor_rollout_ref:
+  actor:
+    # Pick the AgentCore subclass that matches the active model_engine, so we
+    # can carry `ppo_mini_steps` without TypeError from the stock ActorConfig.
+    _target_: ${_agentcore_actor_targets.${model_engine}}
+
+    # AgentCore-specific override: when set, directly determines the number of
+    # ppo mini steps per global training step. Useful in agentcore rollout mode
+    # where one trajectory may produce multiple sequences.
+    ppo_mini_steps: 1
+
+  rollout:
+    # Override the default RolloutConfig target with our subclass that knows
+    # about the `agentcore` field.
+    _target_: agentcore_rl_toolkit.backends.verl.config.AgentCoreRolloutConfig
+
+    # AgentCore-specific config
+    agentcore:
+      _target_: agentcore_rl_toolkit.backends.verl.config.AgentCoreConfig
+      agent_runtime_arn: ""
+      s3_bucket: ""
+      reqs_per_sec: 25
+      max_pool_connections: 10
+      max_rollout_time: 1800
+      gateway_port: 9090
+      gateway_store: memory
+
+data:
+  custom_cls:
+    path: pkg://agentcore_rl_toolkit.backends.verl.dataset
+    name: AgentCoreDataset
+
+trainer:
+  project_name: agentcore
+  experiment_name: grpo
+  logger: ["console", "wandb"]
