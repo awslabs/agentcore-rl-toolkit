@@ -21,7 +21,11 @@ src/agentcore_rl_toolkit/backends/slime/examples/**/config.yaml
 # Config files
 config.toml
 
-# Claude Code configuration
-.claude/
+# Claude Code configuration: ignore everything by default,
+# allowlist only skills meant to ship with the repo.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/check-cloudwatch-session-logs/
 
 .bedrock_agentcore.yaml
