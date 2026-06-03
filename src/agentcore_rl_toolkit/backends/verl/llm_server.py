@@ -1,9 +1,8 @@
 """AgentCore LLM server manager.
 
 Subclasses verl's LLMServerManager to:
-1. Use AgentCoreVLLMReplica for ghost-request protection.
-2. Launch and manage the rllm-model-gateway subprocess.
-3. Register vLLM server addresses with the gateway.
+1. Launch and manage the rllm-model-gateway subprocess.
+2. Register vLLM server addresses with the gateway.
 """
 
 import logging
@@ -17,13 +16,14 @@ from rllm_model_gateway import GatewayClient
 from verl.single_controller.ray.base import RayResourcePool, RayWorkerGroup
 from verl.workers.rollout.llm_server import LLMServerManager
 
-from agentcore_rl_toolkit.backends.verl.vllm_replica import AgentCoreVLLMReplica
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _HEALTH_POLL_INTERVAL = 0.5
-_HEALTH_POLL_TIMEOUT = 30.0
+# Cumulative token mode loads the served checkpoint's tokenizer and builds the
+# renderer before the HTTP server accepts requests, which can take tens of
+# seconds on a cold HF cache, so keep this generous.
+_HEALTH_POLL_TIMEOUT = 100.0
 
 
 def _get_routable_ip() -> str:
@@ -53,8 +53,7 @@ def _get_routable_ip() -> str:
 class AgentCoreLLMServerManager(LLMServerManager):
     """LLM server manager with rllm-model-gateway for AgentCore rollout.
 
-    Overrides the replica class to use AgentCoreVLLMReplica and adds gateway
-    lifecycle management (start, register workers, stop).
+    Adds gateway lifecycle management (start, register workers, stop).
     """
 
     def __init__(
@@ -63,8 +62,6 @@ class AgentCoreLLMServerManager(LLMServerManager):
         worker_group: RayWorkerGroup = None,
         rollout_resource_pool: RayResourcePool = None,
     ):
-        # Set replica class before super().__init__ which reads it
-        self.rollout_replica_class = AgentCoreVLLMReplica
         super().__init__(config=config, worker_group=worker_group, rollout_resource_pool=rollout_resource_pool)
 
         # Gateway state
@@ -76,6 +73,9 @@ class AgentCoreLLMServerManager(LLMServerManager):
         self._gateway_port = getattr(agentcore_config, "gateway_port", 9090)
         self._gateway_host = _get_routable_ip()
         self._gateway_store = getattr(agentcore_config, "gateway_store", "memory")
+        self._gateway_cumulative_token_mode = getattr(agentcore_config, "gateway_cumulative_token_mode", False)
+        self._gateway_renderer_model_family = getattr(agentcore_config, "gateway_renderer_model_family", "auto")
+        self._model_path = config.actor_rollout_ref.model.path
 
     def _start_gateway(self):
         """Launch model gateway as a subprocess and poll until healthy."""
@@ -92,6 +92,11 @@ class AgentCoreLLMServerManager(LLMServerManager):
             "--log-level",
             "warning",
         ]
+
+        if self._gateway_cumulative_token_mode:
+            cmd.extend(["--cumulative-token-mode", "--model", str(self._model_path)])
+            if self._gateway_renderer_model_family != "auto":
+                cmd.extend(["--renderer-family", self._gateway_renderer_model_family])
 
         logger.info("Starting model gateway subprocess: %s", " ".join(cmd))
         self._gateway_process = subprocess.Popen(cmd)

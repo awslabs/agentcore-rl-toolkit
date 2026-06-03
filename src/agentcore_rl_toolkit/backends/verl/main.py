@@ -7,7 +7,6 @@ Usage:
         ...
 """
 
-import logging
 import os
 import socket
 
@@ -30,16 +29,6 @@ class VerlRunner:
     def run(self, config):
         """Execute the AgentCore training workflow."""
         from pprint import pprint
-
-        # Re-establish logging config inside the Ray actor. Other libraries
-        # imported before verl may have already attached handlers to the root
-        # logger, which makes verl's basicConfig() in verl/__init__.py a no-op
-        # and silently drops logger.warning(...) records from this package.
-        logging.basicConfig(
-            format="%(levelname)s:%(asctime)s:%(message)s",
-            level=logging.WARNING,
-            force=True,
-        )
 
         from verl.single_controller.ray import RayWorkerGroup, ResourcePoolManager
         from verl.trainer.ppo.ray_trainer import Role

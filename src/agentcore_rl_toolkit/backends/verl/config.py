@@ -22,6 +22,8 @@ class AgentCoreConfig(BaseConfig):
     max_rollout_time: int = 1800
     gateway_port: int = 9090
     gateway_store: str = "memory"
+    gateway_cumulative_token_mode: bool = False
+    gateway_renderer_model_family: str = "auto"
 
 
 @dataclass

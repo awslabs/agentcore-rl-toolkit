@@ -7,7 +7,6 @@ post-processes them into segment-level DataProto for training.
 
 import asyncio
 import logging
-import os
 import time
 import uuid
 from collections import Counter
@@ -24,7 +23,6 @@ from verl.utils.fs import copy_to_local
 from agentcore_rl_toolkit import RolloutClient
 
 logger = logging.getLogger(__name__)
-logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 def _pad_sequence_to_length(tensor, target_length, pad_value, left_pad=False):

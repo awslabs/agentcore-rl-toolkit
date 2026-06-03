@@ -70,6 +70,8 @@ python3 -m agentcore_rl_toolkit.backends.verl.main \
     actor_rollout_ref.rollout.agentcore.agent_runtime_arn=your-math-agent-arn \
     actor_rollout_ref.rollout.agentcore.s3_bucket=your-s3-bucket \
     actor_rollout_ref.rollout.agentcore.max_rollout_time=180 \
+    actor_rollout_ref.rollout.agentcore.gateway_cumulative_token_mode=true \
+    actor_rollout_ref.rollout.agentcore.gateway_renderer_model_family=qwen3 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.megatron.pipeline_model_parallel_size=1 \
     actor_rollout_ref.ref.megatron.tensor_model_parallel_size=2 \
