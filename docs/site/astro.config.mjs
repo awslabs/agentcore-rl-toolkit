@@ -46,7 +46,7 @@ export default defineConfig({
 							items: [
 								{ label: 'slime', slug: 'guides/slime-backend-setup' },
 								{ label: 'rllm', slug: 'guides/rllm-backend-setup' },
-								{ label: 'verl (coming soon)', slug: 'guides/verl-backend-setup' },
+								{ label: 'verl', slug: 'guides/verl-backend-setup' },
 							],
 						},
 					],
