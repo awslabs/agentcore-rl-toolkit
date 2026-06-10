@@ -52,9 +52,31 @@ rllm = [
     # in agentcore-rl-toolkit, which would create a circular dependency.
     "rllm @ git+https://github.com/rllm-org/rllm.git",
 ]
+verl = [
+    "transformers>=5.5.3",
+    "numpy",
+    "verl==0.8.0",
+    "ray",
+    "torch>=2.10.0",
+    "torchvision>=0.23.0",
+    "vllm==0.21.0",
+    "flash-attn==2.8.3",
+    "qwen-vl-utils",
+    "rllm-model-gateway @ git+https://github.com/rllm-org/rllm.git#subdirectory=rllm-model-gateway",
+]
 
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
+
+[tool.uv]
+override-dependencies = [
+    "numpy>=1.26.0",
+]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [
+    { requirement = "torch", match-runtime = true },
+]
 
 [tool.hatch.metadata]
 # Required so the [rllm] optional extra can pin rllm via a git URL

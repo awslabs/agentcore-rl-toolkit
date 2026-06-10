@@ -8,7 +8,7 @@ This doc describes how to train an AgentCore Runtime-deployed agent with the [ve
 ## Prerequisites
 
 - A GPU cluster with **CUDA>=12.8** installed.
-- Python 3.10+ and [`uv`](https://docs.astral.sh/uv/).
+- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 - AWS credentials with permission to invoke an AgentCore Runtime and read/write an S3 bucket.
 - An AgentCore Runtime deployment of your agent — follow the [Prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/) guide. Save the resulting **runtime ARN** — required as `actor_rollout_ref.rollout.agentcore.agent_runtime_arn` below for launching agent rollout sessions.
 - An S3 bucket for rollout result delivery — required as `actor_rollout_ref.rollout.agentcore.s3_bucket` below for acquiring rewards.
@@ -17,69 +17,15 @@ This doc describes how to train an AgentCore Runtime-deployed agent with the [ve
 
 The verl backend has a heavyweight dependency stack (vLLM, Megatron-Core, Megatron-Bridge, Transformer Engine, Apex, flash-attn). Run the commands below to install environment for verl 0.8.0.
 
-```bash
-uv venv --python 3.12 --seed
-source .venv/bin/activate
-
-uv pip install vllm==0.21.0 --torch-backend=cu130
-uv pip install tensordict torchdata --torch-backend=cu130
-uv pip install accelerate datasets peft hf-transfer \
-    "pyarrow>=19.0.0" pandas \
-    codetiming hydra-core pylatexenc qwen-vl-utils wandb dill \
-    pybind11 liger-kernel mathruler \
-    "ray[default]>=2.41.0" "packaging>=20.0" tensorboard \
-    latex2sympy2_extended math_verify \
-    pytest py-spy pre-commit ruff --torch-backend=cu130
-
-uv pip install "optree>=0.13.0" "grpcio>=1.62.1" --torch-backend=cu130
-
-export CUDA_HOME=/usr/local/cuda-13.0
-uv pip install --no-cache-dir --no-build-isolation \
-    flash_attn==2.8.3 --torch-backend=cu130
-
-APEX_CPP_EXT=1 APEX_CUDA_EXT=1 MAX_JOBS=32 uv pip install -v \
-    --disable-pip-version-check \
-    --no-cache-dir --no-build-isolation \
-    "apex @ git+https://github.com/NVIDIA/apex.git@1bcf66dc11c3f614d6a071b1bb39854189ea3110" \
-    --torch-backend=cu130
-
-uv pip install --no-cache --no-build-isolation \
-    "transformer_engine[pytorch,core_cu13]==2.15.0" \
-    --torch-backend=cu130
-
-uv pip install --no-deps "nvidia-cublas==13.5.1.27"
-
-uv pip install --no-deps megatron-core==0.17.0 --torch-backend=cu130
-
-uv pip install opencv-python --torch-backend=cu130
-uv pip install opencv-fixer && \
-    python -c "from opencv_fixer import AutoFix; AutoFix()"
-
-uv pip install 'nvidia-modelopt[torch]>=0.37.0'
-
-uv pip install --no-deps \
-    "megatron-bridge @ git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@15d8eadcde212712d6bc9e271da5fef7d03732d7" \
-    --torch-backend=cu130
-
-# flash-linear-attention (required for Qwen3.5 Gated Delta Net attention)
-uv pip install flash-linear-attention==0.4.1 --torch-backend=cu130
-
-# Install verl, pinned to a known-good commit
-git clone https://github.com/verl-project/verl.git
-git -C verl checkout 0c36dee1387243ee0c1c57273dd81cd7902422b6
-uv pip install --no-deps -e verl/ --torch-backend=cu130
-
-# Download and install the stable branch vllm (support vLLM serving in RL rollout) of agentcore-rl-toolkit
-git clone https://github.com/awslabs/agentcore-rl-toolkit -b vllm
-uv pip install -e agentcore-rl-toolkit/
-
-git clone https://github.com/rllm-org/rllm
-uv pip install -e rllm/rllm-model-gateway
-```
-
 :::note
-The above commands assume CUDA 13.0 is installed at `/usr/local/cuda-13.0`; adjust `CUDA_HOME` and `--torch-backend` if yours differs.
+The following commands assume CUDA 13.0 is installed at `/usr/local/cuda-13.0`; adjust `CUDA_HOME` and `--torch-backend` if yours differs.
 :::
+
+```bash
+export CUDA_HOME=/usr/local/cuda-13.0
+uv pip install -e .[verl] --torch-backend=cu130
+bash src/agentcore_rl_toolkit/backends/verl/scripts/install_megatron.sh cu130
+```
 
 ## Prepare data
 
@@ -112,7 +58,7 @@ actor_rollout_ref:
       agent_runtime_arn: ""                   # REQUIRED — The ARN of your deployed agent at AgentCore Runtime
       s3_bucket: ""                           # REQUIRED — S3 bucket for saving rewards and other artifacts of agent rollouts
       reqs_per_sec: 25                        # AgentCore Runtime invoke TPS limit (default 25, per-account)
-      max_pool_connections: 10                # boto3 connection pool size
+      max_pool_connections: 10                # boto3 connection pool size (peak simultaneous HTTP calls of AgentCore invoke and S3 poll)
       max_rollout_time: 1800                  # Max running time of an AgentCore Runtime session in seconds
       gateway_port: 9090                      # local model-gateway port
       gateway_store: memory                   # gateway trace store backend
