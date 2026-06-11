@@ -160,19 +160,13 @@ class AgentCoreLoopManager:
         """
         max_time = self.config.actor_rollout_ref.rollout.agentcore.max_rollout_time
         target_size = len(rollout_batch_input)
-        max_concurrent = self.config.actor_rollout_ref.rollout.agentcore.max_pool_connections
-        semaphore = asyncio.Semaphore(max_concurrent)
 
         async_client = AsyncGatewayClient(self._gateway_url)
 
         start_time = time.time()
 
-        async def _run_with_semaphore(payload, uid):
-            async with semaphore:
-                return await self._process_single_task(
-                    async_client, payload, uid, rollout_sampling_params or {}, max_time
-                )
-
+        # All tasks in the batch are fired concurrently; the ACR TPS limiter inside
+        # RolloutClient controls AgentCore invoke request rate.
         tasks = []
         for i in range(target_size):
             non_tensor_item = rollout_batch_input[i].non_tensor_batch
@@ -185,7 +179,11 @@ class AgentCoreLoopManager:
                 )
 
             uid = payload.pop("uid")
-            tasks.append(asyncio.create_task(_run_with_semaphore(payload, uid)))
+            tasks.append(
+                asyncio.create_task(
+                    self._process_single_task(async_client, payload, uid, rollout_sampling_params or {}, max_time)
+                )
+            )
 
         try:
             results = await asyncio.gather(*tasks, return_exceptions=True)
