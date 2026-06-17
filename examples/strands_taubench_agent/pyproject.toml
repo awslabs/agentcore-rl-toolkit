@@ -1,0 +1,13 @@
+[project]
+name = "strands-taubench-agent-example"
+version = "0.1.0"
+description = "Example: Strands Tau-Bench Agent using Bedrock AgentCore RL Toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agentcore-rl-toolkit>=0.1.0",
+    "strands-agents[openai]>=1.18.0",
+]
+
+[tool.setuptools]
+py-modules = ["rl_app", "reward", "utils", "constants"]
