@@ -50,7 +50,11 @@ rllm = [
     #
     # NOTE: do not depend on rllm's own [agentcore] extra here — it pulls
     # in agentcore-rl-toolkit, which would create a circular dependency.
-    "rllm @ git+https://github.com/rllm-org/rllm.git",
+    #
+    # The git source is declared in [tool.uv.sources] below rather than inline
+    # here, because PyPI rejects direct-reference (git URL) dependencies in
+    # uploaded packages. uv reads the source when installing from the repo.
+    "rllm",
 ]
 verl = [
     "transformers>=5.5.3",
@@ -62,7 +66,7 @@ verl = [
     "vllm==0.21.0",
     "flash-attn==2.8.3",
     "qwen-vl-utils",
-    "rllm-model-gateway @ git+https://github.com/rllm-org/rllm.git#subdirectory=rllm-model-gateway",
+    "rllm-model-gateway>=0.1.0",
 ]
 
 [project.urls]
@@ -72,6 +76,14 @@ Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 override-dependencies = [
     "numpy>=1.26.0",
 ]
+
+[tool.uv.sources]
+# rllm is not published to PyPI; install it from GitHub. The git source is
+# declared here rather than inline in [project.optional-dependencies] so the
+# published package metadata stays free of direct-reference (git URL)
+# dependencies, which PyPI rejects. uv reads this source when installing the
+# [rllm] extra from a checkout of this repo.
+rllm = { git = "https://github.com/rllm-org/rllm.git" }
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [
