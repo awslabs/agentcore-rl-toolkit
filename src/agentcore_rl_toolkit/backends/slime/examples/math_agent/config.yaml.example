@@ -25,11 +25,17 @@ reward_postprocessing: "grpo"       # "grpo" or "identity"
 # cumulative token mode. It constructs a per-session cumulative input token
 # sequence and forwards it to sglang servers if the message history is cumulative.
 cumulative_token_mode: false
-# Model gateway's cumulative token mode uses renderers package to construct
-# cross-message-turn bridge tokens, that needs setting model family name
-# (e.g. "qwen3", "glm-5"). If it is "auto" and actor_rollout_ref.model.path
-# is a huggingface model id, renderers will auto infers model family name.
-# But you must set model family name explicitly if actor_rollout_ref.model.path
-# is a local model path. Check supported model families in MODEL_RENDERER_MAP of
+
+# renderer_family is only used when cumulative_token_mode is true — the renderers
+# package needs the model family name (e.g. "qwen3", "glm-5") to build the
+# cross-turn bridge tokens.
+#
+# "auto" resolves the family only by EXACT match of the served model name against
+# renderers' MODEL_RENDERER_MAP, which works when slime's --hf-checkpoint is a
+# canonical HuggingFace id (e.g. "Qwen/Qwen3-4B-Instruct-2507"). --hf-checkpoint
+# is usually a LOCAL PATH, which never matches, so "auto" falls back to a renderer
+# with no bridge and the gateway errors out at startup. => With cumulative mode on
+# and a local checkpoint path, you MUST set renderer_family explicitly.
+# Supported families are the keys of MODEL_RENDERER_MAP:
 # https://github.com/PrimeIntellect-ai/renderers/blob/main/renderers/base.py
 renderer_family: "auto"
