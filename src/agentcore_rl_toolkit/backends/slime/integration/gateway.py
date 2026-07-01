@@ -28,6 +28,28 @@ class GatewayConfig:
     add_logprobs: bool = True
     add_return_token_ids: bool = True
     strip_vllm_fields: bool = False
+    # Cumulative token mode: gateway rewrites turn N>1 to /v1/completions with a
+    # pre-tokenized, prefix-extending prompt (drift-free multi-turn). Requires
+    # `model` (tokenizer source) and a `renderer_family` the model supports.
+    cumulative_token_mode: bool = False
+    renderer_family: str = "auto"
+    # Served model checkpoint (path or HF id). The gateway loads its tokenizer to
+    # render each turn's prompt to token ids for SGLang /generate and to decode
+    # completion ids for parsing; in cumulative mode it also resolves the renderer.
+    # Always required for the slime backend (use_sglang is always on); sourced from
+    # slime's --hf-checkpoint at the call site.
+    model: str | None = None
+    # SGLang tool-call / reasoning parser names for parsing /generate output text
+    # (same parsers SGLang's /v1/chat/completions uses). Required for tool-using
+    # agents in use_sglang mode; without the tool parser, tool calls come back as
+    # plain assistant text.
+    sglang_tool_call_parser: str | None = None
+    sglang_reasoning_parser: str | None = None
+    # Log level for the gateway subprocess (passed as --log-level). Also controls
+    # uvicorn access logs and httpx request logs, which are very chatty at INFO
+    # (one line per /v1/chat/completions and /generate call). Default WARNING so
+    # the training stdout is dominated by our own batch/metric logs.
+    log_level: str = "warning"
 
 
 class SlimeGatewayManager:
@@ -67,11 +89,37 @@ class SlimeGatewayManager:
             cmd.extend(["--host", cfg.host])
         if cfg.db_path:
             cmd.extend(["--db-path", cfg.db_path])
+        if cfg.log_level:
+            cmd.extend(["--log-level", cfg.log_level])
+
+        if not cfg.model:
+            raise ValueError(
+                "GatewayConfig.model is required for the slime backend, "
+                "the gateway needs the served checkpoint to load its tokenizer. "
+                "Pass it through --hf-checkpoint of slime's training script."
+            )
+        cmd.append("--use-sglang")
+        cmd.extend(["--model", cfg.model])
+        # SGLang output parsers (tool calls / reasoning). The same parser names
+        # slime passes to its SGLang server, so the gateway parses /generate output
+        # identically. Without the tool parser, tool calls come back as plain text.
+        if cfg.sglang_tool_call_parser:
+            cmd.extend(["--sglang-tool-call-parser", cfg.sglang_tool_call_parser])
+        if cfg.sglang_reasoning_parser:
+            cmd.extend(["--sglang-reasoning-parser", cfg.sglang_reasoning_parser])
+        # Cumulative mode adds the cross-turn bridge; it needs --renderer-family
+        # for a local checkpoint path (renderers can auto-infer it only for HF ids).
+        if cfg.cumulative_token_mode:
+            cmd.append("--cumulative-token-mode")
+            if cfg.renderer_family and cfg.renderer_family != "auto":
+                cmd.extend(["--renderer-family", cfg.renderer_family])
         # Note: add_logprobs, add_return_token_ids, strip_vllm_fields are
         # gateway config options set via GatewayClient after startup, not CLI args.
 
         self._process = subprocess.Popen(cmd)
-        self._wait_for_health(timeout=30)
+        # Tokenizer (always) + renderer (cumulative) load can take longer than a
+        # plain proxy start, so allow a generous health window.
+        self._wait_for_health(timeout=120)
 
         base = f"http://{cfg.host or 'localhost'}:{cfg.port}"
         self._client = GatewayClient(base)

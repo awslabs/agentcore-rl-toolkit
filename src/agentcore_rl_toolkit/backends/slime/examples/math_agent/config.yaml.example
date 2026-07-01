@@ -17,5 +17,19 @@ gateway_port: 9090                  # rllm-model-gateway port
 acr_timeout: 900                    # per-session ACR invocation timeout (s)
 model_id: "default"                 # OpenAI model id served to the agent
 acr_tps_limit: 25                   # ACR service TPS quota
-max_concurrent: 100                 # max concurrent ACR sessions (eval batching)
+max_concurrent: 100                 # max concurrent ACR sessions
+max_pool_connections: 256           # boto3 connection pool size
 reward_postprocessing: "grpo"       # "grpo" or "identity"
+
+# Set gateway_cumulative_token_mode to true will turn on model gateway's
+# cumulative token mode. It constructs a per-session cumulative input token
+# sequence and forwards it to sglang servers if the message history is cumulative.
+cumulative_token_mode: false
+# Model gateway's cumulative token mode uses renderers package to construct
+# cross-message-turn bridge tokens, that needs setting model family name
+# (e.g. "qwen3", "glm-5"). If it is "auto" and actor_rollout_ref.model.path
+# is a huggingface model id, renderers will auto infers model family name.
+# But you must set model family name explicitly if actor_rollout_ref.model.path
+# is a local model path. Check supported model families in MODEL_RENDERER_MAP of
+# https://github.com/PrimeIntellect-ai/renderers/blob/main/renderers/base.py
+renderer_family: "auto"
