@@ -9,8 +9,8 @@ user surface is the
 [`SlimeRunner`](/agentcore-rl-toolkit/api/backends/slime/runner/)
 class for launching training.
 
-For known issues (Megatron-LM regression on 32B, norm-epsilon
-mismatch, etc.) see
+For known issues (e.g. the norm-epsilon mismatch on
+Qwen2.5-32B-Instruct) see
 [slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
 
 ## Prerequisites
