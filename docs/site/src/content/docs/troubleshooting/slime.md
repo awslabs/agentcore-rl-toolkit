@@ -14,20 +14,19 @@ was validated against:
 | Component | Version / SHA |
 |---|---|
 | Instance type | 8 × NVIDIA H100 80GB HBM3 |
-| CUDA | `12.9` |
-| PyTorch | `2.9.1+cu129` |
-| Docker image | `slimerl/slime@sha256:0100c933f1f63e7c4acdb9ec575e769839d59de4a648551e09e3fe0e7885631b` (built 2026-04-28) |
-| slime | commit `f3e7bd7f3091d3be05c20977eefb31a785d6221d` (2026-04-28) |
-| SGLang | `v0.5.9` |
-| Megatron-LM | commit `3714d81d418c9f1bca4594fc35f9e8289f652862` ⚠ see note |
+| CUDA | `13.0` |
+| PyTorch | `2.11.0+cu130` |
+| slime | commit `fa3c990af6f18efd3fd9922698bf4bf4048d1263` |
+| SGLang | `0.5.13` |
+| Megatron-LM | commit `1dcf0dafa884ad52ffb243625717a3471643e087` ⚠ see note |
 
 :::caution[Megatron-LM pin]
-The image bundles Megatron-LM at `1dcf0dafa` (~500 commits ahead of
-slime's stable pin), which breaks 32B training — see the
-[LinearCrossEntropyModule issue](#linearcrossentropymodule-parallelism-error-on-32b-or-any-model-with-untied-embeddings) below.
-We downgrade to `3714d81d` (slime's documented stable sha) via
-`git checkout` inside `/root/Megatron-LM`. The table above reflects
-the downgraded sha, not the one baked into the image.
+`install_slime.sh` pins Megatron-LM at `1dcf0dafa` (~500 commits ahead
+of slime's stable pin). This is fine for tied-embedding models
+(0.5B/3B/7B) but breaks 32B training — see the
+[LinearCrossEntropyModule issue](#linearcrossentropymodule-parallelism-error-on-32b-or-any-model-with-untied-embeddings)
+below. For 32B, downgrade to `3714d81d` (slime's documented stable sha)
+via `git checkout`.
 :::
 
 ## `LinearCrossEntropyModule` parallelism error on 32B (or any model with untied embeddings)
