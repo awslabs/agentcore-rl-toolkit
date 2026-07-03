@@ -35,7 +35,29 @@ dev = [
     "pytest-asyncio>=0.23",
     "mypy>=1.0",
     "pre-commit>=3.0",
+    # rollout_gateway test deps (so the full suite runs without a separate install):
+    # aiohttp for adapter/server tests, transformers for renderer round-trip / E2E.
+    "aiohttp>=3.9",
+    "transformers>=4.44",
 ]
+gateway = [
+    # The rollout capture gateway (agentcore_rl_toolkit.rollout_gateway). Trainer-side
+    # only — the agent-side surface (AgentCoreRLApp, RolloutClient) needs none of this.
+    # aiohttp: the gateway HTTP server + HTTP sampling backends.
+    # transformers: HF tokenizer for HfTemplateRenderer (apply_chat_template).
+    "aiohttp>=3.9",
+    "transformers>=4.44",
+]
+# NOTE: the Tinker backend (TinkerSdkBackend + TinkerRenderer) needs `tinker` and
+# `tinker-cookbook`, which require Python >=3.11. They are intentionally NOT declared as
+# an extra here: this package supports Python >=3.10, and pinning a >=3.11-only
+# dependency would make the resolution unsatisfiable on 3.10. Install them manually
+# (`pip install tinker tinker-cookbook`) on Python >=3.11 to use the Tinker backend.
+#
+# NOTE: HfTemplateRenderer parses tool calls with a dependency-free regex covering the
+# common <tool_call><function=...> format, and reasoning via a </think> split. Engine
+# tool/reasoning parsers (sglang, vllm) are not a declared dependency; a caller that
+# needs one for an exotic format installs it and passes a parser name explicitly.
 slime = [
     # Proxy that sits between the agent and SGLang during training, capturing
     # token IDs and logprobs into TraceRecords that slime consumes as Samples.
