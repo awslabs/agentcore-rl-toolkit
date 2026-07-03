@@ -16,9 +16,14 @@ exp_id: "gsm8k-grpo-train"
 gateway_port: 9090                  # rllm-model-gateway port
 acr_timeout: 900                    # per-session ACR invocation timeout (s)
 model_id: "default"                 # OpenAI model id served to the agent
-acr_tps_limit: 25                   # ACR service TPS quota
+acr_tps_limit: 5                   # ACR service TPS quota
 max_concurrent: 100                 # max concurrent ACR sessions
-max_pool_connections: 256           # boto3 connection pool size
+
+# Number of network connections the AWS client keeps open (and reuses) to talk
+# to ACR/S3. This is NOT max_concurrent: it caps reused connections, not how many
+# sessions run at once. Too small value causes "Connection pool is full" warnings,
+# they are NOT errors. Setting a too large value wastes resources (idle open sockets).
+max_pool_connections: 10
 reward_postprocessing: "grpo"       # "grpo" or "identity"
 
 # Set gateway_cumulative_token_mode to true will turn on model gateway's
