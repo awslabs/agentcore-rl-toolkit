@@ -41,13 +41,22 @@ SlimeRunner(
     slime_dir: str = '/root/slime',
     megatron_dir: str = '/root/Megatron-LM',
 
+    # --- Optional: CUDA toolchain pinning ---
+    cuda_home: str | None = None,
+
     # --- Optional: ACR / toolkit (forwarded to slime via custom-config yaml) ---
     model_id: str = 'default',
     acr_timeout: int = 900,
     acr_tps_limit: int = 25,
     max_concurrent: int = 100,
+    max_pool_connections: int = 100,
     gateway_port: int = 9090,
     reward_postprocessing: str = 'grpo',
+    sglang_tool_call_parser: str = 'qwen',
+    sglang_reasoning_parser: str | None = None,
+    cumulative_token_mode: bool = False,
+    renderer_family: str = 'auto',
+    gateway_log_level: str = 'warning',
 
     # --- Optional: training hyperparameters ---
     rollout_batch_size: int = 32,
@@ -60,6 +69,7 @@ SlimeRunner(
     weight_decay: float = 0.1,
     adam_beta2: float = 0.98,
     sglang_mem_fraction_static: float = 0.7,
+    sglang_context_length: int | None = None,
     max_tokens_per_gpu: int = 9216,
 
     # --- Wandb (opt-in; no defaults injected if unset) ---
@@ -95,6 +105,10 @@ via ``ray job submit``. Streams stdout/stderr to the parent process.
 
 - `agent_runtime_arn` *(str)*
 
+- `cuda_home` *(str | None)*
+
+- `cumulative_token_mode` *(bool)*
+
 - `data_path` *(str)*
 
 - `eps_clip` *(float)*
@@ -105,11 +119,15 @@ via ``ray job submit``. Streams stdout/stderr to the parent process.
 
 - `extra_flags` *(list[str])*
 
+- `gateway_log_level` *(str)*
+
 - `gateway_port` *(int)*
 
 - `lr` *(float)*
 
 - `max_concurrent` *(int)*
+
+- `max_pool_connections` *(int)*
 
 - `max_tokens_per_gpu` *(int)*
 
@@ -125,6 +143,8 @@ via ``ray job submit``. Streams stdout/stderr to the parent process.
 
 - `num_gpus` *(int)*
 
+- `renderer_family` *(str)*
+
 - `reward_postprocessing` *(str)*
 
 - `rollout_batch_size` *(int)*
@@ -137,7 +157,13 @@ via ``ray job submit``. Streams stdout/stderr to the parent process.
 
 - `s3_bucket` *(str)*
 
+- `sglang_context_length` *(int | None)*
+
 - `sglang_mem_fraction_static` *(float)*
+
+- `sglang_reasoning_parser` *(str | None)*
+
+- `sglang_tool_call_parser` *(str)*
 
 - `slime_dir` *(str)*
 

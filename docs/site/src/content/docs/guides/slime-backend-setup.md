@@ -5,23 +5,18 @@ description: Train an AgentCore Runtime-deployed agent with the SLIME training b
 
 This doc describes how to train an AgentCore Runtime-deployed agent with the
 [slime](https://github.com/THUDM/slime) training backend. The public
-user surface is exactly two things: the
+user surface is the
 [`SlimeRunner`](/agentcore-rl-toolkit/api/backends/slime/runner/)
-class (for launching training) and the two SGLang
-[patch scripts](/agentcore-rl-toolkit/api/backends/slime/patches/)
-(applied once to the SGLang install).
+class for launching training.
 
-For known issues (Megatron-LM regression on 32B, norm-epsilon
-mismatch, etc.) see
+For known issues (e.g. the norm-epsilon mismatch on
+Qwen2.5-32B-Instruct) see
 [slime troubleshooting](/agentcore-rl-toolkit/troubleshooting/slime/).
 
 ## Prerequisites
 
-- Hardware and CUDA requirements: see
-  [slime's README](https://github.com/THUDM/slime#installation) and the
-  [slime docker README](https://github.com/THUDM/slime/blob/main/docker/README.md)
-  for tested GPU configurations per model size.
-- Python 3.10+ and [`uv`](https://docs.astral.sh/uv/).
+- A GPU cluster with **CUDA>=12.9** installed.
+- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 - AWS credentials with permission to invoke an AgentCore Runtime and
   read/write an S3 bucket.
 - An AgentCore Runtime deployment of your agent — follow the
@@ -31,43 +26,51 @@ mismatch, etc.) see
 - An S3 bucket for rollout result delivery — required as the
   `s3_bucket` argument on `SlimeRunner` below.
 
-## slime environment
+## Installation
+
+Choose **one** of the two paths below to install slime, then install
+the toolkit into the same environment.
+
+### Option A: Official slime docker
 
 Follow
 [slime's own installation docs](https://github.com/THUDM/slime#installation)
-— either the container path (`slimerl/slime:latest`) or a bare-metal
-install. Everything below runs inside this environment.
+and use the container image (`slimerl/slime:latest`). Inside the
+container, slime and Megatron-LM ship pre-installed at `/root/slime`
+and `/root/Megatron-LM` — use those paths for `slime_dir` /
+`megatron_dir` on `SlimeRunner`.
 
-Inside the `slimerl/slime:latest` container, slime and Megatron-LM
-ship pre-installed at `/root/slime` and `/root/Megatron-LM` — use
-those paths for `slime_dir` / `megatron_dir` on `SlimeRunner`. For a
-bare-metal install, point at wherever you cloned slime + Megatron-LM.
-
-## Install the toolkit + apply patches
-
-Inside the slime environment:
+Install the toolkit with the slime-backend extras inside the container:
 
 ```bash
-# From a clone of this repo
-cd /path/to/agentcore-rl-toolkit
-
-# Install the toolkit plus the slime-backend extras
 uv pip install -e ".[slime]"
 ```
 
-Then apply the SGLang `token_ids` patch — it adds
-`prompt_token_ids` / `token_ids` fields to chat completion responses
-so the gateway can capture RL training trace data. The patch is idempotent:
+:::note
+We have only tested against official slime at commit
+[`fa3c990`](https://github.com/THUDM/slime/commit/fa3c990af6f18efd3fd9922698bf4bf4048d1263).
+:::
+
+### Option B: Bare-metal install script
+
+Install slime and its heavyweight dependency stack (Megatron-LM,
+Transformer Engine, Apex, flash-attn, sglang, torch_memory_saver)
+with the provided script, which clones slime + Megatron-LM into the
+current directory and applies slime's official patches. Run it inside
+your activated python environment.
+
+:::note
+Both CUDA 12.9 and CUDA 13 are supported. The following commands assume CUDA 13.0 is installed at `/usr/local/cuda-13.0`; adjust `CUDA_HOME` and `cu13` if yours differs.
+:::
 
 ```bash
-python -m agentcore_rl_toolkit.backends.slime.patches.sglang_token_ids
-
-# Verify the patch round-trips under greedy decoding (any HF checkpoint
-# works; Qwen2.5-0.5B-Instruct is the fastest to download + load)
-python -m agentcore_rl_toolkit.backends.slime.patches.verify_sglang_token_ids \
-    --model-path /path/to/Qwen2.5-0.5B-Instruct
-# Expect: "OK: 4/4 checks passed"
+uv pip install -e ".[slime]"
+export CUDA_HOME=/usr/local/cuda-13.0
+bash src/agentcore_rl_toolkit/backends/slime/scripts/install_slime.sh cu13
 ```
+
+Point `slime_dir` / `megatron_dir` on `SlimeRunner` at the `slime` and
+`Megatron-LM` directories the script cloned.
 
 ## Prepare data
 

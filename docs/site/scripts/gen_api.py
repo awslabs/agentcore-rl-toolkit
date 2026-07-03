@@ -20,12 +20,7 @@ Output structure:
         reward.md
       backends/
         slime/
-          rollout.md
-          traces.md
-          rewards.md
-          gateway.md
-          sglang_token_ids.md
-          verify_sglang_token_ids.md
+          runner.md
 """
 from __future__ import annotations
 
@@ -98,31 +93,16 @@ MODULES: list[ModuleSpec] = [
         include=("RewardFunction",),
     ),
     # --- Backends › slime --- #
-    # Only the public user surface: the SlimeRunner entry point and the
-    # two SGLang patch scripts. integration/rollout.py and
-    # integration/rewards.py are load-bearing plugin paths but users
-    # don't import them — SlimeRunner wires them into the job.
+    # Only the public user surface: the SlimeRunner entry point.
+    # integration/rollout.py and integration/rewards.py are load-bearing
+    # plugin paths but users don't import them — SlimeRunner wires them
+    # into the job.
     ModuleSpec(
         dotted_paths=("agentcore_rl_toolkit.backends.slime.runner",),
         out_path="backends/slime/runner.md",
         title="SlimeRunner",
         description="One Python entry point for slime-backed training.",
         include=("SlimeRunner",),
-    ),
-    # Both patches consolidated onto one page.
-    # sglang_token_ids exposes apply_patch (the public patch entry point).
-    # verify_sglang_token_ids exposes main (the CLI contract, invoked via
-    # `python -m ...verify_sglang_token_ids`). Everything else is
-    # low-level monkey-patch machinery / internal check helpers.
-    ModuleSpec(
-        dotted_paths=(
-            "agentcore_rl_toolkit.backends.slime.patches.sglang_token_ids",
-            "agentcore_rl_toolkit.backends.slime.patches.verify_sglang_token_ids",
-        ),
-        out_path="backends/slime/patches.md",
-        title="SGLang patches",
-        description="Apply + verify the SGLang token-IDs patch used by the slime backend.",
-        include=("apply_patch", "main"),
     ),
 ]
 

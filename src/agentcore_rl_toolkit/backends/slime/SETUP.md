@@ -3,15 +3,13 @@
 How to train an ACR-deployed agent with the [slime](https://github.com/THUDM/slime)
 training backend. The guide splits concerns into three parts:
 
-- **[Part 1 — Slime environment](#part-1--slime-environment-upstream)**:
-  get a working slime runtime. This is slime's own concern; we only
-  describe what we expect at the end.
-- **[Part 2 — Install ART + backend](#part-2--install-art--slime-backend)**:
-  install this toolkit and apply the two SGLang patches we own.
-- **[Part 3 — Run training and evaluation](#part-3--run-training-and-evaluation)**:
+- **[Part 1 — Slime environment](#part-1--slime-environment)**:
+  get a working slime runtime plus this toolkit, via either the
+  official slime docker or the bare-metal install script.
+- **[Part 2 — Run training and evaluation](#part-2--run-training-and-evaluation)**:
   deploy the agent, prepare data, run `train.sh` / `eval.sh`.
 - **[Common Problems & Fixes](#common-problems--fixes)** covers known
-  gotchas (Megatron-LM regression on 32B, norm-epsilon mismatch, etc.).
+  gotchas (e.g. the norm-epsilon mismatch on Qwen2.5-32B-Instruct).
 - **[Tested Versions](#tested-versions)** pins the exact environment
   this was validated against — check here if you want to reproduce our
   results.
@@ -23,7 +21,8 @@ training backend. The guide splits concerns into three parts:
   [slime's README](https://github.com/THUDM/slime#installation) and the
   [slime docker README](https://github.com/THUDM/slime/blob/main/docker/README.md)
   for tested GPU configurations per model size.
-- Python 3.10+ and [`uv`](https://docs.astral.sh/uv/).
+- A GPU cluster with **CUDA >= 12.9** installed.
+- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 - AWS credentials with permission to invoke an ACR runtime and
   read/write an S3 bucket (`aws sts get-caller-identity` works).
 - An ACR deployment of your agent — `rl_app.py` configured and deployed
@@ -32,62 +31,71 @@ training backend. The guide splits concerns into three parts:
 
 ---
 
-## Part 1 — Slime environment (upstream)
+## Part 1 — Slime environment
 
-Follow [slime's own installation docs](https://github.com/THUDM/slime#installation)
-— either the container path (`slimerl/slime:latest`, what we validated)
-or a bare-metal install. Part 2 and Part 3 below run inside this
+Choose **one** of the two paths below to install slime, then install the
+toolkit into the same environment. Part 2 below runs inside this
 environment.
 
-Inside the `slimerl/slime:latest` container, slime and Megatron-LM ship
-pre-installed at `/root/slime` and `/root/Megatron-LM` — use those paths
-for `SLIME_DIR` / `MEGATRON_DIR` in step 3.4. For a bare-metal install,
-point at wherever you cloned slime + Megatron-LM.
+### Option A: Official slime docker (recommended)
 
----
+Follow [slime's own installation docs](https://github.com/THUDM/slime#installation)
+and use the container image (`slimerl/slime:latest`). Inside the
+container, slime and Megatron-LM ship pre-installed at `/root/slime` and
+`/root/Megatron-LM` — use those paths for `SLIME_DIR` / `MEGATRON_DIR`
+in step 2.4 (or `slime_dir` / `megatron_dir` on `SlimeRunner`).
 
-## Part 2 — Install ART + slime backend
-
-Inside the slime environment from Part 1:
+Install the toolkit with the slime-backend extras inside the container
+(the `[slime]` extra pulls in rllm-model-gateway, which the backend
+imports):
 
 ```bash
-# From a clone of this repo
+# From a clone of this repo, inside the slime container
 cd /path/to/agentcore-rl-toolkit
-
-# Install the toolkit plus the slime-backend extras
-# (the `[slime]` extra pulls in rllm-model-gateway, which the backend imports)
 uv pip install -e ".[slime]"
 ```
 
-Then apply the SGLang `token_ids` patch — it adds prompt_token_ids /
-token_ids fields to chat completion responses so the gateway can capture
-RL training trace data without requiring `logprobs=True` on every
-request. The patch is idempotent (second run is a no-op):
+We have only tested against official slime at commit
+`fa3c990af6f18efd3fd9922698bf4bf4048d1263` (the commit pinned in
+`scripts/install_slime.sh`).
+
+### Option B: Bare-metal install script
+
+Install slime and its heavyweight dependency stack (Megatron-LM,
+Transformer Engine, Apex, flash-attn, sglang, torch_memory_saver) with
+the provided script, which clones slime + Megatron-LM into the current
+directory and applies slime's official patches. Run it inside your
+activated python environment.
+
+The script supports both CUDA 12 and CUDA 13. It defaults `CUDA_HOME`
+to `/usr/local/cuda-13.0` (cu13) or `/usr/local/cuda-12.9` (cu12);
+export `CUDA_HOME` yourself first if yours differs.
 
 ```bash
-python -m agentcore_rl_toolkit.backends.slime.patches.sglang_token_ids
+# From a clone of this repo, inside your activated python environment
+cd /path/to/agentcore-rl-toolkit
 
-# Verify the patch round-trips under greedy decoding (any HF checkpoint
-# works; Qwen2.5-0.5B-Instruct is the fastest to download + load)
-python -m agentcore_rl_toolkit.backends.slime.patches.verify_sglang_token_ids \
-    --model-path /path/to/Qwen2.5-0.5B-Instruct
-# Expect: "OK: 4/4 checks passed"
+# Install the toolkit with the slime-backend extras
+uv pip install -e ".[slime]"
+
+# For CUDA 13
+export CUDA_HOME=/usr/local/cuda-13.0
+bash src/agentcore_rl_toolkit/backends/slime/scripts/install_slime.sh cu13
+
+# For CUDA 12
+export CUDA_HOME=/usr/local/cuda-12.9
+bash src/agentcore_rl_toolkit/backends/slime/scripts/install_slime.sh cu12
 ```
 
-The verification script launches its own SGLang server, runs four
-greedy-decoded correctness checks (non-streaming basic, streaming basic,
-cross-mode consistency, tool-call consistency), and tears the server
-down.
-
-> **Note on the container path:** the patch persists only within that
-> container layer. Bake it into your image or re-apply on every
-> container start.
+Point `SLIME_DIR` / `MEGATRON_DIR` (step 2.4) or `slime_dir` /
+`megatron_dir` on `SlimeRunner` at the `slime` and `Megatron-LM`
+directories the script cloned.
 
 ---
 
-## Part 3 — Run training and evaluation
+## Part 2 — Run training and evaluation
 
-### 3.1 Deploy the agent to ACR
+### 2.1 Deploy the agent to ACR
 
 Follow the "Run RL App Hosted on ACR" section in
 [`examples/strands_math_agent/README.md`](../../../../examples/strands_math_agent/README.md)
@@ -95,9 +103,9 @@ Follow the "Run RL App Hosted on ACR" section in
 and IAM setup.
 
 Save the resulting **runtime ARN** and **S3 bucket name** — they go
-into `config.yaml` in step 3.3.
+into `config.yaml` in step 2.3.
 
-### 3.2 Download model and data
+### 2.2 Download model and data
 
 ```bash
 python -c "
@@ -128,14 +136,14 @@ different agents can use different payload shapes (e.g. ``{'task_id': ...}``
 for AppWorld, ``{'repo_uri': ..., 'metadata_uri': ..., ...}`` for
 migration) without any slime-side changes.
 
-### 3.3 Configure deployment settings
+### 2.3 Configure deployment settings
 
 ```bash
 cd src/agentcore_rl_toolkit/backends/slime/examples/math_agent
 
 cp config.yaml.example config.yaml   # gitignored
 # Edit config.yaml:
-#   agent_runtime_arn: "arn:aws:bedrock-agentcore:..."   (from step 3.1)
+#   agent_runtime_arn: "arn:aws:bedrock-agentcore:..."   (from step 2.1)
 #   s3_bucket: "your-bucket-name"
 #   (other fields have sensible defaults — leave as-is)
 
@@ -147,7 +155,7 @@ cp .wandb.env.example .wandb.env     # optional; skip to disable wandb
 
 `config.yaml` and `.wandb.env` are gitignored.
 
-### 3.4 Run training
+### 2.4 Run training
 
 Two entry points, same job under the hood:
 
@@ -228,7 +236,7 @@ bash src/agentcore_rl_toolkit/backends/slime/examples/math_agent/train.sh
 
 For 32B on 8 GPUs, add `MODEL_TYPE=qwen2.5-32B TP_SIZE=8 ROLLOUT_GPUS_PER_ENGINE=8 NUM_ROLLOUT=5`.
 
-### 3.5 Run evaluation
+### 2.5 Run evaluation
 
 `eval.sh` launches SGLang directly against an HF checkpoint and runs
 `examples/strands_math_agent/evaluate.py` against it + the deployed ACR
@@ -247,35 +255,6 @@ point `MODEL_DIR` at the HF export inside the save directory.
 
 ## Common Problems & Fixes
 
-### `LinearCrossEntropyModule` parallelism error on 32B (or any model with untied embeddings)
-
-**Symptom:** During 32B training, the Megatron actor crashes with:
-
-```
-ValueError: Cannot determine parallelism type for module 'LinearCrossEntropyModule'
-            at weight 'output_layer.weight'.
-```
-
-**Cause:** The Megatron-LM bundled in `slimerl/slime:latest` is several
-hundred commits ahead of the sha pinned in slime's docker README
-(`3714d81d`). Specifically, Megatron PR **#3226 "Reapply fix Linear CE
-Fusion"** (2026-02-04) replaced `ColumnParallelLinear` with a new
-`LinearCrossEntropyModule` that megatron-bridge's `AutoMapping` doesn't
-recognize. Models with tied embeddings (0.5B, 3B, 7B) skip this code
-path; models with `--untie-embeddings-and-output-weights` (32B and up)
-hit it.
-
-**Fix:** Inside the container, pin `/root/Megatron-LM` to the stable sha:
-
-```bash
-cd /root/Megatron-LM
-# Stash any image-local patches first (can be restored later with `git stash pop`)
-git stash -u -m "slime local patches"
-git checkout 3714d81d418c9f1bca4594fc35f9e8289f652862
-# Clear pyc caches that reference the old code
-find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
-```
-
 ### `--norm-epsilon` mismatch on Qwen2.5-32B-Instruct
 
 **Cause:** slime's `scripts/models/qwen2.5-32B.sh` hardcodes
@@ -284,8 +263,8 @@ find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
 
 **Fix:** Edit the slime model script to `--norm-epsilon 1e-6`, or add
 `--norm-epsilon 1e-6` explicitly in `train.sh`'s `python3 train.py` CLI
-args. 0.5B/3B/7B Instruct variants match their base-model norm epsilons,
-so this only affects 32B.
+args. Qwen2.5-0.5B / 1.5B / 3B / 7B Instruct variants match their
+base-model norm epsilons, so this only affects Qwen2.5-32B.
 
 ---
 
@@ -297,16 +276,8 @@ validated against:
 | Component | Version / SHA |
 |---|---|
 | Instance type | 8 × NVIDIA H100 80GB HBM3 |
-| CUDA | `12.9` |
-| PyTorch | `2.9.1+cu129` |
-| Docker image | `slimerl/slime@sha256:0100c933f1f63e7c4acdb9ec575e769839d59de4a648551e09e3fe0e7885631b` (built 2026-04-28) |
-| slime | commit `f3e7bd7f3091d3be05c20977eefb31a785d6221d` (2026-04-28) |
-| SGLang | `v0.5.9` |
-| Megatron-LM | commit `3714d81d418c9f1bca4594fc35f9e8289f652862` ⚠️ see note |
-
-> **Megatron-LM pin.** The image bundles Megatron-LM at `1dcf0dafa` (~500
-> commits ahead of slime's stable pin), which breaks 32B training — see
-> [Common Problems & Fixes](#common-problems--fixes). We downgrade to
-> `3714d81d` (slime's documented stable sha) via `git checkout` inside
-> `/root/Megatron-LM`. The table above reflects the downgraded sha, not
-> the one baked into the image.
+| CUDA | `13.0` |
+| PyTorch | `2.11.0+cu130` |
+| slime | commit `fa3c990af6f18efd3fd9922698bf4bf4048d1263` |
+| SGLang | `0.5.13` |
+| Megatron-LM | commit `1dcf0dafa884ad52ffb243625717a3471643e087` |
