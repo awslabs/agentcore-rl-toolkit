@@ -262,12 +262,30 @@ sample-only backends like Tinker, which cannot render themselves.
 | `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation, parallel tool-call branches, and heals re-tokenization drift between turns (CLEAN / REALIGN / FORK). Tokenizer-free and torch-free. |
 | `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (default, HF `apply_chat_template`) or `TinkerRenderer` (needs `tinker-cookbook`, installed manually). |
 | `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. |
-| Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). |
+| Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
 | `RolloutGateway` | `gateway.py` | Assembles tokenizer + renderer + backend + adapters onto one aiohttp app sharing one `TrajectoryManager`. Session identity rides in the api-key / Bearer slot; `base_url` is a fixed gateway address (no per-session URLs). |
 
 **Session model.** A session id (in the Bearer slot) keys one trajectory tree.
 `gateway.create_session(sid)` → agent turns are captured → `gateway.finish_session(sid)`
 drains the tree into `list[TraceRecord]`.
+
+**Multi-API & sub-agents.**
+- *Multi-API* (works today): OpenAI- and Anthropic-protocol turns for the same session id
+  fold into the same trajectory tree, so one training run can capture agents that speak
+  different wire protocols.
+- *Dynamic sub-agents as in-session forks* (works today): when a harness spawns a sub-agent
+  (e.g. Claude Code's Task tool) whose LLM calls reuse the **same** session id, its distinct
+  system prompt doesn't match the parent's branch, so `TrajectoryManager` **forks** a new leaf
+  automatically (`_find_mount_point` matches by role + message equality). `get_trajectory`
+  walks *all* leaves, so the parent trajectory and each sub-agent trajectory are all captured
+  and correlated under one tree — the common self-spawning-sub-agent case needs no extra
+  wiring. (Verifying this end-to-end against a real Claude Code harness is a to-do; the design
+  is in place, but only synthetic/single-agent flows have been exercised so far.)
+- *Sub-agents that run under a **distinct** session id* (grouping pending): if the harness
+  gives a sub-agent its own session id (its own Bearer key), it becomes a separate tree. Tying
+  those separate trees into one episode requires stamping a shared `rollout_id` across their
+  `TraceRecord`s — that stamping lives in the (not-yet-landed) dispatch layer, so this
+  cross-session case is not wired in this package yet.
 
 **Dependencies.** The gateway is trainer-side and lives behind extras — the base install
 (agent-side `AgentCoreRLApp` / `RolloutClient`) stays lean:
@@ -287,6 +305,21 @@ importing the package never requires aiohttp. Tests live in `tests/rollout_gatew
 backend (the per-backend rollout function + `TraceRecord → native sample` conversion, and
 the ACR dispatch/reward-join glue) is not yet on the main branch — a prototype dispatcher
 is parked on the `wip/online-rl-dispatch` branch until a backend consumes it end-to-end.
+
+**Vendored from slime (upstream baselines).** Several files are adapted from
+[slime](https://github.com/THUDM/slime) (Apache-2.0; see `NOTICE`). To check what changed
+upstream before re-syncing, diff the source file against the baseline commit below:
+
+| This repo | slime source | Baseline commit |
+|---|---|---|
+| `rollout_gateway/trajectory.py` | `slime/agent/trajectory.py` | `90c212b5` |
+| `rollout_gateway/adapters/{common,openai,anthropic}.py` | `slime/agent/adapters/` | `90c212b5` |
+| `rollout_gateway/parsing.py` | `slime/agent/parsing.py` | `90c212b5` |
+
+Re-sync workflow: `git -C <slime> diff 90c212b5..HEAD -- slime/agent/<file>` shows upstream
+changes since the lift. Our copies are intentionally modified (torch-free; `Sample` →
+`TraceRecord`; injected backend/renderer seams; sglang parser hook removed), so treat the diff
+as a review aid, not an automatic merge. Bump the baseline commit here when you re-sync.
 
 ### Migration Guide (basic_app → rl_app)
 
