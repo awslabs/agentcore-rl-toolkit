@@ -30,7 +30,11 @@ _TOOLKIT_CONFIG_KEYS = (
     "model_id",
     "acr_tps_limit",
     "max_concurrent",
+    "max_pool_connections",
     "reward_postprocessing",
+    "cumulative_token_mode",
+    "renderer_family",
+    "gateway_log_level",
 )
 
 
@@ -64,13 +68,28 @@ class SlimeRunner:
     slime_dir: str = "/root/slime"
     megatron_dir: str = "/root/Megatron-LM"
 
+    # --- Optional: CUDA toolchain pinning ---
+    # When set, the runner pins the worker env to one CUDA toolkit (mirrors
+    # train.sh): exports CUDA_HOME/PATH, prepends the venv-bundled nvidia/*/lib
+    # dirs, and strips every other /usr/local/cuda-* from LD_LIBRARY_PATH so
+    # TransformerEngine doesn't abort with "Multiple libcudart libraries found".
+    # Leave None to inherit the ambient environment unchanged.
+    cuda_home: str | None = None
+
     # --- Optional: ACR / toolkit (forwarded to slime via custom-config yaml) ---
     model_id: str = "default"
     acr_timeout: int = 900
     acr_tps_limit: int = 25
     max_concurrent: int = 100
+    max_pool_connections: int = 100
     gateway_port: int = 9090
     reward_postprocessing: str = "grpo"
+    # Gateway use_sglang parsers (must match the served model) + cumulative mode.
+    sglang_tool_call_parser: str = "qwen"
+    sglang_reasoning_parser: str | None = None
+    cumulative_token_mode: bool = False
+    renderer_family: str = "auto"
+    gateway_log_level: str = "warning"
 
     # --- Optional: training hyperparameters ---
     rollout_batch_size: int = 32
@@ -83,6 +102,7 @@ class SlimeRunner:
     weight_decay: float = 0.1
     adam_beta2: float = 0.98
     sglang_mem_fraction_static: float = 0.7
+    sglang_context_length: int | None = None
     max_tokens_per_gpu: int = 9216
 
     # --- Wandb (opt-in; no defaults injected if unset) ---
@@ -152,17 +172,41 @@ class SlimeRunner:
         items = out.split(b"\0")
         return [x.decode() for x in items if x]
 
+    def _cuda_ld_library_path(self) -> str:
+        """LD_LIBRARY_PATH pinned to a single CUDA toolkit (mirrors train.sh).
+
+        Prepends every venv-bundled ``nvidia/*/lib`` dir (runtime+cublas, cudnn,
+        nccl, cusparselt, nvshmem) and ``$CUDA_HOME/lib64``, after stripping every
+        other ``/usr/local/cuda-*`` from the ambient LD_LIBRARY_PATH so
+        TransformerEngine sees only this CUDA runtime. Requires ``cuda_home``.
+        """
+        import glob
+        import re
+        import sysconfig
+
+        nvidia_base = os.path.join(sysconfig.get_path("purelib"), "nvidia")
+        nvidia_libs = sorted(glob.glob(os.path.join(nvidia_base, "*", "lib")))
+        ambient = os.environ.get("LD_LIBRARY_PATH", "")
+        kept = [p for p in ambient.split(":") if p and not re.match(r"^/usr/local/cuda(-[0-9.]+)?/", p)]
+        parts = [*nvidia_libs, f"{self.cuda_home}/lib64", *kept]
+        return ":".join(parts)
+
     def _build_runtime_env(self) -> dict:
         """Runtime env forwarded to every Ray worker.
 
         Mirrors train.sh's inline python snippet: PYTHONPATH for Megatron,
-        CUDA_DEVICE_MAX_CONNECTIONS for Megatron TP, plus wandb keys when
-        set in the parent environment.
+        CUDA_DEVICE_MAX_CONNECTIONS for Megatron TP, plus wandb keys when set in
+        the parent environment. When ``cuda_home`` is set, also pins CUDA_HOME +
+        LD_LIBRARY_PATH to one toolkit so the worker (and the train actors, via
+        --train-env-vars) avoid the "Multiple libcudart libraries found" abort.
         """
         env_vars: dict[str, str] = {
             "PYTHONPATH": self.megatron_dir,
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
         }
+        if self.cuda_home:
+            env_vars["CUDA_HOME"] = self.cuda_home
+            env_vars["LD_LIBRARY_PATH"] = self._cuda_ld_library_path()
         for key in ("WANDB_API_KEY", "WANDB_ENTITY"):
             val = os.environ.get(key)
             if val:
@@ -276,7 +320,11 @@ class SlimeRunner:
             "--sglang-cuda-graph-max-bs",
             "32",
             "--sglang-tool-call-parser",
-            "qwen25",
+            self.sglang_tool_call_parser,
+            "--sglang-log-level",
+            "warning",
+            "--sglang-log-level-http",
+            "warning",
             "--attention-dropout",
             "0.0",
             "--hidden-dropout",
@@ -301,6 +349,20 @@ class SlimeRunner:
             "--max-tokens-per-gpu",
             str(self.max_tokens_per_gpu),
         ]
+
+        # Optional SGLang reasoning parser (split <think>...</think> in the gateway).
+        if self.sglang_reasoning_parser:
+            flags.extend(["--sglang-reasoning-parser", self.sglang_reasoning_parser])
+        # Optional SGLang context length cap.
+        if self.sglang_context_length is not None:
+            flags.extend(["--sglang-context-length", str(self.sglang_context_length)])
+        # CUDA pinning for the Megatron train actors: slime gives them their own
+        # runtime_env that does NOT carry CUDA_HOME/LD_LIBRARY_PATH, so pass the
+        # pinned paths through --train-env-vars too (mirrors train.sh). Only when
+        # cuda_home is set.
+        if self.cuda_home:
+            train_env = {"CUDA_HOME": self.cuda_home, "LD_LIBRARY_PATH": self._cuda_ld_library_path()}
+            flags.extend(["--train-env-vars", json.dumps(train_env)])
 
         # Wandb opt-in: only emit --use-wandb if the user (or env) supplied an API key.
         if os.environ.get("WANDB_API_KEY"):
