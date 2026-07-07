@@ -11,6 +11,7 @@ This document provides context, patterns, and guidelines for AI coding assistant
   - [Why This SDK](#why-this-sdk)
   - [Background: BedrockAgentCoreApp](#background-bedrockagentcoreapp)
   - [What agentcore-rl-toolkit Provides](#what-agentcore-rl-toolkit-provides)
+  - [Rollout Gateway](#rollout-gateway)
   - [Migration Guide (basic_app → rl_app)](#migration-guide-basic_app--rl_app)
   - [Deployment to ACR](#deployment-to-acr)
   - [Evaluation](#evaluation)
@@ -49,6 +50,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
+| `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
@@ -64,7 +66,15 @@ agentcore-rl-toolkit/
 │   ├── __init__.py                 # Public exports
 │   ├── app.py                      # AgentCoreRLApp base class
 │   ├── client.py                   # RolloutClient for batch evaluation
-│   └── reward_function.py          # RewardFunction base class
+│   ├── reward_function.py          # RewardFunction base class
+│   └── rollout_gateway/            # Token-level trajectory capture layer (trainer-side)
+│       ├── trace.py                # TraceRecord — torch-free output boundary
+│       ├── trajectory.py           # TrajectoryManager — per-session message tree
+│       ├── render.py               # Renderer protocol; HfTemplateRenderer, TinkerRenderer
+│       ├── parsing.py              # tool/reasoning output parsing (sglang optional)
+│       ├── gateway.py              # RolloutGateway — assembles the serving unit
+│       ├── adapters/               # OpenAI + Anthropic wire protocol adapters
+│       └── sampling_backends/      # SamplingBackend impls (vLLM/SGLang HTTP, Tinker SDK)
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
 │   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
@@ -224,6 +234,92 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 **RewardFunction** (`src/agentcore_rl_toolkit/reward_function.py`)
 - Base class for reward implementations
 - Can be any function that outputs a scalar
+
+### Rollout Gateway
+
+`src/agentcore_rl_toolkit/rollout_gateway/` is an in-repo, backend-agnostic layer that
+captures **token-level, loss-maskable trajectories** from agent rollouts for RL training.
+It is the successor to the `rllm-model-gateway` dependency used by the current
+`backends/{slime,verl}` integrations.
+
+**Why it exists.** RL training needs per-token ids, logprobs, and a loss mask for every
+model turn — not just the final text. The gateway captures these transparently: an agent
+points its OpenAI/Anthropic client at the gateway (just change `base_url`), and the
+gateway records the trajectory as a side effect of serving the request.
+
+**How it works.** The gateway *owns tokenization*. Rather than scraping token ids out of
+a chat response (which is engine-specific and brittle), it renders canonical messages to
+`token_ids` itself, sends those to a token-in/token-out inference backend, and gets back
+`token_ids` + logprobs. Owning both directions makes loss-masking well-defined and
+eliminates cross-backend retokenization drift. This is also what lets it support
+sample-only backends like Tinker, which cannot render themselves.
+
+**Core components:**
+
+| Component | File | Role |
+|---|---|---|
+| `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`. Each training backend converts this to its native sample type in its own process. |
+| `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation, parallel tool-call branches, and heals re-tokenization drift between turns (CLEAN / REALIGN / FORK). Tokenizer-free and torch-free. |
+| `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (default, HF `apply_chat_template`) or `TinkerRenderer` (needs `tinker-cookbook`, installed manually). |
+| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. |
+| Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
+| `RolloutGateway` | `gateway.py` | Assembles tokenizer + renderer + backend + adapters onto one aiohttp app sharing one `TrajectoryManager`. Session identity rides in the api-key / Bearer slot; `base_url` is a fixed gateway address (no per-session URLs). |
+
+**Session model.** A session id (in the Bearer slot) keys one trajectory tree.
+`gateway.create_session(sid)` → agent turns are captured → `gateway.finish_session(sid)`
+drains the tree into `list[TraceRecord]`.
+
+**Multi-API & sub-agents.**
+- *Multi-API* (works today): OpenAI- and Anthropic-protocol turns for the same session id
+  fold into the same trajectory tree, so one training run can capture agents that speak
+  different wire protocols.
+- *Dynamic sub-agents as in-session forks* (works today): when a harness spawns a sub-agent
+  (e.g. Claude Code's Task tool) whose LLM calls reuse the **same** session id, its distinct
+  system prompt doesn't match the parent's branch, so `TrajectoryManager` **forks** a new leaf
+  automatically (`_find_mount_point` matches by role + message equality). `get_trajectory`
+  walks *all* leaves, so the parent trajectory and each sub-agent trajectory are all captured
+  and correlated under one tree — the common self-spawning-sub-agent case needs no extra
+  wiring. (Verifying this end-to-end against a real Claude Code harness is a to-do; the design
+  is in place, but only synthetic/single-agent flows have been exercised so far.)
+- *Sub-agents that run under a **distinct** session id* (grouping pending): if the harness
+  gives a sub-agent its own session id (its own Bearer key), it becomes a separate tree. Tying
+  those separate trees into one episode requires stamping a shared `rollout_id` across their
+  `TraceRecord`s — that stamping lives in the (not-yet-landed) dispatch layer, so this
+  cross-session case is not wired in this package yet.
+
+**Dependencies.** The gateway is trainer-side and lives behind extras — the base install
+(agent-side `AgentCoreRLApp` / `RolloutClient`) stays lean:
+- `pip install agentcore-rl-toolkit[gateway]` → `aiohttp` + `transformers`.
+- Tool/reasoning parsing uses a dependency-free regex (common `<tool_call>` format) and
+  `</think>` split; no engine parser dependency. A caller needing engine-grade parsing
+  for an exotic format installs `sglang`/`vllm` and passes a parser name explicitly.
+- For the Tinker backend (`TinkerSdkBackend` + `TinkerRenderer`), install `tinker` and
+  `tinker-cookbook` manually — they require Python ≥3.11, so they are not declared as an
+  extra (this package supports ≥3.10). Both pull torch.
+
+The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBackend`
+protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so
+importing the package never requires aiohttp. Tests live in `tests/rollout_gateway/`.
+
+**Status.** The capture layer above is implemented and tested. Wiring it into a training
+backend (the per-backend rollout function + `TraceRecord → native sample` conversion, and
+the ACR dispatch/reward-join glue) is not yet on the main branch — a prototype dispatcher
+is parked on the `wip/online-rl-dispatch` branch until a backend consumes it end-to-end.
+
+**Vendored from slime (upstream baselines).** Several files are adapted from
+[slime](https://github.com/THUDM/slime) (Apache-2.0; see `NOTICE`). To check what changed
+upstream before re-syncing, diff the source file against the baseline commit below:
+
+| This repo | slime source | Baseline commit |
+|---|---|---|
+| `rollout_gateway/trajectory.py` | `slime/agent/trajectory.py` | `90c212b5` |
+| `rollout_gateway/adapters/{common,openai,anthropic}.py` | `slime/agent/adapters/` | `90c212b5` |
+| `rollout_gateway/parsing.py` | `slime/agent/parsing.py` | `90c212b5` |
+
+Re-sync workflow: `git -C <slime> diff 90c212b5..HEAD -- slime/agent/<file>` shows upstream
+changes since the lift. Our copies are intentionally modified (torch-free; `Sample` →
+`TraceRecord`; injected backend/renderer seams; sglang parser hook removed), so treat the diff
+as a review aid, not an automatic merge. Bump the baseline commit here when you re-sync.
 
 ### Migration Guide (basic_app → rl_app)
 
@@ -402,6 +498,14 @@ Agents use their framework's native OpenAI-compatible model class (e.g., `OpenAI
 
 ```bash
 uv run pytest tests/
+```
+
+The rollout gateway tests (`tests/rollout_gateway/`) need the gateway's runtime deps
+(`aiohttp`, `transformers`), which are included in the `dev` extra:
+
+```bash
+uv sync --extra dev
+uv run pytest tests/rollout_gateway/
 ```
 
 ### Building and Pushing Docker Images

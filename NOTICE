@@ -1,1 +1,15 @@
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+------------------------------------------------------------------------------
+
+This product includes software developed as part of the slime project
+(https://github.com/THUDM/slime), licensed under the Apache License, Version 2.0.
+
+The rollout gateway (src/agentcore_rl_toolkit/rollout_gateway/) adapts code from
+slime, notably:
+  - trajectory.py  — TrajectoryManager, TurnRecord, MessageNode, and the
+                     CLEAN/REALIGN/FORK drift classification, adapted from
+                     slime/agent/trajectory.py (made torch-free).
+  - adapters/      — OpenAIAdapter, AnthropicAdapter, and the shared BaseAdapter
+                     pipeline, adapted from slime/agent/adapters/.
+  - parsing.py     — output-parsing helpers, adapted from slime/agent/parsing.py.
