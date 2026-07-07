@@ -47,7 +47,6 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | File | Purpose |
 |------|---------|
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
-| `src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py` | Legacy `vLLMModel` for client-side token ID collection (replaced by rllm-model-gateway) |
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `examples/strands_math_agent/` | GSM8K math agent example |
@@ -65,11 +64,7 @@ agentcore-rl-toolkit/
 │   ├── __init__.py                 # Public exports
 │   ├── app.py                      # AgentCoreRLApp base class
 │   ├── client.py                   # RolloutClient for batch evaluation
-│   ├── reward_function.py          # RewardFunction base class
-│   └── frameworks/
-│       └── strands/
-│           ├── __init__.py
-│           └── vllm_model.py       # Legacy vLLMModel (client-side token ID collection)
+│   └── reward_function.py          # RewardFunction base class
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
 │   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
@@ -225,11 +220,6 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 - Framework-agnostic: works with any agent framework, not just Strands
 
 #### Utilities
-
-**vLLMModel** (`src/agentcore_rl_toolkit/frameworks/strands/vllm_model.py`) — **Legacy**
-- Client-side token ID collection wrapper around Strands `OpenAIModel`
-- Replaced by [rllm-model-gateway](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway), which captures token IDs transparently at the HTTP layer as a proxy between the agent and inference server — no custom model wrapper needed in agent code
-- The file is retained for backward compatibility but examples now use standard `OpenAIModel`
 
 **RewardFunction** (`src/agentcore_rl_toolkit/reward_function.py`)
 - Base class for reward implementations
@@ -406,11 +396,7 @@ See `.env.example` for template. The build script sources `.env` for deployment 
 
 ### Adding Support for a New Framework
 
-Agents use their framework's native OpenAI-compatible model class (e.g., `OpenAIModel` for Strands), so framework-specific model wrappers are generally not needed. If other framework-specific utilities are needed:
-
-1. Create `src/agentcore_rl_toolkit/frameworks/{framework}/`
-2. Implement the utility
-3. Export in the framework's `__init__.py`
+Agents use their framework's native OpenAI-compatible model class (e.g., `OpenAIModel` for Strands), so framework-specific model wrappers are not needed. Point the model's `base_url` at the training inference server and token capture is handled at the infrastructure layer — no per-framework code lives in this package.
 
 ### Running Tests
 

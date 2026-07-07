@@ -58,7 +58,7 @@ Two separate packages are involved — don't confuse them:
 
 | Package | What it gives you | Source |
 |---------|-------------------|--------|
-| `agentcore-rl-toolkit` (this repo) | The RL SDK (`AgentCoreRLApp`, `@rollout_entrypoint`, `vLLMModel`) **and this example** | `git clone` (below) |
+| `agentcore-rl-toolkit` (this repo) | The RL SDK (`AgentCoreRLApp`, `@rollout_entrypoint`) **and this example** | `git clone` (below) |
 | `bedrock-agentcore-starter-toolkit` | AWS's `agentcore` CLI used to deploy to ACR | `pip install` (below) |
 
 ## Installation
