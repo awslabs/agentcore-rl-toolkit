@@ -18,6 +18,11 @@ dependencies = [
 [tool.setuptools]
 py-modules = ["rl_app", "reward", "models", "utils"]
 
+[tool.uv]
+override-dependencies = [
+    "migrationbench @ git+https://github.com/amazon-science/MigrationBench.git@19acd9eb3a402d825f200eb14cf01584eaa1f6e9",
+]
+
 [tool.uv.sources]
 migrationbench = { git = "https://github.com/amazon-science/MigrationBench.git", rev = "19acd9eb3a402d825f200eb14cf01584eaa1f6e9" }
 java-migration-agent = { git = "https://github.com/amazon-science/JavaMigration.git", subdirectory = "java_migration_agent" }
