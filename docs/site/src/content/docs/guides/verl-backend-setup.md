@@ -87,12 +87,17 @@ Before running the training:
 
 The training can be launched with the following commands:
 
+:::note
+The following commands assume CUDA 13.0 is installed at `/usr/local/cuda-13.0`; adjust `CUDA_HOME` if yours differs.
+:::
+
 ```bash
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export CUDA_HOME=/usr/local/cuda-13.0
-VENV_CU13_LIB=$(python -c "import sysconfig, os; print(os.path.join(sysconfig.get_path('purelib'), 'nvidia', 'cu13', 'lib'))")
-export LD_LIBRARY_PATH=$VENV_CU13_LIB:$LD_LIBRARY_PATH
+NVIDIA_LIBS=$(python -c "import sysconfig, os, glob; base=os.path.join(sysconfig.get_path('purelib'), 'nvidia'); print(':'.join(sorted(glob.glob(os.path.join(base, '*', 'lib')))))")
+LD_LIBRARY_PATH="$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -vE '^/usr/local/cuda(-[0-9.]+)?/' | paste -sd ':' -)"
+export LD_LIBRARY_PATH="${NVIDIA_LIBS}:${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
 export WANDB_API_KEY="your-wandb-api-key"
 
 python3 -m agentcore_rl_toolkit.backends.verl.main \

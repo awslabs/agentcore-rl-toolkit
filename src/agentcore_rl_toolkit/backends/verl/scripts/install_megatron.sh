@@ -20,8 +20,17 @@ echo "[1/5] Installing nvidia-modelopt..."
 uv pip install 'nvidia-modelopt>=0.37.0'
 
 echo "[2/5] Installing transformer-engine (this may take a while)..."
-MAX_JOBS=128 uv pip install --no-cache --no-build-isolation \
-    "transformer_engine[pytorch,core-cu${CUDA_MAJOR}]==2.11"
+if [ "${CUDA_MAJOR}" != "12" ]; then
+    # If CUDA version is not cu12, explicitly exclude transformer-engine-cu12
+    # to avoid "Multiple libcudart libraries found" errors.
+    echo "transformer-engine-cu12 ; sys_platform == 'never'" | \
+    MAX_JOBS=128 uv pip install --no-cache --no-build-isolation \
+        --overrides - \
+        "transformer_engine[pytorch,core-cu${CUDA_MAJOR}]==2.11"
+else
+    MAX_JOBS=128 uv pip install --no-cache --no-build-isolation \
+        "transformer_engine[pytorch,core-cu${CUDA_MAJOR}]==2.11"
+fi
 
 # megatron-core > 0.15.0 required for numpy>=2.0.0 compatibility
 echo "[3/5] Installing megatron-core..."

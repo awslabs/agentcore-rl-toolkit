@@ -80,12 +80,14 @@ rllm = [
 ]
 verl = [
     "transformers>=5.5.3",
+    "datasets>=5.0.0",
     "numpy",
     "verl==0.8.0",
     "ray",
     "torch>=2.10.0",
     "torchvision>=0.23.0",
-    "vllm==0.21.0",
+    "vllm==0.22.0",
+    "flash-linear-attention",
     "flash-attn==2.8.3",
     "qwen-vl-utils",
     "rllm-model-gateway>=0.1.0",
