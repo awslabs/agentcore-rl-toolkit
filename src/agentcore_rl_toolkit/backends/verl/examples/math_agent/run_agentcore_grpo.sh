@@ -7,10 +7,9 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 # Set your cuda path
 export CUDA_HOME=/usr/local/cuda-13.0
 
-# If you installed nvidia-cublas-cu13 library in python environment, run the following two
-# to add it to system library paths.
-VENV_CU13_LIB=$(python -c "import sysconfig, os; print(os.path.join(sysconfig.get_path('purelib'), 'nvidia', 'cu13', 'lib'))")
-export LD_LIBRARY_PATH=$VENV_CU13_LIB:$LD_LIBRARY_PATH
+NVIDIA_LIBS=$(python -c "import sysconfig, os, glob; base=os.path.join(sysconfig.get_path('purelib'), 'nvidia'); print(':'.join(sorted(glob.glob(os.path.join(base, '*', 'lib')))))")
+LD_LIBRARY_PATH="$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -vE '^/usr/local/cuda(-[0-9.]+)?/' | paste -sd ':' -)"
+export LD_LIBRARY_PATH="${NVIDIA_LIBS}:${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
 
 # If you want to use wandb to visualize your training curves, set your wandb API key here.
 export WANDB_API_KEY="your-wandb-api-key"

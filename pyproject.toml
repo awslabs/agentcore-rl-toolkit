@@ -79,13 +79,14 @@ rllm = [
     "rllm",
 ]
 verl = [
-    "transformers>=5.5.3",
+    "transformers==5.8.1",
     "numpy",
     "verl==0.8.0",
     "ray",
     "torch>=2.10.0",
     "torchvision>=0.23.0",
-    "vllm==0.21.0",
+    "vllm==0.22.0",
+    "flash-linear-attention",
     "flash-attn==2.8.3",
     "qwen-vl-utils",
     "rllm-model-gateway>=0.1.0",
@@ -95,6 +96,14 @@ verl = [
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
 [tool.uv]
+# Declaring verl and rllm as conflicting extras lets uv resolve each
+# in its own fork instead of forcing one universal lock.
+conflicts = [
+    [
+        { extra = "verl" },
+        { extra = "rllm" },
+    ],
+]
 override-dependencies = [
     "numpy>=1.26.0",
 ]
