@@ -264,29 +264,44 @@ illustration examples.
 **MigrationBench:**
 
 ```text
-Agent: I'll start by exploring the repository structure.
-    → shell: find /tmp/workspace/Rorledning -name "pom.xml"
+# Repo: jReddit/jReddit (44 tests, 7,089 LOC). Java 17 breaks it three ways:
+#   - RedditOAuthAgent.java imports javax.xml.bind.DatatypeConverter (removed in Java 11+)
+#   - Mockito 1.9.5 can't generate proxies on JDK 17 (NoClassDefFoundError: ClassImposterizer)
+#   - After bumping Mockito: runner moves org.mockito.runners → org.mockito.junit,
+#     and Matchers.any → Mockito.any
 
-Agent: Let me examine the pom.xml to understand the current Java version and
-       dependencies.
-    → editor: view /tmp/workspace/Rorledning/pom.xml
-    (sees java.version=1.8, guava 29.0, JUnit 5.6.2, surefire 2.22.2)
+Agent: Let me run the build first to see the current state and what version it's using.
+    → shell: mvn -ntp clean verify 2>&1 | tail -n 100
+    ✗ package javax.xml.bind does not exist       (surfaces the JAXB failure up front)
 
-Agent: Let me run the existing tests to confirm they pass on Java 8.
-    → shell: mvn -ntp clean test 2>&1 | tail -n 100
-    ✓ BUILD SUCCESS — Tests run: 10, Failures: 0
+Agent: Java 17 removed the JAXB API (javax.xml.bind). Let me examine that file.
+    → editor: view RedditOAuthAgent.java          (confirms the DatatypeConverter import)
 
-Agent: Now I'll migrate to Java 17. Updating the pom.xml:
-    → editor: str_replace in pom.xml
-       <java.version>1.8</java.version>  →  <java.version>17</java.version>
+Agent: I'll add the JAXB dependencies and configure the compiler to use Java 17.
+    → editor: str_replace pom.xml
+        + <maven.compiler.source>17</…>  <target>17</…>  <release>17</…>
+    → editor: str_replace pom.xml                 (+ jaxb-api 2.3.1, + jaxb-runtime 2.3.1)
+    → editor: str_replace pom.xml                 (Mockito 1.9.5 → 4.6.1)
 
-Agent: Let's run the tests again to make sure everything still works with Java 17.
-    → shell: mvn -ntp clean test 2>&1 | tail -n 100
-    ✓ BUILD SUCCESS — Tests run: 10, Failures: 0
+Agent: Mockito 4.x moved the runner package. Rather than rip out @RunWith and
+       hand-bolt openMocks(), the class merely moved — one surgical rename keeps
+       the runner, so no @Before body surgery is needed.
+    → shell: find src/test -name "*.java" -exec \
+        sed -i 's/org\.mockito\.runners/org\.mockito\.junit/g' {} \;
+    → editor: str_replace tests   (Matchers.any → Mockito.any; + -Xdoclint:none for Javadoc)
 
-Agent: Let me verify the compiled classes are Java 17 bytecode.
-    → shell: find target -name "*.class" -exec javap -verbose {} \; | grep "major version"
-    ✓ major version: 61 (all class files)
+Agent: Let's try building again.
+    → shell: mvn -ntp clean verify 2>&1 | tail -n 100
+    ✓ BUILD SUCCESS
+
+Agent: Let's verify the jar was built with Java 17 bytecode.
+    → shell: javap -v -cp target/jreddit-1.0.4-SNAPSHOT.jar \
+        com.github.jreddit.oauth.RedditOAuthAgent | grep "major version"
+    ✓ major version: 61
+
+Agent: Let's run the tests to make sure everything is working.
+    → shell: mvn -ntp test 2>&1 | tail -n 20
+    ✓ Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
 ```
 
 **OfficeBench:**
