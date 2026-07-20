@@ -67,6 +67,16 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Blog',
+					items: [
+						{ label: 'Overview', slug: 'blog' },
+						{
+							label: 'Training multi-step agents with RL',
+							slug: 'blog/training-multi-step-agents-rl',
+						},
+					],
+				},
+				{
 					label: 'API Reference',
 					items: [
 						{
