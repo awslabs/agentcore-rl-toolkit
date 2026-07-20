@@ -97,7 +97,9 @@ def _compose_command(command: str, cwd: str = None, env: dict = None) -> str:
             if not _ENV_KEY_RE.match(key):
                 raise ValueError(f"Invalid environment variable name: {key!r}")
         exports = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
-        prefix += f"export {exports}; "
+        # && (not ;) so a failed cd cannot fall through to running the command
+        # in the wrong directory with a clean exit code.
+        prefix += f"export {exports} && "
     return prefix + command
 
 
@@ -245,7 +247,7 @@ class Sandbox:
 
         Commands are stateless — each call runs in a fresh shell. Use ``cwd``
         and ``env`` to re-establish state per call; they are composed into the
-        command string (``cd ... && export ...; <command>``).
+        command string (``cd ... && export ... && <command>``).
 
         The command is interpreted by a shell (default ``/bin/sh``): pipes,
         ``;``, variable expansion and command substitution all work. (On the
@@ -339,6 +341,7 @@ class Sandbox:
             self._client._client.stop_runtime_session(
                 agentRuntimeArn=self._client.runtime_arn,
                 runtimeSessionId=self.session_id,
+                qualifier=self._client.qualifier,
                 clientToken=str(uuid.uuid4()),
             )
             logger.info(f"Terminated sandbox session {self.session_id[:8]}...")

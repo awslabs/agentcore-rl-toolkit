@@ -189,7 +189,7 @@ class TestExec:
         mock_acr.invoke_agent_runtime_command.return_value = make_command_response()
         client.attach(FAKE_SESSION_ID).exec("pytest -q", cwd="/app", env={"FOO": "bar"})
         body = mock_acr.invoke_agent_runtime_command.call_args.kwargs["body"]
-        assert body["command"] == "/bin/sh -c 'cd /app && export FOO=bar; pytest -q'"
+        assert body["command"] == "/bin/sh -c 'cd /app && export FOO=bar && pytest -q'"
 
     def test_client_level_shell(self):
         with patch("agentcore_rl_toolkit.sandbox.client.boto3") as mock_boto3:
@@ -263,7 +263,19 @@ class TestTerminate:
         kwargs = mock_acr.stop_runtime_session.call_args.kwargs
         assert kwargs["agentRuntimeArn"] == FAKE_ARN
         assert kwargs["runtimeSessionId"] == FAKE_SESSION_ID
+        assert kwargs["qualifier"] == "DEFAULT"
         assert kwargs["clientToken"]
+
+    def test_terminate_forwards_custom_qualifier(self):
+        """A non-DEFAULT qualifier must reach stop_runtime_session, not just start/exec."""
+        with patch("agentcore_rl_toolkit.sandbox.client.boto3") as mock_boto3:
+            mock_acr = MagicMock()
+            mock_boto3.client.return_value = mock_acr
+            client = SandboxClient(runtime_arn=FAKE_ARN, qualifier="prod-endpoint")
+        mock_acr.invoke_agent_runtime.return_value = make_start_response({"status": "ok", "state": "healthy"})
+        client.attach(FAKE_SESSION_ID).terminate()
+        assert mock_acr.invoke_agent_runtime.call_args.kwargs["qualifier"] == "prod-endpoint"
+        assert mock_acr.stop_runtime_session.call_args.kwargs["qualifier"] == "prod-endpoint"
 
     def test_stop_action_failure_still_stops_session(self):
         client, mock_acr = make_client_and_mock()

@@ -369,7 +369,7 @@ sb = client.attach(session_id)                  # reconnect to a live session
   failures: `ClientError`/`EventStreamError` propagate; `SandboxProtocolError` means the
   deployed container isn't behaving like sandboxd (wrong image) or the stream was invalid.
 - **Commands are stateless** — each `exec()` runs in a fresh process. `cwd=`/`env=` params
-  are composed into the command string per call (`cd ... && export ...; <command>`).
+  are composed into the command string per call (`cd ... && export ... && <command>`).
 - **The command API does not invoke a shell itself** (it word-splits argv-style), so the
   client wraps every command in `<shell> -c '...'` on the wire — default `/bin/sh` for
   arbitrary-image portability, overridable via `SandboxClient(shell=...)`/`exec(shell=...)`.
