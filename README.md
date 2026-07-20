@@ -45,6 +45,7 @@ While session routing is valuable for multi-turn production agents, RL rollouts 
 - **Async end-to-end**: Fire-and-forget server + future-based client — no long-lived TCP connections needed for long-running agent rollouts
 - **Simplified rollout collection**: `RolloutClient` manages concurrency, rate limiting, and S3 result polling out of the box for both training loops and batch evaluation
 - **Production parity**: Direct code reuse from production agents ensures training behavior matches real deployment
+- **Sandbox on ACR** (`SandboxClient` + `agentcore-sandboxd`): Run shell commands in arbitrary Docker images (e.g. SWE-bench-style coding environments) as isolated AgentCore runtime sessions — no agent server required in the image
 
 ## Agent-Side: Adapting Your Agent for RL
 
@@ -308,6 +309,21 @@ chmod +x scripts/build_docker_image_and_push_to_ecr.sh
   --tag=dev \
   --context=examples/strands_math_agent
 ```
+
+## Sandbox: Command Execution in Arbitrary Images
+
+Coding-agent evaluation and RL training typically start from prebuilt environment images (repository checkout, dependencies, test runner) that are not HTTP agent servers. The sandbox SDK bridges them onto AgentCore Runtime: a tiny health shim (`agentcore-sandboxd`, built from [`sandboxd/`](./sandboxd/)) is added to the image to satisfy the ACR container contract, and commands run through ACR's native `InvokeAgentRuntimeCommand` API.
+
+```python
+from agentcore_rl_toolkit.sandbox import SandboxClient
+
+client = SandboxClient(runtime_arn="arn:aws:bedrock-agentcore:...:runtime/...")
+with client.start() as sb:
+    result = sb.exec("cd /app && pytest -q", timeout=900)
+    print(result.exit_code, result.stdout)
+```
+
+Failing commands and timeouts are results, not exceptions — exactly what reward functions need. See [`examples/sandbox_quickstart/`](./examples/sandbox_quickstart/) for the full walkthrough (build the shim binary, wrap and push an image, create a runtime, run commands).
 
 ## Contributing
 

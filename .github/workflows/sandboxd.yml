@@ -1,0 +1,29 @@
+name: Sandboxd
+
+on:
+  push:
+    branches: [main]
+    paths: ["sandboxd/**"]
+  pull_request:
+    branches: [main]
+    paths: ["sandboxd/**"]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sandboxd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test -race ./...

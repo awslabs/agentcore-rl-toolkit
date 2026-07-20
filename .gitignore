@@ -27,5 +27,7 @@ config.toml
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/check-cloudwatch-session-logs/
+# Personal per-project Claude instructions (loaded alongside CLAUDE.md, never committed)
+CLAUDE.local.md
 
 .bedrock_agentcore.yaml
