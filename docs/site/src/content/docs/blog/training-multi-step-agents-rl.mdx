@@ -3,6 +3,8 @@ title: Training multi-step agents on AgentCore Runtime with reinforcement learni
 description: Reusing production agent code, parallelizing rollouts in microVMs, and capturing training data transparently — so RL becomes another invocation pattern, not a separate codebase.
 ---
 
+_By Youzhi Luo, Bryan Lu, Linbo Liu, Panpan Xu · July 20, 2026_
+
 :::note[TL;DR]
 We built an end-to-end system for online RL on multi-step agents on top of
 Bedrock AgentCore Runtime: reuse your production agent code (a one-line
@@ -318,11 +320,11 @@ wide range of capability and cost:
 The consolidated table below summarizes base-model and RL-trained performance
 (task success rate) for each model–benchmark pair.
 
-| # | Use case | Dataset | Model | Base model performance | RL-trained model performance |
-|---|----------|---------|-------|:----------------------:|:----------------------------:|
-| 1 | Code-migration agent | MigrationBench | Qwen3-Coder-30B-A3B-Instruct | 43% | 76% |
-| 2 | Office-automation agent | OfficeBench | Qwen3-4B-Instruct-2507 | 18% | 30% |
-| 3 | Office-automation agent | OfficeBench | Qwen3-30B-A3B-Instruct-2507 | 24% | 41% |
+| Use case | Dataset | Model | Base model performance | RL-trained model performance |
+|----------|---------|-------|:----------------------:|:----------------------------:|
+| Code-migration agent | MigrationBench | Qwen3-Coder-30B-A3B-Instruct | 43% | 76% |
+| Office-automation agent | OfficeBench | Qwen3-4B-Instruct-2507 | 18% | 30% |
+| Office-automation agent | OfficeBench | Qwen3-30B-A3B-Instruct-2507 | 24% | 41% |
 
 Here are a few of our experimental findings:
 
