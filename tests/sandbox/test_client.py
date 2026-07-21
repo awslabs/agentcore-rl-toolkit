@@ -303,6 +303,24 @@ class TestTerminate:
         assert mock_acr.invoke_agent_runtime.call_count == 1
 
 
+class TestExecAfterTerminate:
+    def test_exec_after_terminate_raises(self):
+        client, mock_acr = make_client_and_mock()
+        mock_acr.invoke_agent_runtime.return_value = make_start_response({"status": "ok", "state": "healthy"})
+        sandbox = client.attach(FAKE_SESSION_ID)
+        sandbox.terminate()
+        with pytest.raises(RuntimeError, match="is terminated"):
+            sandbox.exec("echo hi")
+        mock_acr.invoke_agent_runtime_command.assert_not_called()
+
+    def test_exec_after_context_exit_raises(self):
+        client, _ = make_client_and_mock(make_start_response())
+        with client.start() as sandbox:
+            pass
+        with pytest.raises(RuntimeError, match="is terminated"):
+            sandbox.exec("echo hi")
+
+
 class TestContextManager:
     def test_exit_terminates(self):
         client, mock_acr = make_client_and_mock(make_start_response())

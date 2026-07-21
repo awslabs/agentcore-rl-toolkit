@@ -268,7 +268,17 @@ class Sandbox:
         Returns:
             An ``ExecResult`` with exit code, accumulated stdout/stderr, and the
             timeout flag.
+
+        Raises:
+            RuntimeError: If the sandbox has been terminated. (After
+                ``StopRuntimeSession`` the session id remains valid, so an
+                unguarded exec would silently provision a fresh microVM and run
+                against empty state instead of failing.)
         """
+        if self._terminated:
+            raise RuntimeError(
+                f"Sandbox {self.session_id[:8]}... is terminated; use SandboxClient.start() for a new session"
+            )
         composed = _compose_command(command, cwd=cwd, env=env)
         body = {"command": _wrap_in_shell(composed, shell=shell or self._client.shell)}
         if timeout is not None:
