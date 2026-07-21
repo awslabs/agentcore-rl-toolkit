@@ -1,0 +1,8 @@
+# Copy this file to config.toml and fill in your values
+
+[agentcore]
+region = "us-west-2"
+agent_name = "sandbox_quickstart"
+# The image pushed by ./build_and_push.sh:
+image_uri = "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/ECR_REPO_NAME:sandbox-quickstart"
+execution_role_arn = "arn:aws:iam::ACCOUNT_ID:role/EXAMPLE_ROLE"

@@ -12,6 +12,7 @@ This document provides context, patterns, and guidelines for AI coding assistant
   - [Background: BedrockAgentCoreApp](#background-bedrockagentcoreapp)
   - [What agentcore-rl-toolkit Provides](#what-agentcore-rl-toolkit-provides)
   - [Rollout Gateway](#rollout-gateway)
+  - [Sandbox SDK](#sandbox-sdk)
   - [Migration Guide (basic_app → rl_app)](#migration-guide-basic_app--rl_app)
   - [Deployment to ACR](#deployment-to-acr)
   - [Evaluation](#evaluation)
@@ -51,6 +52,8 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
+| `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
+| `sandboxd/` | Go health shim (`agentcore-sandboxd`) that makes arbitrary Docker images satisfy the ACR container contract |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
@@ -67,6 +70,9 @@ agentcore-rl-toolkit/
 │   ├── app.py                      # AgentCoreRLApp base class
 │   ├── client.py                   # RolloutClient for batch evaluation
 │   ├── reward_function.py          # RewardFunction base class
+│   ├── sandbox/                    # Sandbox SDK (sync client for command execution)
+│   │   ├── client.py               # SandboxClient (start/attach) + Sandbox (exec/terminate)
+│   │   └── types.py                # ExecResult, SandboxProtocolError
 │   └── rollout_gateway/            # Token-level trajectory capture layer (trainer-side)
 │       ├── trace.py                # TraceRecord — torch-free output boundary
 │       ├── trajectory.py           # TrajectoryManager — per-session message tree
@@ -94,17 +100,28 @@ agentcore-rl-toolkit/
 │   │   ├── reward.py               # OfficeBenchReward implementation
 │   │   ├── tools.py                # Office automation tools
 │   │   └── pyproject.toml          # Example-specific dependencies
-│   └── strands_appworld_agent/    # AppWorld example
-│       ├── rl_app.py               # RL-adapted AppWorld code agent
-│       ├── evaluate.py             # Async batch evaluation script
-│       ├── deploy.py               # Deploy container to AgentCore
-│       ├── reward.py               # AppWorldReward implementation
-│       ├── Dockerfile              # ACR container (AppWorld data baked in)
-│       └── pyproject.toml          # Example-specific dependencies
+│   ├── strands_appworld_agent/    # AppWorld example
+│   │   ├── rl_app.py               # RL-adapted AppWorld code agent
+│   │   ├── evaluate.py             # Async batch evaluation script
+│   │   ├── deploy.py               # Deploy container to AgentCore
+│   │   ├── reward.py               # AppWorldReward implementation
+│   │   ├── Dockerfile              # ACR container (AppWorld data baked in)
+│   │   └── pyproject.toml          # Example-specific dependencies
+│   └── sandbox_quickstart/         # Sandbox SDK example (no agent server)
+│       ├── Dockerfile              # debian-slim + prebuilt sandboxd binary
+│       ├── build_and_push.sh       # binary + image + ECR push in one command
+│       ├── deploy.py               # create the sandbox runtime (temp scaffolding)
+│       ├── run_sandbox.py          # start -> exec -> terminate demo
+│       └── README.md               # binary build + deploy + run walkthrough
+├── sandboxd/                       # Go health shim (self-contained module, stdlib only)
+│   ├── main.go                     # /ping + /invocations busy-state server
+│   ├── main_test.go
+│   └── build.sh                    # cross-compile (arm64 default; docker fallback)
 ├── tests/
 │   ├── test_rollout_entrypoint.py
 │   ├── test_client.py
-│   └── test_async_client.py
+│   ├── test_async_client.py
+│   └── sandbox/                    # Sandbox SDK tests (mocked boto3)
 ├── scripts/
 │   └── build_docker_image_and_push_to_ecr.sh
 ├── pyproject.toml
@@ -320,6 +337,63 @@ Re-sync workflow: `git -C <slime> diff 90c212b5..HEAD -- slime/agent/<file>` sho
 changes since the lift. Our copies are intentionally modified (torch-free; `Sample` →
 `TraceRecord`; injected backend/renderer seams; sglang parser hook removed), so treat the diff
 as a review aid, not an automatic merge. Bump the baseline commit here when you re-sync.
+
+### Sandbox SDK
+
+`src/agentcore_rl_toolkit/sandbox/` runs shell commands in **arbitrary Docker images**
+(e.g. SWE-bench-style coding environments) deployed as ACR runtimes — the substrate for
+coding-agent evaluation and RL rollouts.
+
+**How it works.** Most coding-environment images are not HTTP agent servers, but ACR
+requires containers to expose `/ping` and `/invocations` on port 8080. The bridge is
+`agentcore-sandboxd` (Go, stdlib-only, source in `sandboxd/`): a health shim added to the
+image that manages the Healthy/HealthyBusy ping state. Command execution does NOT go
+through the shim — the client uses ACR's native `InvokeAgentRuntimeCommand` API, which
+runs shell commands in the same session/container and streams back stdout/stderr/exit code.
+
+```python
+from agentcore_rl_toolkit.sandbox import SandboxClient
+
+client = SandboxClient(runtime_arn="arn:aws:bedrock-agentcore:...:runtime/...")
+with client.start() as sb:                      # session starts, ping -> HealthyBusy
+    result = sb.exec("cd /app && pytest -q", timeout=900)
+    result.exit_code, result.stdout, result.stderr, result.timed_out
+# __exit__ -> terminate(): ping -> Healthy, then StopRuntimeSession
+sb = client.attach(session_id)                  # reconnect to a live session
+```
+
+**Key semantics:**
+
+- **Nonzero exit and timeout are data, not exceptions** (`ExecResult.exit_code`,
+  `ExecResult.timed_out` with partial output). Exceptions are reserved for infrastructure
+  failures: `ClientError`/`EventStreamError` propagate; `SandboxProtocolError` means the
+  deployed container isn't behaving like sandboxd (wrong image) or the stream was invalid.
+- **Commands are stateless** — each `exec()` runs in a fresh process. `cwd=`/`env=` params
+  are composed into the command string per call (`cd ... && export ... && <command>`).
+- **The command API does not invoke a shell itself** (it word-splits argv-style), so the
+  client wraps every command in `<shell> -c '...'` on the wire — default `/bin/sh` for
+  arbitrary-image portability, overridable via `SandboxClient(shell=...)`/`exec(shell=...)`.
+  Users just write shell strings; pipes, `;`, and `$VAR` work.
+- **Verbs**: `start`/`attach`/`terminate` are the per-session data plane. `create` is
+  reserved for future control-plane provisioning (`CreateAgentRuntime` from an ECR image).
+- `terminate()` is idempotent and best-effort: it flips the ping to Healthy first so the
+  idle reaper collects the session even if `StopRuntimeSession` fails.
+- The base image must contain a shell (`InvokeAgentRuntimeCommand` executes shell
+  commands); scratch/distroless images won't work.
+- Sync-only today. Planned next phases: TTL leak protection + async client (aiobotocore),
+  then detached exec (`spawn`/`ExecHandle`), interactive shells, file transfer.
+
+**Building the shim binary** (static, cross-compiled; works on x86 hosts, falls back to a
+golang container if Go isn't installed):
+
+```bash
+sandboxd/build.sh                 # -> sandboxd/dist/agentcore-sandboxd-linux-arm64
+sandboxd/build.sh --stage examples/sandbox_quickstart   # also copy into a build context
+```
+
+See `examples/sandbox_quickstart/` for the full walkthrough (wrap image → push to ECR →
+create runtime → run). Python tests: `tests/sandbox/` (boto3 fully mocked). Go tests:
+`cd sandboxd && go test -race ./...` (CI: `.github/workflows/sandboxd.yml`).
 
 ### Migration Guide (basic_app → rl_app)
 
