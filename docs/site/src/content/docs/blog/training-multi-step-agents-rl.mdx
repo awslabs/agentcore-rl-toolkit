@@ -1,0 +1,410 @@
+---
+title: Training multi-step agents on AgentCore Runtime with reinforcement learning
+description: Reusing production agent code, parallelizing rollouts in microVMs, and capturing training data transparently — so RL becomes another invocation pattern, not a separate codebase.
+---
+
+_By Youzhi Luo, Bryan Lu, Linbo Liu, Panpan Xu · July 20, 2026_
+
+:::note[TL;DR]
+We built an end-to-end system for online RL on multi-step agents on top of
+Bedrock AgentCore Runtime: reuse your production agent code (a one-line
+decorator swap), parallelize rollouts in isolated microVMs, and capture
+training data transparently at the HTTP layer — so RL becomes another
+invocation pattern, not a separate codebase. On two long-horizon benchmarks,
+RL lifts task success from 43% → 76% on MigrationBench and roughly doubles it
+on OfficeBench, with the largest gains on the hardest multi-app tasks.
+:::
+
+## Introduction
+
+As organizations move beyond off-the-shelf assistants to AI agents tailored
+for their own tools, workflows, and policies, reinforcement learning (RL) has
+emerged as a practical way to lift task success rates without the cost of
+training a model from scratch. But adapting a production agent for online RL
+traditionally requires a parallel codebase: custom rollout harnesses, bespoke
+model wrappers, and ad hoc data plumbing between rollout and trainer.
+
+In this post, we describe an end-to-end system for online RL on multi-step
+agents built on top of
+[Bedrock AgentCore Runtime (ACR)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html),
+and share results from training and evaluating agents on two long-horizon
+benchmarks: **MigrationBench** (Java code-migration agent) and **OfficeBench**
+(office-automation tasks spanning calendar, email, Excel, Word, PDF, and OCR).
+Our goal was to keep the production agent code essentially intact — a single
+decorator swap — while gaining a scalable, isolated rollout fleet and a clean
+integration path to popular open-source RL training stacks.
+
+## Why AgentCore Runtime for agentic RL
+
+Online RL for agents is, at its core, a coordination problem. The training
+engine needs to produce many independent rollouts in parallel, gather
+per-trajectory rewards, and feed the resulting tokens and logprobs back into a
+policy update — all while keeping inference fast and rollouts isolated from one
+another. ACR provides three properties that map directly onto these
+requirements:
+
+- **Session isolation.** Each runtime session executes in its own microVM, so
+  an agent that mutates filesystem state, runs subprocesses, or talks to a
+  stateful environment can't leak side effects into a sibling rollout.
+- **Session routing.** Requests sharing a session ID route to the same
+  container, which lets multi-step agents accumulate state across calls without
+  the trainer having to manage stickiness itself.
+- **Auto-scaling.** New runtime sessions spin up on demand, so a training run
+  can fan out to thousands of rollouts without the trainer holding sticky TCP
+  connections to a fixed worker pool.
+
+Together, these make rollout generation efficient: fire-and-forget invocations
+that scale horizontally and clean up after themselves.
+
+## System overview
+
+The figure below shows the diagram of our system end-to-end. The training
+backend (right) submits prompts to ACR (left), which runs N parallel agent
+rollouts. Each rollout's agent calls models through the **model-gateway**
+(center), which proxies OpenAI-compatible requests to the backend's inference
+servers and transparently captures rollout data — token IDs, logprobs, expert
+masks, and rewards — at the HTTP layer. The agent writes its scalar reward to
+S3. The training engine consumes the rollout data plus rewards, runs a policy
+update, and syncs new weights back to the inference servers.
+
+<figure class="art-diagram" role="img" aria-label="Training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via model-gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
+  <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <marker id="dg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+      </marker>
+    </defs>
+
+    {/* ── Three columns, each 260px wide, 20px gutters ─────────
+         Left   (AgentCore): x = 20–280
+         Center (shared):    x = 320–580
+         Right  (backend):   x = 620–880
+    ─────────────────────────────────────────────────────────────── */}
+
+    {/* ── Left column — AgentCore Runtime ── */}
+    <rect class="dg-group" x="20" y="20" width="260" height="440" rx="8" />
+    <text class="dg-group-label" x="150" y="44" text-anchor="middle">AgentCore Runtime</text>
+    <text class="dg-note" x="150" y="62" text-anchor="middle">N parallel rollouts</text>
+
+    {/* rollout-stack shadow cards suggesting N */}
+    <rect class="dg-card-shadow" x="52" y="92" width="196" height="336" rx="6" />
+    <rect class="dg-card-shadow" x="46" y="86" width="196" height="336" rx="6" />
+    <rect class="dg-card" x="40" y="80" width="196" height="336" rx="6" />
+
+    <rect class="dg-node" x="60" y="100" width="156" height="60" rx="4" />
+    <text class="dg-label" x="138" y="136" text-anchor="middle">Agent</text>
+
+    <rect class="dg-node" x="60" y="200" width="156" height="60" rx="4" />
+    <text class="dg-label" x="138" y="236" text-anchor="middle">Environment</text>
+
+    {/* Agent ↔ Environment loop */}
+    <path class="dg-edge" d="M 110 160 L 110 200" marker-end="url(#dg-arrow)" />
+    <text class="dg-edge-label" x="106" y="185" text-anchor="end">Tool Use</text>
+    <path class="dg-edge" d="M 166 200 L 166 160" marker-end="url(#dg-arrow)" />
+    <text class="dg-edge-label" x="170" y="185" text-anchor="start">Tool Result</text>
+
+    <rect class="dg-node" x="60" y="340" width="156" height="56" rx="4" />
+    <text class="dg-label" x="138" y="374" text-anchor="middle">Evaluate</text>
+
+    {/* Agent → Evaluate (trajectory) */}
+    <path class="dg-edge dg-edge-dashed" d="M 138 260 L 138 338" marker-end="url(#dg-arrow)" />
+
+    {/* ── Center column — shared data plane ── */}
+    {/* Gateway — top */}
+    <rect class="dg-node dg-node-accent" x="340" y="100" width="220" height="60" rx="4" />
+    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">model-gateway</text>
+    <text class="dg-sublabel" x="450" y="145" text-anchor="middle">v1/chat proxy + capture</text>
+
+    {/* Rollout Data — middle */}
+    <rect class="dg-node" x="340" y="200" width="220" height="140" rx="4" />
+    <text class="dg-label" x="450" y="224" text-anchor="middle">Rollout Data</text>
+    <line class="dg-divider" x1="360" y1="234" x2="540" y2="234" />
+    <text class="dg-sublabel" x="450" y="254" text-anchor="middle">Token IDs</text>
+    <text class="dg-sublabel" x="450" y="276" text-anchor="middle">Logprobs</text>
+    <text class="dg-sublabel" x="450" y="298" text-anchor="middle">Expert masks</text>
+    <text class="dg-sublabel" x="450" y="320" text-anchor="middle">Rewards</text>
+
+    {/* S3 — bottom */}
+    <rect class="dg-node" x="340" y="378" width="220" height="56" rx="4" />
+    <text class="dg-label" x="450" y="412" text-anchor="middle">S3 (rewards)</text>
+
+    {/* Gateway → Rollout Data */}
+    <path class="dg-edge" d="M 450 160 L 450 200" marker-end="url(#dg-arrow)" />
+    {/* S3 → Rollout Data */}
+    <path class="dg-edge" d="M 450 378 L 450 340" marker-end="url(#dg-arrow)" />
+
+    {/* ── Right column — Training Backend ── */}
+    <rect class="dg-group" x="620" y="20" width="260" height="440" rx="8" />
+    <text class="dg-group-label" x="750" y="44" text-anchor="middle">Training Backend</text>
+    <text class="dg-note" x="750" y="62" text-anchor="middle">slime · rllm · verl</text>
+
+    <rect class="dg-node" x="640" y="100" width="220" height="80" rx="4" />
+    <text class="dg-label" x="750" y="136" text-anchor="middle">Inference Servers</text>
+    <text class="dg-sublabel" x="750" y="156" text-anchor="middle">vLLM · SGLang</text>
+
+    <rect class="dg-node" x="640" y="320" width="220" height="80" rx="4" />
+    <text class="dg-label" x="750" y="356" text-anchor="middle">Training Engine</text>
+    <text class="dg-sublabel" x="750" y="376" text-anchor="middle">policy update</text>
+
+    {/* Weight Sync loop — from top of Training Engine up to bottom of Inference Servers */}
+    <path class="dg-edge" d="M 750 320 L 750 180" marker-end="url(#dg-arrow)" />
+    <text class="dg-edge-label" x="758" y="254" text-anchor="start">Weight Sync</text>
+
+    {/* ── Cross-column edges (all dock to exact box edges) ── */}
+    {/* Agent → Gateway (v1/chat, forward) */}
+    <path class="dg-edge" d="M 216 122 L 340 122" marker-end="url(#dg-arrow)" />
+    <text class="dg-edge-label" x="278" y="114" text-anchor="middle">v1/chat</text>
+    {/* Gateway → Agent (response, reverse) */}
+    <path class="dg-edge" d="M 340 142 L 216 142" marker-end="url(#dg-arrow)" />
+
+    {/* Gateway → Inference Servers */}
+    <path class="dg-edge" d="M 560 122 L 640 122" marker-end="url(#dg-arrow)" />
+    {/* Inference Servers → Gateway */}
+    <path class="dg-edge" d="M 640 142 L 560 142" marker-end="url(#dg-arrow)" />
+
+    {/* Evaluate (x=60..216, y=340..396, center y=368) → S3 (x=340..560, y=378..434, center y=406).
+         Route with an elbow: out of Evaluate's right edge, down a bit, then into S3's left edge. */}
+    <path class="dg-edge" d="M 216 368 L 278 368 L 278 406 L 340 406" marker-end="url(#dg-arrow)" />
+    <text class="dg-edge-label" x="228" y="360" text-anchor="start">save reward</text>
+
+    {/* Rollout Data (x=340..560, y=200..340, right-edge center y=270) → Training Engine (x=640..860, y=320..400, center y=360).
+         Elbow: out of Rollout Data right edge, down, then into Training Engine left edge. */}
+    <path class="dg-edge" d="M 560 270 L 600 270 L 600 360 L 640 360" marker-end="url(#dg-arrow)" />
+  </svg>
+  <figcaption>Figure 1 — AgentCore RL System Diagram</figcaption>
+</figure>
+
+The toolkit
+([agentcore-rl-toolkit](https://github.com/awslabs/agentcore-rl-toolkit)) is
+built around the principle that an agent shouldn't know whether it's running in
+production or being trained. Adapting an existing `BedrockAgentCoreApp`-based
+agent for RL is a one-line swap:
+
+```diff
+- from bedrock_agentcore.runtime import BedrockAgentCoreApp
++ from agentcore_rl_toolkit import AgentCoreRLApp
+
+- app = BedrockAgentCoreApp()
++ app = AgentCoreRLApp()
+
+- @app.entrypoint
++ @app.rollout_entrypoint
+  def invoke_agent(payload):
+      ...
+```
+
+The `@rollout_entrypoint` decorator wraps the function with two patterns that
+matter for long-horizon agentic RL:
+
+1. **Fire-and-forget background execution.** The HTTP response returns
+   immediately with an S3 key, and the agent runs to completion in the
+   background — no need to hold a TCP connection open for minutes while a
+   30-step rollout grinds through tool calls.
+2. **S3 as the result channel.** The trainer-side `RolloutClient` polls S3 with
+   HEAD requests, which sidesteps the need for a separate message bus and gives
+   natural retries if a rollout takes longer than expected.
+
+The cleanest part of the design, in our view, is that the agent itself never
+imports anything RL-specific. Inside the entrypoint, agents create a standard
+`OpenAIModel` (Strands, LangGraph, or any other OpenAI-compatible client) and
+point it at a `base_url` passed in via the rollout payload. That URL points to
+the **model-gateway**, which sits between the agent and the actual inference
+server, forwards every chat completion call, and silently captures the token
+IDs, logprobs, and assistant/tool masks that the trainer needs.
+
+This split keeps agent containers small, dependency-light, and
+indistinguishable from their production counterparts — exactly what we want
+when the agent's job is to faithfully reproduce production behavior during
+rollout.
+
+Because the data plane (model-gateway and S3) is decoupled from the trainer, we
+can plug in any of the popular open-source RL stacks without modifying the
+agent: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/),
+[rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/), or
+[verl](/agentcore-rl-toolkit/guides/verl-backend-setup/). The training engine
+reads rollout data from the gateway, performs its policy update, and syncs new
+weights to the inference servers — closing the loop.
+
+## Experiments
+
+We exercised the system on two long-horizon agentic benchmarks, chosen because
+they stress different parts of the runtime: complex developer toolchains with
+strict correctness criteria (MigrationBench), and heavyweight, multi-app
+environments where each rollout container runs real office software
+(OfficeBench).
+
+[MigrationBench](/agentcore-rl-toolkit/examples/strands-migration-agent/) is a
+benchmark of real-world Java repositories that need to be upgraded from Java 8
+to Java 17. Think of it as handing a developer an old codebase and asking them
+to make it compile and pass all its tests on a newer platform — except the
+developer is an AI agent. The agent must read build files, update library
+dependencies to compatible versions, fix compilation errors caused by
+deprecated APIs, and iterate until the entire project builds and every original
+test still passes. Success is binary and strict: a task scores 1.0 only if the
+project compiles with Java 17 bytecode _and_ all tests remain functionally
+equivalent, 0.0 otherwise. This makes MigrationBench a challenging multi-step
+reasoning task — a single overlooked dependency or missed API change causes the
+entire build to fail.
+
+[OfficeBench](/agentcore-rl-toolkit/examples/strands-officebench-agent/) is a
+300-task benchmark for office automation — the kind of work an executive
+assistant might do: reading spreadsheets, composing emails, scheduling
+meetings, converting documents between formats, and combining information across
+applications. Tasks are split across single-app (93), two-app (95), and
+three-app (112) categories spanning calendar, email, Excel, Word, PDF, and OCR.
+The challenge grows with the number of apps: a three-app task might require the
+agent to extract data from a PDF, populate an Excel spreadsheet, and email the
+result — with success checked by examining the exact state of every output
+file. Each rollout container ships with LibreOffice, Tesseract, and a writable
+testbed.
+
+Below we provide one agent trace from MigrationBench and OfficeBench as
+illustration examples.
+
+**MigrationBench:**
+
+```text
+# Repo: jReddit/jReddit (44 tests, 7,089 LOC). Java 17 breaks it three ways:
+#   - RedditOAuthAgent.java imports javax.xml.bind.DatatypeConverter (removed in Java 11+)
+#   - Mockito 1.9.5 can't generate proxies on JDK 17 (NoClassDefFoundError: ClassImposterizer)
+#   - After bumping Mockito: runner moves org.mockito.runners → org.mockito.junit,
+#     and Matchers.any → Mockito.any
+
+Agent: Let me run the build first to see the current state and what version it's using.
+    → shell: mvn -ntp clean verify 2>&1 | tail -n 100
+    ✗ package javax.xml.bind does not exist       (surfaces the JAXB failure up front)
+
+Agent: Java 17 removed the JAXB API (javax.xml.bind). Let me examine that file.
+    → editor: view RedditOAuthAgent.java          (confirms the DatatypeConverter import)
+
+Agent: I'll add the JAXB dependencies and configure the compiler to use Java 17.
+    → editor: str_replace pom.xml
+        + <maven.compiler.source>17</…>  <target>17</…>  <release>17</…>
+    → editor: str_replace pom.xml                 (+ jaxb-api 2.3.1, + jaxb-runtime 2.3.1)
+    → editor: str_replace pom.xml                 (Mockito 1.9.5 → 4.6.1)
+
+Agent: Mockito 4.x moved the runner package. Rather than rip out @RunWith and
+       hand-bolt openMocks(), the class merely moved — one surgical rename keeps
+       the runner, so no @Before body surgery is needed.
+    → shell: find src/test -name "*.java" -exec \
+        sed -i 's/org\.mockito\.runners/org\.mockito\.junit/g' {} \;
+    → editor: str_replace tests   (Matchers.any → Mockito.any; + -Xdoclint:none for Javadoc)
+
+Agent: Let's try building again.
+    → shell: mvn -ntp clean verify 2>&1 | tail -n 100
+    ✓ BUILD SUCCESS
+
+Agent: Let's verify the jar was built with Java 17 bytecode.
+    → shell: javap -v -cp target/jreddit-1.0.4-SNAPSHOT.jar \
+        com.github.jreddit.oauth.RedditOAuthAgent | grep "major version"
+    ✓ major version: 61
+
+Agent: Let's run the tests to make sure everything is working.
+    → shell: mvn -ntp test 2>&1 | tail -n 20
+    ✓ Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
+```
+
+**OfficeBench:**
+
+```text
+Task: "Read Bob's calendar events and send email using event names to Bob only
+       for class."
+
+Agent: I'll check Bob's calendar events.
+    → calendar_list_events(username="Bob")
+    Returns 5 events: class (4–6 PM), nap, lunch, dinner, sleeping
+
+Agent: Bob has a "class" event today from 4:00 PM to 6:00 PM.
+       I'll send him an email with just the class details.
+    → email_send_email(sender="Alice", recipient="Bob",
+        subject="Your Class Schedule Today",
+        content="Hi Bob, ... Event: class, Time: 4:00 PM - 6:00 PM ...")
+    ✓ Successfully sent email to Bob.
+```
+
+In our experiments, we trained three open-weight Qwen base models that span a
+wide range of capability and cost:
+
+- **Qwen3-4B-Instruct-2507** — a small instruction-tuned model that fits
+  comfortably on a single GPU and serves as our cheapest baseline.
+- **Qwen3-30B-A3B-Instruct-2507** — a mixture-of-experts model with strong
+  general instruction-following at much lower active-parameter cost.
+- **Qwen3-Coder-30B-A3B-Instruct** — the code-specialized variant of the 30B
+  model, which we expected to do better on MigrationBench's coding tasks.
+
+The consolidated table below summarizes base-model and RL-trained performance
+(task success rate) for each model–benchmark pair.
+
+| Use case | Dataset | Model | Base model performance | RL-trained model performance |
+|----------|---------|-------|:----------------------:|:----------------------------:|
+| Code-migration agent | MigrationBench | Qwen3-Coder-30B-A3B-Instruct | 43% | 76% |
+| Office-automation agent | OfficeBench | Qwen3-4B-Instruct-2507 | 18% | 30% |
+| Office-automation agent | OfficeBench | Qwen3-30B-A3B-Instruct-2507 | 24% | 41% |
+
+Here are a few of our experimental findings:
+
+- **RL yields large absolute gains on both benchmarks, with the biggest lift on
+  the hardest tasks.** On OfficeBench, the three-app category — where the base
+  model barely functions (3.3% success) — jumps to 30.0% after RL training, a
+  9× improvement. Two-app tasks' success rises from 38.2% to 58.8%. On
+  MigrationBench, the code-specialized 30B model moves from 40% to 73%,
+  unlocking 99 new repositories that the base model could not migrate. These
+  gains arrive within 60–70 training steps, showing that even modest RL budgets
+  can substantially shift behavior on long-horizon tasks.
+- **RL training teaches the agent _when_ to persist, not just _what_ to try.**
+  On MigrationBench, the RL-trained model produces longer trajectories on
+  average (41 turns vs. 29 for the base model). Rather than giving up after a
+  first build failure, the trained agent has learned to iterate: re-reading
+  error messages, trying alternative dependency versions, and running
+  verification passes — the same loop that makes human developers effective on
+  migration tasks.
+- **RL is effective across the model-size spectrum.** On OfficeBench, both the
+  4B model (18% → 30%) and the 30B model (24% → 41%) show substantial gains
+  from the same training recipe. This suggests that RL-based customization is
+  not limited to large models — even a small model that fits on a single GPU
+  can be meaningfully improved for a target domain, making the approach
+  accessible at a range of compute budgets.
+- **Complex agentic behaviors are learnable from outcome reward alone.**
+  OfficeBench provides only a binary pass/fail signal at the end of a
+  trajectory — no intermediate credit for partial progress. Despite this sparse
+  reward, the RL-trained agent improves across _all_ complexity tiers, with the
+  largest absolute gains on multi-app tasks that require cross-application
+  coordination. This suggests that outcome-level RL is sufficient to teach
+  tool-selection and sequencing behavior, even without step-level reward
+  shaping.
+
+### Reproduce
+
+- **MigrationBench** — see the training code at
+  [rllm-org/rllm/cookbooks/migrationbench](https://github.com/rllm-org/rllm/tree/main/cookbooks/migrationbench)
+  and the accompanying write-up,
+  [Training a code-migration agent on AgentCore](https://rllm-project.com/post.html?post=agentcore_migrationbench.md).
+- **OfficeBench** — see the training code at
+  [agentcore-rl-toolkit `verl/examples/officebench_agent`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/verl/examples/officebench_agent).
+
+## What's next
+
+Looking ahead, our research roadmap focuses on several directions. The first is
+**reward signal enrichment**: while outcome-level rewards proved sufficient to
+drive meaningful gains, we believe step-level advantage assignment — giving
+credit to individual actions within a long trajectory — can accelerate learning
+and reduce variance, particularly for tasks that span dozens of turns. Our
+recent work on SALT (Step-level Advantage assignment for Long-horizon agents via
+Trajectory graph) demonstrates promising results in this direction.
+
+The second is **expanding the training data frontier**. Our current experiments
+rely on curated benchmark splits, but production deployments demand more. We're
+investing in synthetic-data generation and adaptive data filtering to produce
+diverse, high-quality training tasks at scale — reducing the bottleneck of
+hand-curated datasets while maintaining the signal quality that RL requires.
+
+The third is **broadening framework and model coverage**. The toolkit currently
+demonstrates results with Strands-based agents, but the architecture is
+framework-agnostic by design. We plan to add first-class integration examples
+for additional agent frameworks, and to systematically evaluate RL training
+across more model families and sizes to map out the cost–performance frontier
+for practitioners.
+
+If you are interested in this work and would like to run RL training on your own
+agents, start with the [overview](/agentcore-rl-toolkit/guides/overview/) and
+[prepare your agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/).
