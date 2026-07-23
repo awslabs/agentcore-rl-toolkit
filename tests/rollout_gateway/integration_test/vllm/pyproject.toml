@@ -1,0 +1,24 @@
+[project]
+name = "rollout-gateway-e2e-vllm"
+version = "0.1.0"
+description = "Env for the rollout_gateway real-model E2E test against a live vLLM server"
+requires-python = ">=3.10"
+dependencies = [
+    # the package under test, from the local checkout (editable, see tool.uv.sources)
+    "agentcore-rl-toolkit[gateway]",
+    # the real clients driving the gateway over HTTP (one per wire protocol)
+    "openai>=1.40",
+    "anthropic>=0.40",
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    # the inference server the test runs against (launched separately, see ../README.md)
+    "vllm>=0.10",
+]
+
+[tool.uv.sources]
+agentcore-rl-toolkit = { path = "../../../../", editable = true }
+
+[tool.uv]
+package = false
+# GPU inference server -> only resolve for linux
+environments = ["sys_platform == 'linux'"]

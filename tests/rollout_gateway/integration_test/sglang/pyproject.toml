@@ -1,0 +1,26 @@
+[project]
+name = "rollout-gateway-e2e-sglang"
+version = "0.1.0"
+description = "Env for the rollout_gateway real-model E2E test against a live SGLang server"
+# <3.13: sglang -> outlines-core==0.1.26 ships wheels only up to cp312
+# (building it from source needs a Rust toolchain)
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    # the package under test, from the local checkout (editable, see tool.uv.sources)
+    "agentcore-rl-toolkit[gateway]",
+    # the real client driving the gateway over HTTP
+    "openai>=1.40",
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    # the inference server the test runs against (launched separately, see ../README.md).
+    # [all] pulls the server runtime deps (orjson, fastapi, sgl-kernel, ...).
+    "sglang[all]>=0.5",
+]
+
+[tool.uv.sources]
+agentcore-rl-toolkit = { path = "../../../../", editable = true }
+
+[tool.uv]
+package = false
+# GPU inference server -> only resolve for linux
+environments = ["sys_platform == 'linux'"]
