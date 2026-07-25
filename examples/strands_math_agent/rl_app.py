@@ -22,7 +22,7 @@ reward_fn = GSM8KReward()
 
 
 @app.rollout_entrypoint
-def invoke_agent(payload: dict):
+def invoke_agent(payload: dict, context):
     """
     Invoke the math agent with a payload using the rollout_entrypoint decorator.
 
@@ -41,8 +41,13 @@ def invoke_agent(payload: dict):
     model_id = payload["_rollout"]["model_id"]
     params = payload["_rollout"].get("sampling_params", {})
 
+    # The ACR session id doubles as the trajectory-capture session key: rollout
+    # gateways read it from the api-key slot. "EMPTY" for local runs and
+    # gateways with per-session URLs (which ignore the api key).
+    api_key = context.session_id or "EMPTY"
+
     model = OpenAIModel(
-        client_args={"api_key": "EMPTY", "base_url": base_url},
+        client_args={"api_key": api_key, "base_url": base_url},
         model_id=model_id,
         params=params,
     )

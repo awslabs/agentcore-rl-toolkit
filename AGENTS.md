@@ -52,6 +52,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
+| `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl backend: `AgentCoreAgentLoop` plugged into stock verl main_ppo via the rollout gateway (successor to `backends/verl`) |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
 | `sandboxd/` | Go health shim (`agentcore-sandboxd`) that makes arbitrary Docker images satisfy the ACR container contract |
 | `examples/strands_math_agent/` | GSM8K math agent example |
@@ -73,14 +74,20 @@ agentcore-rl-toolkit/
 │   ├── sandbox/                    # Sandbox SDK (sync client for command execution)
 │   │   ├── client.py               # SandboxClient (start/attach) + Sandbox (exec/terminate)
 │   │   └── types.py                # ExecResult, SandboxProtocolError
-│   └── rollout_gateway/            # Token-level trajectory capture layer (trainer-side)
-│       ├── trace.py                # TraceRecord — torch-free output boundary
-│       ├── trajectory.py           # TrajectoryManager — per-session message tree
-│       ├── render.py               # Renderer protocol; HfTemplateRenderer, TinkerRenderer
-│       ├── parsing.py              # tool/reasoning output parsing (sglang optional)
-│       ├── gateway.py              # RolloutGateway — assembles the serving unit
-│       ├── adapters/               # OpenAI + Anthropic wire protocol adapters
-│       └── sampling_backends/      # SamplingBackend impls (vLLM/SGLang HTTP, Tinker SDK)
+│   ├── rollout_gateway/            # Token-level trajectory capture layer (trainer-side)
+│   │   ├── trace.py                # TraceRecord — torch-free output boundary
+│   │   ├── trajectory.py           # TrajectoryManager — per-session message tree
+│   │   ├── render.py               # Renderer protocol; HfTemplateRenderer, TinkerRenderer
+│   │   ├── parsing.py              # tool/reasoning output parsing (sglang optional)
+│   │   ├── gateway.py              # RolloutGateway — assembles the serving unit
+│   │   ├── adapters/               # OpenAI + Anthropic wire protocol adapters
+│   │   └── sampling_backends/      # SamplingBackend impls (vLLM/SGLang HTTP, Tinker SDK)
+│   └── backends/experimental/verl/ # Experimental verl backend on the rollout gateway
+│       ├── sampling_backend.py     # VerlSamplingBackend over verl's LLMServerClient
+│       ├── gateway_host.py         # per-worker-process gateway singleton (threaded aiohttp)
+│       ├── agent_loop.py           # AgentCoreAgentLoop (verl custom agent loop)
+│       ├── dataset.py              # PayloadDataset (payload-column dataset contract)
+│       └── examples/               # GSM8K example: run script + per-run agent-loop YAML
 ├── examples/
 │   ├── strands_math_agent/         # GSM8K example
 │   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
@@ -278,7 +285,7 @@ sample-only backends like Tinker, which cannot render themselves.
 | `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`. Each training backend converts this to its native sample type in its own process. |
 | `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation, parallel tool-call branches, and heals re-tokenization drift between turns (CLEAN / REALIGN / FORK). Tokenizer-free and torch-free. |
 | `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (default, HF `apply_chat_template`) or `TinkerRenderer` (needs `tinker-cookbook`, installed manually). |
-| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. |
+| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
 | Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
 | `RolloutGateway` | `gateway.py` | Assembles tokenizer + renderer + backend + adapters onto one aiohttp app sharing one `TrajectoryManager`. Session identity rides in the api-key / Bearer slot; `base_url` is a fixed gateway address (no per-session URLs). |
 
@@ -318,10 +325,48 @@ The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBack
 protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so
 importing the package never requires aiohttp. Tests live in `tests/rollout_gateway/`.
 
-**Status.** The capture layer above is implemented and tested. Wiring it into a training
-backend (the per-backend rollout function + `TraceRecord → native sample` conversion, and
-the ACR dispatch/reward-join glue) is not yet on the main branch — a prototype dispatcher
-is parked on the `wip/online-rl-dispatch` branch until a backend consumes it end-to-end.
+**Status.** The capture layer above is implemented and tested. Its first training-backend
+consumer is the **experimental verl backend** (`backends/experimental/verl/`, see below);
+other backends' dispatch/reward-join glue is not yet on the main branch — a prototype
+dispatcher is parked on the `wip/online-rl-dispatch` branch.
+
+### Experimental verl backend (`backends/experimental/verl/`)
+
+The successor to `backends/verl` (which stays untouched until this graduates). It plugs
+into **stock** `python -m verl.trainer.main_ppo` as a custom agent loop — no custom
+trainer, no custom entrypoint — so verl's native features (v1 trainer, replay buffer,
+DAPO filtering, checkpointing, validation, reward loop) work unchanged. Requires
+`trainer.use_v1=true`; verl is pinned to uni-agent's blessed commit `78bba31d` via
+`[tool.uv.sources]` (`uv sync --extra verl-experimental`).
+
+Key pieces (see `backends/experimental/verl/README.md` for the full design):
+- `sampling_backend.py` — `VerlSamplingBackend`: gateway `SamplingBackend` over verl's
+  token-in/token-out `LLMServerClient` (sticky routing by session id).
+- `gateway_host.py` — one `RolloutGateway` per AgentLoopWorker process, served from a
+  daemon thread on an auto-assigned port; ACR containers dial `http://<node_ip>:<port>/v1`
+  (OpenAI-SDK convention: the advertised base_url includes `/v1`).
+- `agent_loop.py` — `AgentCoreAgentLoop` (registered via the agent-loop YAML only —
+  deliberately NOT `@register`-decorated; the decorator would overwrite the YAML's
+  kwarg-carrying registry entry on first instantiation): per rollout, create a gateway
+  session (sid = uuid4 = ACR `runtimeSessionId`), invoke ACR via `RolloutClient`, await
+  the S3 result, drain the session into `TraceRecord`s, and emit one `AgentLoopOutput`
+  per trajectory-tree leaf. Failures never raise — they return an inert single-token
+  row (`response_mask=[1]`, logprob 0, reward 0; an all-zero mask is rejected by verl).
+- `dataset.py` — `PayloadDataset`: rows carry the agent's exact ACR invoke payload in a
+  `payload` column; the chat-format `prompt` column verl's dataloader needs is
+  synthesized at load time from `payload["prompt"]` (keeps agents decoupled from
+  trainer/dataset conventions; sibling fields of `payload` are reserved for dispatch
+  metadata, e.g. a future `agent` routing field).
+- Rewards: inline `{"rewards": ...}` from the agent → `rm_scores`; otherwise verl's
+  native `custom_reward_function` runs with the S3 result at `extra_info["acr_result"]`.
+- Agent-side contract: the app sets `api_key = context.session_id or "EMPTY"` so the
+  gateway can key capture off the Bearer/api-key slot (`"EMPTY"` keeps local runs and
+  the legacy per-session-URL gateways working). Adopted by `strands_math_agent`
+  (validated end to end); the other examples still send `"EMPTY"` and migrate as
+  they're validated against this backend.
+- Validated end to end: `examples/math_agent/fsdp_fft_sync_grpo.sh` (GRPO, Qwen3-4B
+  full-FT, TIS + KL trust region) reaches ~0.93 GSM8K val reward in one epoch against
+  a live ACR agent.
 
 **Vendored from slime (upstream baselines).** Several files are adapted from
 [slime](https://github.com/THUDM/slime) (Apache-2.0; see `NOTICE`). To check what changed
@@ -419,7 +464,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 - Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
 - Optional `sampling_params` (e.g., `max_completion_tokens`, `temperature`) can also be passed via `_rollout` for training-engine-controlled generation settings
 - Use standard `OpenAIModel` — no custom model wrappers needed. For evaluation, `base_url` can point directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` directly
-- `api_key` is set to `"EMPTY"` — the standard vLLM convention for servers that don't require authentication
+- `api_key` is set from `context.session_id` (the ACR runtime session id, available when the entrypoint declares a second `context` parameter) — trajectory-capture gateways like the experimental verl backend key token capture off the api-key slot. Fall back to `"EMPTY"` (the standard vLLM convention for unauthenticated servers) for local runs and gateways with per-session URLs, which ignore the api key
 - Model and agent are created per-invocation inside the entrypoint
 - This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
 - This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
@@ -432,11 +477,12 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 - def invoke_agent(payload):
 -     response = agent(user_input)
 + @app.rollout_entrypoint
-+ def invoke_agent(payload: dict):
++ def invoke_agent(payload: dict, context):
 +     base_url = payload["_rollout"]["base_url"]
 +     model_id = payload["_rollout"]["model_id"]
 +     params = payload["_rollout"].get("sampling_params", {})
-+     model = OpenAIModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
++     api_key = context.session_id or "EMPTY"  # session key for trajectory-capture gateways
++     model = OpenAIModel(client_args={"api_key": api_key, "base_url": base_url}, model_id=model_id, params=params)
 +     agent = Agent(model=model, tools=[calculator], system_prompt="...")
 +     response = agent(user_input)
 ```
