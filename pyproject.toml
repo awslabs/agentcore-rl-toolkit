@@ -39,6 +39,8 @@ dev = [
     # aiohttp for adapter/server tests, transformers for renderer round-trip / E2E.
     "aiohttp>=3.9",
     "transformers>=4.44",
+    # openai: real-SDK wire-contract test for the gateway (Bearer-slot session capture).
+    "openai>=1.0",
 ]
 gateway = [
     # The rollout capture gateway (agentcore_rl_toolkit.rollout_gateway). Trainer-side
@@ -91,17 +93,54 @@ verl = [
     "qwen-vl-utils",
     "rllm-model-gateway>=0.1.0",
 ]
+verl-experimental = [
+    # The experimental verl backend (backends/experimental/verl): stock verl
+    # main_ppo + a custom agent loop capturing trajectories via the in-repo
+    # rollout_gateway (no rllm-model-gateway). verl is pinned to uni-agent's
+    # blessed submodule commit via [tool.uv.sources] below; install from a
+    # checkout with `uv sync --extra verl-experimental`.
+    #
+    # vllm 0.23.0 matches verl's reference stack at the pinned commit
+    # (docker/Dockerfile.stable.vllm: vllm 0.23.0 / torch 2.11.0 / cu130 /
+    # flash-attn 2.8.3). torch 2.11 wheels are CUDA 13.0 builds, so building
+    # flash-attn needs a CUDA 13 toolkit: CUDA_HOME=/usr/local/cuda-13.0.
+    "verl",
+    # verl declares runtime deps in requirements.txt (its Docker images pip-install
+    # it), not in setup.py install_requires — so a git install of verl misses them.
+    # Declared here as proven needed (import-time failures on our training path):
+    "transferqueue==0.1.8",  # v1 trainer data plane (main_ppo.py)
+    "orjson",  # verl.utils.tracking (undeclared even in verl's requirements.txt)
+    "aiohttp>=3.9",
+    "transformers>=4.44",
+    "numpy",
+    "ray",
+    "torch>=2.10.0",
+    "torchvision>=0.23.0",
+    "vllm==0.23.0",
+    "flash-linear-attention",
+    "flash-attn==2.8.3",
+    "qwen-vl-utils",
+]
 
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
 [tool.uv]
+# flash-attn's setup.py imports torch at build time and must see the SAME torch
+# it will run against; uv's isolated build env broke this (CUDA version probing
+# fails/mismatches). Build it in the venv instead — requires torch to already be
+# installed, so first sync torch (cheap, wheels), then the extra:
+#   uv sync --extra verl-experimental  # (torch resolves first; flash-attn builds last)
+# Building flash-attn also needs the CUDA 13 toolkit on this AMI:
+#   CUDA_HOME=/usr/local/cuda-13.0
+no-build-isolation-package = ["flash-attn"]
 # Declaring verl and rllm as conflicting extras lets uv resolve each
 # in its own fork instead of forcing one universal lock.
 conflicts = [
     [
         { extra = "verl" },
         { extra = "rllm" },
+        { extra = "verl-experimental" },
     ],
 ]
 override-dependencies = [
@@ -115,11 +154,14 @@ override-dependencies = [
 # dependencies, which PyPI rejects. uv reads this source when installing the
 # [rllm] extra from a checkout of this repo.
 rllm = { git = "https://github.com/rllm-org/rllm.git" }
-
-[tool.uv.extra-build-dependencies]
-flash-attn = [
-    { requirement = "torch", match-runtime = true },
+# verl pinned to uni-agent's blessed submodule commit for the experimental
+# backend (backends/experimental/verl). Applies only when the
+# [verl-experimental] extra is selected; the legacy [verl] extra resolves
+# verl==0.8.0 from PyPI in its own conflict fork.
+verl = [
+    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl-experimental" },
 ]
+
 
 [tool.hatch.metadata]
 # Required so the [rllm] optional extra can pin rllm via a git URL

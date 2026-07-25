@@ -18,6 +18,15 @@ build/
 # Local slime backend config (contains ARN/bucket; commit config.yaml.example only)
 src/agentcore_rl_toolkit/backends/slime/examples/**/config.yaml
 
+# Training/example run artifacts, wherever generated. Convention-level patterns:
+# hydra run dirs, verl checkpoint dirs (scripts use CKPTS_DIR=exp_*), wandb run
+# dirs, and generated datasets (reproducible via the example preprocess scripts).
+outputs/
+checkpoints/
+exp_*/
+wandb/
+*.parquet
+
 # Config files
 config.toml
 
