@@ -1,0 +1,28 @@
+# Per-run agent-loop config for verl's `rollout.agent.agent_loop_config_path` —
+# part of this example, edit freely. Every key besides `name` and `_target_` is
+# passed to AgentCoreAgentLoop.__init__; unset keys use the constructor defaults
+# (see the backend README for the full kwarg reference). `${oc.env:VAR}` is
+# OmegaConf env-var interpolation (errors if VAR is unset), keeping ARNs/buckets
+# out of committed config.
+- name: agentcore_agent
+  _target_: agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop
+  agent_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
+  s3_bucket: ${oc.env:ACR_S3_BUCKET}
+  # math rollouts finish in well under 2 minutes; fail hung sessions fast
+  # instead of holding a TransferQueue slot for the 1800s library default
+  max_rollout_time: 180
+  # Other kwargs and their defaults:
+  # exp_id: my-experiment          # default: derived from trainer project/experiment name
+  # tps_limit: 5                   # client-side invoke rate cap (conservative default;
+  #                                # raise toward your account's ACR InvokeAgentRuntime quota)
+  # gateway_port: 0                # 0 = auto-assign per worker process
+  # gateway_public_host: <ip>      # host advertised to agents for gateway callbacks.
+  #                                # Default: the node IP Ray reports (fine when ACR
+  #                                # containers can route to the trainer nodes, as in
+  #                                # same-VPC setups). Set explicitly when they can't
+  #                                # (public networking mode, NAT, multi-homed nodes)
+  # reward_mode: built_in          # who computes the reward: "built_in" = the agent
+  #                                # returns {"rewards": ...} in its session result
+  #                                # (failures score 0); "separate" = verl's
+  #                                # custom_reward_function scores every rollout,
+  #                                # with the session result at extra_info["acr_result"]
