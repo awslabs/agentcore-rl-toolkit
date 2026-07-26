@@ -1,19 +1,18 @@
-"""Prove the hydra-instantiation ctor contract: the YAML entry's extra keys
-(including `name`) are passed as kwargs and must be swallowed, exactly as
-verl's AgentLoopWorker does via hydra.utils.instantiate."""
+"""Prove the hydra-instantiation ctor contract: verl's AgentLoopWorker calls
+``hydra.utils.instantiate`` on the YAML registry entry, passing the entry's
+extra keys (including ``name``) as kwargs plus its ``DictConfigWrap``/
+``ToolListWrap`` wrappers — all of which the constructor must swallow."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
+import hydra
+from omegaconf import DictConfig, OmegaConf
+from verl.experimental.agent_loop.agent_loop import ToolListWrap
 
-from .conftest import FakeLLMServerClient, FakeTokenizer, make_trainer_config
-
-hydra = pytest.importorskip("hydra")
+from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make_trainer_config
 
 
 def test_instantiate_from_yaml_entry():
-    from omegaconf import OmegaConf
-
     from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
 
     entry = OmegaConf.create(
@@ -36,9 +35,12 @@ def test_instantiate_from_yaml_entry():
             tokenizer=FakeTokenizer(),
             processor=None,
             dataset_cls=None,
-            data_config=MagicMock(config={}),
-            tools=MagicMock(),  # verl passes ToolListWrap
+            data_config=make_data_config(),
+            tools=ToolListWrap([]),
         )
 
     assert isinstance(loop, AgentCoreAgentLoop)
     assert loop.max_rollout_time == 60
+    # AgentLoopBase unwrapped the DictConfigWrap wrappers
+    assert loop.config.trainer.use_v1 is True
+    assert isinstance(loop.data_config, DictConfig)

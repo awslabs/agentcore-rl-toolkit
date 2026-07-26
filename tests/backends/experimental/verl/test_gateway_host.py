@@ -1,68 +1,13 @@
 """gateway_host tests: threaded serving, singleton semantics, and one
-end-to-end OpenAI-wire turn captured through the verl sampling backend.
-
-verl is not imported — the LLMServerClient is a duck-typed fake.
-"""
+end-to-end OpenAI-wire turn captured through the verl sampling backend."""
 
 import urllib.request
-from dataclasses import dataclass, field
-from typing import Any, Optional
 
 import pytest
 
-from agentcore_rl_toolkit.backends.experimental.verl import gateway_host
 from agentcore_rl_toolkit.backends.experimental.verl.gateway_host import get_or_start_gateway
 
-
-@dataclass
-class FakeTokenOutput:
-    token_ids: list[int]
-    log_probs: Optional[list[float]] = None
-    stop_reason: Optional[str] = None
-    extra_fields: dict[str, Any] = field(default_factory=dict)
-
-
-class FakeLLMServerClient:
-    """Echoes a fixed response for any prompt."""
-
-    def __init__(self):
-        self.calls: list[dict[str, Any]] = []
-
-    async def generate(self, request_id, *, prompt_ids, sampling_params, **kwargs):
-        self.calls.append({"request_id": request_id, "prompt_ids": list(prompt_ids)})
-        return FakeTokenOutput(token_ids=[101, 102], log_probs=[-0.5, -0.6], stop_reason="completed")
-
-
-class FakeTokenizer:
-    """Minimal HF-tokenizer stand-in for HfTemplateRenderer + adapters.
-
-    apply_chat_template maps each message to two ids; decode returns a fixed
-    assistant string.
-    """
-
-    eos_token = "</s>"
-    eos_token_id = 0
-    pad_token_id = 0
-
-    def apply_chat_template(self, messages, *, tools=None, tokenize=True, add_generation_prompt=True, **kw):
-        ids = []
-        for i, _ in enumerate(messages):
-            ids += [10 + i, 20 + i]
-        if add_generation_prompt:
-            ids.append(99)
-        return ids
-
-    def decode(self, ids, skip_special_tokens=False):
-        return "hello world"
-
-    def convert_tokens_to_ids(self, token):
-        return None
-
-
-@pytest.fixture(autouse=True)
-def reset_gateway():
-    yield
-    gateway_host._reset_for_tests()
+from .conftest import FakeLLMServerClient, FakeTokenizer
 
 
 def _start(client=None):
@@ -85,18 +30,6 @@ def test_singleton_returns_same_handle():
     h1 = _start()
     h2 = _start()
     assert h1 is h2
-
-
-def test_reset_allows_restart():
-    h1 = _start()
-    port1 = h1.base_url.rsplit(":", 1)[1]
-    gateway_host._reset_for_tests()
-    h2 = _start()
-    assert h2 is not h1
-    # auto-port: new server is live even if the port differs
-    with urllib.request.urlopen(f"{h2.base_url}/healthz", timeout=5) as r:
-        assert r.status == 200
-    assert port1  # silence unused warning; ports may or may not collide
 
 
 @pytest.mark.asyncio

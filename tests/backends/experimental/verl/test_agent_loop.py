@@ -1,6 +1,7 @@
 """AgentCoreAgentLoop tests: conversion math, invoke wiring, reward modes, and
-failure paths — with a real gateway (threaded) + fake LLM server client, and a
-mocked RolloutClient (no AWS)."""
+failure paths. The loop is constructed through verl's own ``AgentLoopBase``
+against a live (threaded) gateway; only the LLM server client and the
+RolloutClient (no AWS) are faked."""
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from .conftest import FakeLLMServerClient, FakeTokenizer, make_trainer_config
+from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make_trainer_config
 
 pytestmark = pytest.mark.asyncio
 
@@ -24,7 +25,7 @@ def _make_loop(llm_client=None, *, use_v1=True, **loop_kwargs):
             FakeTokenizer(),
             None,
             None,
-            MagicMock(config={}),
+            make_data_config(),
             agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
             s3_bucket="test-bucket",
             gateway_bind_host="127.0.0.1",
@@ -146,7 +147,7 @@ async def test_invalid_reward_mode_rejected():
                 FakeTokenizer(),
                 None,
                 None,
-                MagicMock(config={}),
+                make_data_config(),
                 agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
                 s3_bucket="test-bucket",
                 gateway_bind_host="127.0.0.1",

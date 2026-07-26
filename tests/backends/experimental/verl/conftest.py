@@ -1,145 +1,76 @@
-"""Shared fakes for the experimental verl backend tests.
+"""Shared fixtures for the experimental verl backend tests.
 
-verl itself is a heavyweight optional dependency (torch, ray, vllm), so these
-tests stub the small surface `agent_loop.py` imports from
-``verl.experimental.agent_loop.agent_loop`` (AgentLoopBase/AgentLoopOutput/
-AgentLoopMetrics/register). Everything else — the gateway, adapters, trajectory
-manager, sampling backend — is exercised for real.
+These tests run against the installed verl distribution (the pinned
+``verl-experimental`` extra): ``AgentLoopBase.__init__`` (system-prompt /
+turn-separator probing), pydantic ``AgentLoopOutput``/``TokenOutput``
+validation, ``DictConfigWrap``/OmegaConf config plumbing, and hydra
+instantiation are all verl's own. The whole directory is skipped when verl is
+not installed (``uv sync --extra dev`` alone), and runs in the dedicated
+verl-integration CI job.
+
+Only two seams are faked, deliberately:
+
+- ``FakeLLMServerClient`` — verl's ``LLMServerClient`` fronts Ray actors and a
+  live inference engine; ``generate`` (token-in/token-out) is the whole
+  contract ``VerlSamplingBackend`` consumes. The fake returns verl
+  ``TokenOutput`` models so response-shape drift is still caught.
+- ``FakeTokenizer`` — a deterministic tokenizer so token-level assertions
+  (loss masks, prefix extension, truncation) are exact. HF-tokenizer coverage
+  lives in ``tests/rollout_gateway/`` and ``test_payload_dataset.py``.
 """
 
-import sys
-import types
-from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import pytest
 
-# -- verl stub (installed into sys.modules before agent_loop import) -----------
+verl = pytest.importorskip("verl", reason="requires the verl-experimental extra")
 
-
-def _install_verl_stub() -> None:
-    if "verl.experimental.agent_loop.agent_loop" in sys.modules:
-        return
-
-    mod = types.ModuleType("verl.experimental.agent_loop.agent_loop")
-
-    class AgentLoopMetrics:
-        def __init__(self, generate_sequences: float = 0.0, tool_calls: float = 0.0, **kw):
-            self.generate_sequences = generate_sequences
-            self.tool_calls = tool_calls
-
-    class AgentLoopOutput:
-        """Field-compatible stand-in for verl's pydantic AgentLoopOutput."""
-
-        def __init__(
-            self,
-            *,
-            prompt_ids,
-            response_ids,
-            response_mask,
-            response_logprobs=None,
-            reward_score=None,
-            num_turns=0,
-            metrics=None,
-            extra_fields=None,
-            **kw,
-        ):
-            self.prompt_ids = prompt_ids
-            self.response_ids = response_ids
-            self.response_mask = response_mask
-            self.response_logprobs = response_logprobs
-            self.reward_score = reward_score
-            self.num_turns = num_turns
-            self.metrics = metrics
-            self.extra_fields = extra_fields or {}
-
-    class AgentLoopBase:
-        def __init__(self, trainer_config, server_manager, tokenizer, processor, dataset_cls, data_config, **kwargs):
-            self.config = trainer_config.config
-            self.rollout_config = self.config.actor_rollout_ref.rollout
-            self.server_manager = server_manager
-            self.tokenizer = tokenizer
-            self.processor = processor
-            self.dataset_cls = dataset_cls
-            self.data_config = data_config
-
-    registry: dict[str, type] = {}
-
-    def register(name):
-        def deco(cls):
-            registry[name] = cls
-            return cls
-
-        return deco
-
-    mod.AgentLoopMetrics = AgentLoopMetrics
-    mod.AgentLoopOutput = AgentLoopOutput
-    mod.AgentLoopBase = AgentLoopBase
-    mod.register = register
-    mod._agent_loop_registry = registry
-
-    # parent packages
-    for pkg_name in ("verl", "verl.experimental", "verl.experimental.agent_loop"):
-        if pkg_name not in sys.modules:
-            pkg = types.ModuleType(pkg_name)
-            pkg.__path__ = []  # mark as package
-            sys.modules[pkg_name] = pkg
-    sys.modules["verl.experimental.agent_loop.agent_loop"] = mod
-    sys.modules["verl.experimental.agent_loop"].agent_loop = mod
-
-
-_install_verl_stub()
-
+from omegaconf import OmegaConf  # noqa: E402
+from verl.experimental.agent_loop.agent_loop import DictConfigWrap  # noqa: E402
+from verl.workers.rollout.replica import TokenOutput  # noqa: E402
 
 # -- config helpers -------------------------------------------------------------
 
 
-class AttrDict(dict):
-    """dict with attribute access + .get, standing in for OmegaConf DictConfig."""
-
-    __getattr__ = dict.__getitem__
-
-    def __setattr__(self, k, v):
-        self[k] = v
-
-
-def make_trainer_config(*, use_v1: bool = True, prompt_length: int = 64, response_length: int = 32):
-    config = AttrDict(
-        trainer=AttrDict(use_v1=use_v1),
-        actor_rollout_ref=AttrDict(
-            model=AttrDict(path="test/model"),
-            rollout=AttrDict(prompt_length=prompt_length, response_length=response_length),
-        ),
+def make_trainer_config(*, use_v1: bool = True, prompt_length: int = 64, response_length: int = 32) -> DictConfigWrap:
+    """The slice of verl's trainer config AgentLoopBase + AgentCoreAgentLoop read."""
+    return DictConfigWrap(
+        OmegaConf.create(
+            {
+                "trainer": {"use_v1": use_v1},
+                "actor_rollout_ref": {
+                    "model": {"path": "test/model"},
+                    "rollout": {"prompt_length": prompt_length, "response_length": response_length},
+                },
+            }
+        )
     )
-    wrap = types.SimpleNamespace(config=config)
-    return wrap
 
 
-# -- fakes shared with the sampling-backend/gateway tests -----------------------
+def make_data_config() -> DictConfigWrap:
+    """The slice of verl's data config AgentLoopBase reads
+    (``continuous_token`` is accessed unconditionally in its ``__init__``)."""
+    return DictConfigWrap(OmegaConf.create({"continuous_token": {"enable": False}}))
 
 
-@dataclass
-class FakeTokenOutput:
-    token_ids: list[int]
-    log_probs: Optional[list[float]] = None
-    stop_reason: Optional[str] = None
-    extra_fields: dict[str, Any] = field(default_factory=dict)
+# -- fakes ----------------------------------------------------------------------
 
 
 class FakeLLMServerClient:
-    """Scripted per-call responses; defaults to echoing two tokens."""
+    """Duck-typed ``LLMServerClient``: scripted per-call responses as verl
+    ``TokenOutput`` models; defaults to echoing two tokens."""
 
-    def __init__(self, outputs: Optional[list[FakeTokenOutput]] = None):
-        self.outputs = outputs
+    def __init__(self, outputs: Optional[list[TokenOutput]] = None):
+        self.outputs = list(outputs) if outputs else None
         self.calls: list[dict[str, Any]] = []
 
     async def generate(self, request_id, *, prompt_ids, sampling_params, **kwargs):
         self.calls.append(
-            {"request_id": request_id, "prompt_ids": list(prompt_ids), "sampling_params": sampling_params}
+            {"request_id": request_id, "prompt_ids": list(prompt_ids), "sampling_params": sampling_params, **kwargs}
         )
         if self.outputs:
             return self.outputs.pop(0)
-        return FakeTokenOutput(token_ids=[101, 102], log_probs=[-0.5, -0.6], stop_reason="completed")
+        return TokenOutput(token_ids=[101, 102], log_probs=[-0.5, -0.6], stop_reason="completed")
 
 
 class FakeTokenizer:

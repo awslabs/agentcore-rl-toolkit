@@ -1,24 +1,24 @@
-"""PayloadDataset tests against the real verl RLHFDataset machinery.
-
-Requires verl (pytest.importorskip) since the class under test subclasses
-RLHFDataset and the value being tested is compatibility with its load path.
-"""
+"""PayloadDataset tests through verl's RLHFDataset load path: the class under
+test subclasses RLHFDataset, and the value being tested is compatibility with
+its parquet -> filter -> __getitem__ machinery (with an actual HF tokenizer,
+since length filtering renders the synthesized prompt)."""
 
 import json
 
 import pytest
+from omegaconf import OmegaConf
+from transformers import AutoTokenizer
 
-verl = pytest.importorskip("verl")
-
-from omegaconf import OmegaConf  # noqa: E402
-from transformers import AutoTokenizer  # noqa: E402
-
-from agentcore_rl_toolkit.backends.experimental.verl.dataset import PayloadDataset  # noqa: E402
+from agentcore_rl_toolkit.backends.experimental.verl.dataset import PayloadDataset
 
 
 @pytest.fixture(scope="module")
 def tokenizer():
-    return AutoTokenizer.from_pretrained("gpt2")
+    tok = AutoTokenizer.from_pretrained("gpt2")
+    # gpt2 ships no chat template; length filtering renders the synthesized
+    # prompt through apply_chat_template, so give it a minimal one.
+    tok.chat_template = "{% for m in messages %}{{ m['content'] }}{% endfor %}"
+    return tok
 
 
 def _write_parquet(tmp_path, rows):

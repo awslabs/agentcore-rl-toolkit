@@ -79,10 +79,13 @@ def _extract_agent_reward(result: dict) -> float | None:
 
 
 # NOT decorated with verl's @register: registration comes solely from the
-# agent_loop_config_path YAML entry, which carries the required ctor kwargs.
-# @register would re-fire on first instantiate (module import) and overwrite
-# the YAML registry entry with a bare {"_target_": ...} — every subsequent
-# trajectory would then instantiate without agent_runtime_arn/s3_bucket.
+# agent_loop_config_path YAML entry, because that entry also carries the
+# constructor kwargs this loop requires (agent_runtime_arn, s3_bucket, ...) —
+# @register stores only a bare {"_target_": ...} with no kwargs, which is why
+# it suffices for verl's built-in loops but not here. Worse, the decorator
+# fires when hydra first imports this module (at the first instantiation) and
+# would overwrite the YAML's kwarg-carrying registry entry with the bare one:
+# the first rollout works, every subsequent one crashes on missing kwargs.
 class AgentCoreAgentLoop(AgentLoopBase):
     """Runs each rollout on an ACR-deployed agent, capturing token-level
     trajectories through the process-local rollout gateway."""

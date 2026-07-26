@@ -12,18 +12,11 @@ import uuid
 import openai
 import pytest
 
-from agentcore_rl_toolkit.backends.experimental.verl import gateway_host
 from agentcore_rl_toolkit.backends.experimental.verl.gateway_host import get_or_start_gateway
 
 from .conftest import FakeLLMServerClient, FakeTokenizer
 
 pytestmark = pytest.mark.asyncio
-
-
-@pytest.fixture(autouse=True)
-def reset_gateway():
-    yield
-    gateway_host._reset_for_tests()
 
 
 async def test_openai_sdk_session_capture():
