@@ -1,0 +1,61 @@
+# Integration tests for the experimental verl backend
+# (tests/backends/experimental/verl), which run against the verl distribution
+# and are skipped by the plain unit-test job (they importorskip verl).
+#
+# The full [verl-experimental] extra is not installable on a GitHub runner
+# (vllm pin, flash-attn source build, CUDA torch), and the tests don't need an
+# inference engine — the LLM server client is the faked seam. So this job syncs
+# the [verl-experimental-ci] extra: the same pinned verl and runtime deps, but
+# CPU torch and no inference engines (see pyproject.toml).
+
+name: Experimental verl Integration Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/agentcore_rl_toolkit/backends/experimental/verl/**"
+      - "src/agentcore_rl_toolkit/rollout_gateway/**"
+      - "src/agentcore_rl_toolkit/client.py"
+      - "tests/backends/experimental/verl/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/experimental-verl-integration.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/agentcore_rl_toolkit/backends/experimental/verl/**"
+      - "src/agentcore_rl_toolkit/rollout_gateway/**"
+      - "src/agentcore_rl_toolkit/client.py"
+      - "tests/backends/experimental/verl/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/experimental-verl-integration.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+            .github/workflows/experimental-verl-integration.yml
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --extra verl-experimental-ci --extra dev
+
+      - name: Run verl integration tests
+        run: uv run --no-sync pytest tests/backends/experimental/verl -v
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"

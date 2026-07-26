@@ -628,6 +628,13 @@ uv sync --extra dev
 uv run pytest tests/rollout_gateway/
 ```
 
+The experimental verl backend tests (`tests/backends/experimental/verl/`) run against
+the installed verl distribution and skip when verl is absent (conftest-level
+`importorskip`). Run them from an env with the `verl-experimental` extra synced; in CI
+they run in `.github/workflows/experimental-verl-integration.yml`, which syncs the
+`verl-experimental-ci` extra (same pinned verl, but CPU torch and no vllm/flash-attn —
+the LLM server client is the faked seam, so no inference engine is needed).
+
 ### Building and Pushing Docker Images
 
 ```bash

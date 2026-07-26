@@ -121,6 +121,29 @@ verl-experimental = [
     "flash-attn==2.8.3",
     "qwen-vl-utils",
 ]
+verl-experimental-ci = [
+    # CI slice of [verl-experimental] for the experimental-verl-integration
+    # workflow: same pinned verl (the [tool.uv.sources] entry applies) and
+    # declared runtime deps, but CPU torch (index steering below) and no
+    # inference engines (vllm / flash-attn / qwen-vl-utils) — the backend's
+    # integration tests fake the LLM-server seam, and none of those install on
+    # a GitHub runner (CUDA wheels, source builds).
+    "verl",
+    "transferqueue==0.1.8",
+    "orjson",
+    # verl deps the full extra gets transitively via vllm: fastapi/uvicorn are
+    # in verl's requirements.txt (not its setup.py); cachetools is undeclared
+    # even there (verl/workers/rollout/llm_server.py).
+    "cachetools",
+    "fastapi",
+    "uvicorn",
+    "aiohttp>=3.9",
+    "transformers>=4.44",
+    "numpy",
+    "ray",
+    "torch>=2.10.0",
+    "torchvision>=0.23.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
@@ -141,6 +164,7 @@ conflicts = [
         { extra = "verl" },
         { extra = "rllm" },
         { extra = "verl-experimental" },
+        { extra = "verl-experimental-ci" },
     ],
 ]
 override-dependencies = [
@@ -160,7 +184,21 @@ rllm = { git = "https://github.com/rllm-org/rllm.git" }
 # verl==0.8.0 from PyPI in its own conflict fork.
 verl = [
     { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl-experimental" },
+    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl-experimental-ci" },
 ]
+# CI fork only: CPU torch wheels so the CUDA distribution (plus nvidia-* wheels)
+# never resolves on GitHub runners. The other extras keep the default index.
+torch = [
+    { index = "pytorch-cpu", extra = "verl-experimental-ci" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "verl-experimental-ci" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 
 [tool.hatch.metadata]
