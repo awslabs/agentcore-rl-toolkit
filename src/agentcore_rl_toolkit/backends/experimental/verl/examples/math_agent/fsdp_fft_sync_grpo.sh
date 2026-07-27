@@ -39,8 +39,6 @@ train_files="['$gsm8k_train_path']"
 test_files="['$gsm8k_test_path']"
 
 # One checkpoint dir per experiment (mirrors verl's own default layout).
-# Deriving it from the experiment name also keeps verl's auto-resume scoped to
-# the experiment: a new experiment name can never resume another run's state.
 PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo_experimental}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-gsm8k_qwen3_4b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}

@@ -177,8 +177,9 @@ and no KL/TIS collapsed to reward 0 around step 60 — see the script header):
 FSDP-trainer probability gap using the gateway-captured rollout logprobs.
 
 Checkpoints land under `checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}` (verl's own
-layout); one dir per experiment keeps verl's auto-resume scoped so a new experiment
-can never resume another run's state.
+layout), and the script sets `trainer.resume_mode=disable` so no run auto-resumes.
+If you re-enable resume, the per-experiment dir keeps it scoped: verl's `auto` mode
+only ever searches `trainer.default_local_dir`.
 
 **Wall-clock note:** validation dominates. Each val prompt is a live ACR agent
 round-trip (the GSM8K test split is 1319 prompts ≈ 12 min/eval), versus ~100 s per
@@ -208,9 +209,9 @@ working unchanged.
 - **Agent-side 404s on every rollout**: an agent constructing its own URL paths
   instead of using an OpenAI/Anthropic SDK may miss the `/v1` convention (see above).
 - **Run finishes instantly at "Training Progress: 100%"**: verl auto-resumed from a
-  previous run's checkpoint dir. The script scopes checkpoint dirs by experiment name
-  and sets `trainer.resume_mode=disable`; if you override `CKPTS_DIR`, keep it
-  per-experiment.
+  previous run's checkpoint dir. The script prevents this with
+  `trainer.resume_mode=disable`; if you re-enable resume and override `CKPTS_DIR`,
+  keep it per-experiment so a new experiment can't pick up another run's state.
 - Stop-string text trimmed by verl's rollout servers is excluded from trained ids
   (same behavior as verl's own agent loops).
 - Sub-agents that reuse the same session id fork within one tree and are captured; a
