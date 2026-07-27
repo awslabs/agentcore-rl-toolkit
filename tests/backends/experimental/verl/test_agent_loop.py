@@ -1,7 +1,7 @@
-"""AgentCoreAgentLoop tests: conversion math, invoke wiring, reward modes, and
-failure paths. The loop is constructed through verl's own ``AgentLoopBase``
-against a live (threaded) gateway; only the LLM server client and the
-RolloutClient (no AWS) are faked."""
+"""AgentCoreAgentLoop tests: conversion math, invoke wiring, rewards, and failure
+paths. The loop is constructed through verl's own ``AgentLoopBase`` against a live
+(threaded) gateway; only the LLM server client and the RolloutClient (no AWS) are
+faked."""
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,6 +31,7 @@ def _make_loop(llm_client=None, *, use_v1=True, **loop_kwargs):
             gateway_bind_host="127.0.0.1",
             gateway_public_host="127.0.0.1",
             name="agentcore_agent",  # hydra passes the YAML entry's name through
+            **loop_kwargs,
         )
     return loop
 
@@ -114,26 +115,12 @@ async def test_built_in_mode_missing_reward_warns_and_scores_zero(caplog):
     assert any("returned no {'rewards'" in r.message for r in caplog.records)
 
 
-async def test_separate_mode_leaves_none_and_ignores_agent_reward(caplog):
-    import logging
-
-    loop = _make_loop()
-    loop.reward_mode = "separate"
-    _wire_result(loop, {"status_code": 200, "rewards": 0.9, "artifacts": {"x": 1}})
-    with caplog.at_level(logging.WARNING):
-        outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
-    assert outputs[0].reward_score is None  # verl's reward loop decides
-    assert outputs[0].extra_fields["acr_result"]["artifacts"] == {"x": 1}
-    assert any("ignoring it" in r.message for r in caplog.records)
-
-
-async def test_separate_mode_failure_leaves_none():
-    loop = _make_loop()
-    loop.reward_mode = "separate"
-    loop._client.invoke_async = AsyncMock(side_effect=RuntimeError("boom"))
-    outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
-    assert outputs[0].extra_fields["acr_failed"] is True
-    assert outputs[0].reward_score is None  # failure scoring is the reward fn's call
+async def test_separate_reward_mode_rejected():
+    """Trainer-side scoring needs data_source/reward_model.ground_truth columns
+    the payload-first dataset contract doesn't provide; rejected at construction
+    rather than KeyError-ing inside verl's reward manager."""
+    with pytest.raises(ValueError, match="reward_mode='separate' is not supported"):
+        _make_loop(reward_mode="separate")
 
 
 async def test_invalid_reward_mode_rejected():

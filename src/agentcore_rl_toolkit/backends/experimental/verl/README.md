@@ -126,24 +126,21 @@ ACR endpoints if multi-endpoint training lands — don't put dispatch concerns i
 
 ## Rewards
 
-Who computes the reward is explicit config: `reward_mode` on the agent-loop YAML entry.
+The reward is **built into the agent** (`reward_mode="built_in"`, the only supported
+mode): the agent returns `{"rewards": ...}` in its session result (scalar or list;
+last element wins). The score becomes `rm_scores` directly and verl skips reward
+computation.
 
-1. **`built_in`** (default) — the reward is built into the agent: it returns
-   `{"rewards": ...}` in its session result (scalar or list; last element wins).
-   The score becomes `rm_scores` directly and verl skips reward computation.
-   Failed rollouts score 0.0; a healthy rollout that returns no reward is a
-   contract violation (warned, scored 0.0).
-2. **`separate`** — rewards are computed by a separate, trainer-side reward
-   function: verl's standard `custom_reward_function(data_source, solution_str,
-   ground_truth, extra_info)` runs for every rollout, including failures — the
-   agent's full session result is available at `extra_info["acr_result"]`, so
-   agent-saved artifacts (and failure details) can drive scoring. Any reward the
-   agent returns is ignored (warned).
+- Failed rollouts (timeout, ACR error, non-200 `status_code`) score 0.0.
+- A healthy rollout that returns no reward is a contract violation: warned, scored 0.0.
 
-   Status: designed and unit-tested; not yet exercised in an end-to-end training
-   run. Note verl's `compute_score` signature leans on `data_source` /
-   `reward_model.ground_truth` dataset columns — with a payload-first dataset,
-   read what you need from `extra_info["acr_result"]` instead.
+**Trainer-side rewards (`reward_mode="separate"`) are not supported yet** and are
+rejected at startup. Handing scoring to verl's reward loop requires `data_source` and
+`reward_model.ground_truth` dataset columns — every v1 reward manager indexes them
+unguarded, *before* merging the session result into `extra_info` — so a payload-only
+row raises `KeyError` before the reward function ever runs. Synthesizing a shape for
+those columns without a concrete reward function to validate against would be a
+guess, so the mode stays closed until there is one.
 
 ## Run the GSM8K example
 
@@ -159,7 +156,7 @@ python preprocess_gsm8k.py --output-dir gsm8k
 The example owns two config files, split by which config tree they feed:
 `fsdp_fft_sync_grpo.sh` sets verl-tree knobs (overridable from the CLI via its
 trailing `"$@"`), and `agentcore_agent.yaml` — the per-run agent-loop config —
-carries the loop's kwargs (ARN, bucket, `max_rollout_time`, `reward_mode`, ...).
+carries the loop's kwargs (ARN, bucket, `max_rollout_time`, ...).
 Loop kwargs are NOT CLI-addressable (verl loads the YAML worker-side, outside
 hydra's override grammar): edit the YAML, or use `${oc.env:...}` interpolation
 for values that should vary per launch. Unset kwargs fall back to

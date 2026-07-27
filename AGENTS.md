@@ -357,8 +357,11 @@ Key pieces (see `backends/experimental/verl/README.md` for the full design):
   synthesized at load time from `payload["prompt"]` (keeps agents decoupled from
   trainer/dataset conventions; sibling fields of `payload` are reserved for dispatch
   metadata, e.g. a future `agent` routing field).
-- Rewards: inline `{"rewards": ...}` from the agent → `rm_scores`; otherwise verl's
-  native `custom_reward_function` runs with the S3 result at `extra_info["acr_result"]`.
+- Rewards: the agent owns scoring — inline `{"rewards": ...}` → `rm_scores`, failures
+  and missing rewards score 0.0. Trainer-side scoring (`reward_mode="separate"`) is
+  rejected at startup: verl's reward managers require
+  `data_source`/`reward_model.ground_truth` columns the payload-first dataset contract
+  doesn't provide.
 - Agent-side contract: the app sets `api_key = context.session_id or "EMPTY"` so the
   gateway can key capture off the Bearer/api-key slot (`"EMPTY"` keeps local runs and
   the legacy per-session-URL gateways working). Adopted by `strands_math_agent`

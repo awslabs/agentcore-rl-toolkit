@@ -122,22 +122,34 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 "list[AgentLoopOutput] (one per trajectory-tree leaf), which only "
                 "the v1 TransferQueue path consumes."
             )
-        if reward_mode not in ("built_in", "separate"):
-            raise ValueError(f"reward_mode must be 'built_in' or 'separate', got {reward_mode!r}")
+        if reward_mode == "separate":
+            # Handing scoring to verl's reward loop needs dataset columns the
+            # payload-first contract doesn't produce: every v1 reward manager
+            # indexes non_tensor_batch["data_source"] and
+            # non_tensor_batch["reward_model"]["ground_truth"] unguarded, before
+            # merging acr_result into extra_info — so a payload-only row KeyErrors
+            # before the reward function ever runs. Picking a synthesized shape for
+            # those columns without a concrete reward function to validate against
+            # would just be a guess, so the mode is closed until there is one.
+            raise ValueError(
+                "reward_mode='separate' is not supported yet: verl's reward managers require "
+                "`data_source` and `reward_model.ground_truth` dataset columns, which the "
+                "payload-first dataset contract does not provide. Use reward_mode='built_in' "
+                "and have the agent return {'rewards': ...} in its session result."
+            )
+        if reward_mode != "built_in":
+            raise ValueError(f"reward_mode must be 'built_in', got {reward_mode!r}")
 
         self.prompt_length = self.rollout_config.prompt_length
         self.response_length = self.rollout_config.response_length
         self.max_rollout_time = max_rollout_time
-        # Who computes the reward:
-        #   "built_in": the agent computes its own reward and returns
-        #               {"rewards": ...} in its session result; failed rollouts
-        #               score 0.0. A healthy rollout that returns no reward is a
-        #               contract violation (warned, scored 0.0).
-        #   "separate": rewards are computed by a separate reward function —
-        #               verl's custom_reward_function runs for every rollout,
-        #               including failures; the session result is available to
-        #               it at extra_info["acr_result"]. Any reward the agent
-        #               returns is ignored (warned).
+        # Who computes the reward. Only "built_in" today: the agent computes its
+        # own reward and returns {"rewards": ...} in its session result, which
+        # becomes rm_scores directly (verl skips reward computation). Failed
+        # rollouts score 0.0; a healthy rollout that returns no reward is a
+        # contract violation (warned, scored 0.0). Kept as config rather than
+        # inlined so a validated trainer-side mode can land without a breaking
+        # signature change (see the rejection above).
         self.reward_mode = reward_mode
         self.model_id = self.config.actor_rollout_ref.model.path
 
@@ -257,27 +269,18 @@ class AgentCoreAgentLoop(AgentLoopBase):
 
     # -- helpers ---------------------------------------------------------------
 
-    def _resolve_reward(self, result: dict[str, Any], error: str | None, sid: str) -> float | None:
-        """Resolve reward_score per reward_mode. Returning None hands scoring to
-        verl's reward loop (custom_reward_function); a float becomes rm_scores
-        directly and verl skips reward computation for this rollout."""
-        agent_reward = _extract_agent_reward(result) if error is None else None
-        if self.reward_mode == "separate":
-            if agent_reward is not None:
-                logger.warning(
-                    "reward_mode='separate' but the agent returned a reward for rollout %s; "
-                    "ignoring it — verl's custom_reward_function decides the score.",
-                    sid,
-                )
-            return None
-        # built_in: the agent owns scoring; failures and contract violations score 0
+    def _resolve_reward(self, result: dict[str, Any], error: str | None, sid: str) -> float:
+        """The rollout's reward_score, which becomes rm_scores directly (verl
+        skips reward computation for this rollout). The agent owns scoring;
+        failures and contract violations score 0."""
         if error is not None:
             return 0.0
+        agent_reward = _extract_agent_reward(result)
         if agent_reward is None:
             logger.warning(
-                "reward_mode='built_in' but the agent returned no {'rewards': ...} for "
-                "rollout %s; scoring 0.0. Set reward_mode='separate' if rewards are "
-                "computed by a trainer-side reward function.",
+                "The agent returned no {'rewards': ...} for rollout %s; scoring 0.0. "
+                "The agent owns scoring — return the reward in its session result "
+                "(see the reward contract in backends/experimental/verl/README.md).",
                 sid,
             )
             return 0.0
@@ -383,9 +386,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
 
         The single pad-token response carries response_mask=[1] (NOT 0: verl's
         rollout-correction helper requires at least one valid response token per
-        row) with rollout_log_probs=[0.0]. Reward follows reward_mode: 0.0 in
-        built_in mode; None in separate mode so the trainer-side reward function
-        also decides what a failure is worth."""
+        row) with rollout_log_probs=[0.0], and scores 0.0 in built_in mode."""
         pad_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id or 0
         prompt_ids = [pad_id]
         raw_prompt = kwargs.get("raw_prompt")
@@ -405,6 +406,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
             response_ids=[pad_id],
             response_mask=[1],
             response_logprobs=[0.0],
+            # None is reserved for reward_mode="separate", which __init__ rejects today
             reward_score=0.0 if self.reward_mode == "built_in" else None,
             num_turns=1,
             metrics=AgentLoopMetrics(generate_sequences=elapsed),

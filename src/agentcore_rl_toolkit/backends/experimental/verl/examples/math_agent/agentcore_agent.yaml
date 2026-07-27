@@ -21,8 +21,8 @@
   #                                # containers can route to the trainer nodes, as in
   #                                # same-VPC setups). Set explicitly when they can't
   #                                # (public networking mode, NAT, multi-homed nodes)
-  # reward_mode: built_in          # who computes the reward: "built_in" = the agent
-  #                                # returns {"rewards": ...} in its session result
-  #                                # (failures score 0); "separate" = verl's
-  #                                # custom_reward_function scores every rollout,
-  #                                # with the session result at extra_info["acr_result"]
+  # reward_mode: built_in          # the only supported mode: the agent returns
+  #                                # {"rewards": ...} in its session result
+  #                                # (failures score 0). Trainer-side scoring
+  #                                # ("separate") is rejected at startup; see the
+  #                                # Rewards section of the backend README
