@@ -34,15 +34,11 @@ from .gateway_host import GatewayHandle, get_or_start_gateway
 
 logger = logging.getLogger(__name__)
 
-# RolloutClient cache keyed by construction config. Agent loops are instantiated
-# per trajectory, so instances with the same config MUST share one client — the
-# client owns the ACRRateLimiter, and per-instance clients would each start a
-# fresh limiter (i.e. no effective rate limiting toward ACR's per-ARN TPS cap).
-# Config-keyed (rather than a process singleton) so distinct agent-loop configs
-# (e.g. multi-agent training against different ARNs) get distinct clients. All
-# access happens on the AgentLoopWorker's single asyncio thread, matching
-# RolloutClient's not-thread-safe contract; the client never crosses into the
-# gateway thread.
+# Agent loops are instantiated per trajectory, so same-config instances MUST share
+# one client: the client owns the ACRRateLimiter, and a fresh limiter per instance
+# means no effective rate limiting toward ACR's per-ARN TPS cap. Keyed by config
+# rather than a process singleton so distinct ARNs get distinct clients. Only ever
+# touched from the AgentLoopWorker's asyncio thread (RolloutClient isn't thread-safe).
 _CLIENTS: dict[tuple, RolloutClient] = {}
 
 
@@ -71,12 +67,9 @@ def _extract_agent_reward(result: dict) -> float | None:
     convention of ``@rollout_entrypoint`` apps: scalar, or last element of a
     list), or ``None`` if the agent didn't report one.
 
-    A non-numeric ``rewards`` value raises, deliberately: it means the agent's
-    reward code is broken, so it is broken on every rollout. Scoring 0.0 instead
-    would flatten every GRPO group's advantages — training on nothing while the
-    run looks healthy. Raising is contained by verl per prompt group (logged with
-    a traceback, group tagged ``failure``, replay buffer still samples), and is
-    the only outcome that keeps the unscored row out of the batch entirely.
+    A non-numeric value raises rather than scoring 0.0: broken reward code is broken
+    on every rollout, and zeros would flatten every GRPO group's advantages instead.
+    verl contains the raise per prompt group, so training continues.
     """
     rewards = result.get("rewards")
     if rewards is None:
@@ -94,14 +87,10 @@ def _extract_agent_reward(result: dict) -> float | None:
         ) from e
 
 
-# NOT decorated with verl's @register: registration comes solely from the
-# agent_loop_config_path YAML entry, because that entry also carries the
-# constructor kwargs this loop requires (agent_runtime_arn, s3_bucket, ...) —
-# @register stores only a bare {"_target_": ...} with no kwargs, which is why
-# it suffices for verl's built-in loops but not here. Worse, the decorator
-# fires when hydra first imports this module (at the first instantiation) and
-# would overwrite the YAML's kwarg-carrying registry entry with the bare one:
-# the first rollout works, every subsequent one crashes on missing kwargs.
+# Deliberately NOT decorated with verl's @register: it stores a bare
+# {"_target_": ...} with no kwargs, and fires when hydra imports this module —
+# overwriting the YAML entry that carries our required kwargs. The first rollout
+# would work, every later one crash on missing kwargs. Registration is YAML-only.
 class AgentCoreAgentLoop(AgentLoopBase):
     """Runs each rollout on an ACR-deployed agent, capturing token-level
     trajectories through the process-local rollout gateway."""
@@ -139,14 +128,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 "the v1 TransferQueue path consumes."
             )
         if reward_mode == "separate":
-            # Handing scoring to verl's reward loop needs dataset columns the
-            # payload-first contract doesn't produce: every v1 reward manager
-            # indexes non_tensor_batch["data_source"] and
-            # non_tensor_batch["reward_model"]["ground_truth"] unguarded, before
-            # merging acr_result into extra_info — so a payload-only row KeyErrors
-            # before the reward function ever runs. Picking a synthesized shape for
-            # those columns without a concrete reward function to validate against
-            # would just be a guess, so the mode is closed until there is one.
+            # The reward managers index those columns *before* merging acr_result into
+            # extra_info, so a payload-only row KeyErrors before the reward fn runs.
             raise ValueError(
                 "reward_mode='separate' is not supported yet: verl's reward managers require "
                 "`data_source` and `reward_model.ground_truth` dataset columns, which the "
@@ -159,13 +142,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
         self.prompt_length = self.rollout_config.prompt_length
         self.response_length = self.rollout_config.response_length
         self.max_rollout_time = max_rollout_time
-        # Who computes the reward. Only "built_in" today: the agent computes its
-        # own reward and returns {"rewards": ...} in its session result, which
-        # becomes rm_scores directly (verl skips reward computation). Failed
-        # rollouts score 0.0; a healthy rollout that returns no reward is a
-        # contract violation (warned, scored 0.0). Kept as config rather than
-        # inlined so a validated trainer-side mode can land without a breaking
-        # signature change (see the rejection above).
+        # Kept as config, not inlined, so a validated trainer-side mode can land
+        # without a signature change. Reward semantics: see the README.
         self.reward_mode = reward_mode
         self.model_id = self.config.actor_rollout_ref.model.path
 
@@ -303,14 +281,11 @@ class AgentCoreAgentLoop(AgentLoopBase):
         return agent_reward
 
     def _warn_if_static_session_capture(self, sid: str) -> None:
-        """Diagnose the stale-agent-image failure mode: the rollout's real sid
-        drained empty, but turns are accumulating under a static fallback key —
-        the agent is sending a fixed api_key ("EMPTY" from an image predating
-        the context.session_id contract, or "default" when no auth reaches the
-        adapter) instead of the ACR session id. The adapters accept unseen keys
-        by design (that's how local runs work), so without this warning the
-        misconfiguration trains nothing, silently. Warn only — "EMPTY" is also
-        a legitimate key for local/eval traffic, so we don't drop or close it."""
+        """Diagnose the stale-agent-image failure mode (see the warning below).
+
+        Warn only, never drop the session: the adapters accept unseen keys by design
+        (that is how local runs work) and "EMPTY" is legitimate for local/eval traffic.
+        Without this, the misconfiguration trains nothing, silently."""
         manager = self._gateway.gateway.manager
         for static_sid in ("EMPTY", "default"):
             if manager.turn_count(static_sid):
@@ -332,16 +307,11 @@ class AgentCoreAgentLoop(AgentLoopBase):
         return defaults
 
     def _build_payload(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """The ACR invoke payload: the row's ``payload`` column, forwarded
-        verbatim. It is authored against the agent's own API, so the agent stays
-        free of dataset/trainer conventions; the chat-format ``prompt`` column
-        exists only for verl's dataloader and is never forwarded. This is the
-        single contract — deliberately no field-selection or forward-everything
-        fallback: the row namespace is shared with verl's own plumbing fields,
-        and column values shaped for verl (chat-format prompts) are not shaped
-        for agents. Payload leaves must be plain JSON types (they are, when the
-        dict comes through the stock parquet read path); anything else fails
-        loudly when the client serializes the invoke body.
+        """The ACR invoke payload: the row's ``payload`` column, forwarded verbatim.
+
+        The single contract, with no field-selection or forward-everything fallback —
+        the row namespace is shared with verl's plumbing fields, and verl-shaped
+        columns (chat-format prompts) are not agent-shaped. See the README.
         """
         payload = kwargs.get("payload")
         if isinstance(payload, dict):
