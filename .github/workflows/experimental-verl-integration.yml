@@ -10,6 +10,9 @@
 
 name: Experimental verl Integration Tests
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
