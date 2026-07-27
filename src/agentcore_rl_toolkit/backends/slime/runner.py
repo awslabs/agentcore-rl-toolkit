@@ -87,6 +87,7 @@ class SlimeRunner:
     # Gateway use_sglang parsers (must match the served model) + cumulative mode.
     sglang_tool_call_parser: str = "qwen"
     sglang_reasoning_parser: str | None = None
+    sglang_data_parallel_size: int = 1
     cumulative_token_mode: bool = False
     renderer_family: str = "auto"
     gateway_log_level: str = "warning"
@@ -356,6 +357,8 @@ class SlimeRunner:
         # Optional SGLang context length cap.
         if self.sglang_context_length is not None:
             flags.extend(["--sglang-context-length", str(self.sglang_context_length)])
+        # SGLang data parallel size (required by slime's sglang_utils validation).
+        flags.extend(["--sglang-data-parallel-size", str(self.sglang_data_parallel_size)])
         # CUDA pinning for the Megatron train actors: slime gives them their own
         # runtime_env that does NOT carry CUDA_HOME/LD_LIBRARY_PATH, so pass the
         # pinned paths through --train-env-vars too (mirrors train.sh). Only when

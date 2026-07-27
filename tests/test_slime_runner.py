@@ -88,3 +88,20 @@ def test_toolkit_config_yaml_includes_acr_pointers():
     assert data["s3_bucket"] == REQUIRED_KWARGS["s3_bucket"]
     assert data["exp_id"] == REQUIRED_KWARGS["exp_id"]
     assert data["model_id"] == "qwen-served"
+
+
+def test_sglang_data_parallel_size_default_in_flags():
+    """--sglang-data-parallel-size is always emitted with default value 1."""
+    runner = SlimeRunner(**REQUIRED_KWARGS)
+    flags = runner._build_slime_flags(num_rollout=1, model_args=[], config_path="/tmp/cfg.yaml")
+
+    assert "--sglang-data-parallel-size" in flags
+    assert flags[flags.index("--sglang-data-parallel-size") + 1] == "1"
+
+
+def test_sglang_data_parallel_size_custom_value():
+    """--sglang-data-parallel-size respects a non-default value."""
+    runner = SlimeRunner(**REQUIRED_KWARGS, sglang_data_parallel_size=4)
+    flags = runner._build_slime_flags(num_rollout=1, model_args=[], config_path="/tmp/cfg.yaml")
+
+    assert flags[flags.index("--sglang-data-parallel-size") + 1] == "4"
