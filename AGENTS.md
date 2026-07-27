@@ -350,16 +350,19 @@ Key pieces (see `backends/experimental/verl/README.md` for the full design):
   kwarg-carrying registry entry on first instantiation): per rollout, create a gateway
   session (sid = uuid4 = ACR `runtimeSessionId`), invoke ACR via `RolloutClient`, await
   the S3 result, drain the session into `TraceRecord`s, and emit one `AgentLoopOutput`
-  per trajectory-tree leaf. Failures never raise — they return an inert single-token
-  row (`response_mask=[1]`, logprob 0, reward 0; an all-zero mask is rejected by verl).
+  per trajectory-tree leaf. Rollout failures (timeout, ACR error, non-200) never raise —
+  they return an inert single-token row (`response_mask=[1]`, logprob 0, reward 0; an
+  all-zero mask is rejected by verl). Contract violations that would recur on every
+  rollout (missing `payload` column, non-numeric reward) do raise, by design.
 - `dataset.py` — `PayloadDataset`: rows carry the agent's exact ACR invoke payload in a
   `payload` column; the chat-format `prompt` column verl's dataloader needs is
   synthesized at load time from `payload["prompt"]` (keeps agents decoupled from
   trainer/dataset conventions; sibling fields of `payload` are reserved for dispatch
   metadata, e.g. a future `agent` routing field).
 - Rewards: the agent owns scoring — inline `{"rewards": ...}` → `rm_scores`, failures
-  and missing rewards score 0.0. Trainer-side scoring (`reward_mode="separate"`) is
-  rejected at startup: verl's reward managers require
+  and missing rewards score 0.0, a non-numeric reward raises (broken agent-side reward
+  code would otherwise flatten every GRPO group). Trainer-side scoring
+  (`reward_mode="separate"`) is rejected at startup: verl's reward managers require
   `data_source`/`reward_model.ground_truth` columns the payload-first dataset contract
   doesn't provide.
 - Agent-side contract: the app sets `api_key = context.session_id or "EMPTY"` so the

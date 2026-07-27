@@ -3,6 +3,7 @@ paths. The loop is constructed through verl's own ``AgentLoopBase`` against a li
 (threaded) gateway; only the LLM server client and the RolloutClient (no AWS) are
 faked."""
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -105,10 +106,36 @@ async def test_run_end_to_end_inline_reward():
 
 
 async def test_built_in_mode_missing_reward_warns_and_scores_zero(caplog):
-    import logging
-
     loop = _make_loop()  # default reward_mode="built_in"
     _wire_result(loop, {"status_code": 200, "artifacts": {"x": 1}})
+    with caplog.at_level(logging.WARNING):
+        outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
+    assert outputs[0].reward_score == 0.0
+    assert any("returned no {'rewards'" in r.message for r in caplog.records)
+
+
+async def test_malformed_reward_raises():
+    """A non-numeric reward means broken agent-side reward code, which would be
+    broken on every rollout — raising keeps the unscored row out of the batch
+    instead of silently zeroing it and flattening the GRPO group."""
+    loop = _make_loop()
+    _wire_result(loop, {"status_code": 200, "rewards": "invalid"})
+    with pytest.raises(ValueError, match="non-numeric built-in reward"):
+        await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
+
+
+async def test_malformed_reward_on_failed_rollout_still_scores_zero():
+    """Failures score 0.0 before the reward is even parsed, so a garbage reward
+    on an already-failed rollout stays an inert row (no raise)."""
+    loop = _make_loop()
+    _wire_result(loop, {"status_code": 500, "stop_reason": "boom", "rewards": "invalid"})
+    outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
+    assert outputs[0].reward_score == 0.0
+
+
+async def test_empty_reward_list_treated_as_missing(caplog):
+    loop = _make_loop()
+    _wire_result(loop, {"status_code": 200, "rewards": []})
     with caplog.at_level(logging.WARNING):
         outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
     assert outputs[0].reward_score == 0.0
@@ -201,8 +228,6 @@ async def test_static_session_warning(caplog):
     """Stale agent image: the agent calls in with api_key='EMPTY' instead of its
     ACR session id, so the real sid drains empty -> degenerate output plus a
     warning naming the static session."""
-    import logging
-
     loop = _make_loop()
 
     async def fake_invoke_async(payload, session_id=None, input_id=None, **overrides):

@@ -133,6 +133,12 @@ computation.
 
 - Failed rollouts (timeout, ACR error, non-200 `status_code`) score 0.0.
 - A healthy rollout that returns no reward is a contract violation: warned, scored 0.0.
+- A non-numeric `rewards` value **raises**. That indicates broken agent-side reward
+  code, which would be broken on every rollout, and silently scoring 0.0 would
+  flatten every GRPO group's advantages — a run that trains on nothing while looking
+  healthy. verl contains the raise per prompt group (logged with a traceback, group
+  tagged `failure`, replay buffer still samples), so training continues; the affected
+  rollouts contribute no rows.
 
 **Trainer-side rewards (`reward_mode="separate"`) are not supported yet** and are
 rejected at startup. Handing scoring to verl's reward loop requires `data_source` and

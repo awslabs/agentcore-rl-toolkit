@@ -69,13 +69,29 @@ def _reset_client_for_tests() -> None:
 def _extract_agent_reward(result: dict) -> float | None:
     """The agent-reported reward from a session result (the ``{"rewards": ...}``
     convention of ``@rollout_entrypoint`` apps: scalar, or last element of a
-    list), or ``None`` if the agent didn't report one."""
+    list), or ``None`` if the agent didn't report one.
+
+    A non-numeric ``rewards`` value raises, deliberately: it means the agent's
+    reward code is broken, so it is broken on every rollout. Scoring 0.0 instead
+    would flatten every GRPO group's advantages — training on nothing while the
+    run looks healthy. Raising is contained by verl per prompt group (logged with
+    a traceback, group tagged ``failure``, replay buffer still samples), and is
+    the only outcome that keeps the unscored row out of the batch entirely.
+    """
     rewards = result.get("rewards")
     if rewards is None:
         return None
-    if isinstance(rewards, list):
-        return float(rewards[-1]) if rewards else None
-    return float(rewards)
+    if isinstance(rewards, list) and not rewards:
+        return None  # an empty list reports no reward
+    value = rewards[-1] if isinstance(rewards, list) else rewards
+    try:
+        return float(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"The agent returned a non-numeric built-in reward: rewards={rewards!r} ({e}). "
+            "It must be a float, or a list of floats whose last element is the reward — "
+            "see the reward contract in backends/experimental/verl/README.md."
+        ) from e
 
 
 # NOT decorated with verl's @register: registration comes solely from the
