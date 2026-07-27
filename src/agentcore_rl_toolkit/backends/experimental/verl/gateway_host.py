@@ -26,6 +26,7 @@ from typing import Any
 
 from aiohttp import web
 from aiohttp.web_log import AccessLogger
+from verl.utils.net_utils import is_valid_ipv6_address
 
 from agentcore_rl_toolkit.rollout_gateway import HfTemplateRenderer
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway
@@ -80,7 +81,10 @@ _HANDLE: GatewayHandle | None = None
 
 
 def _node_ip() -> str:
-    """The Ray node IP when inside a Ray worker; localhost otherwise (tests)."""
+    """The Ray node IP when inside a Ray worker; localhost otherwise (tests).
+
+    Returned bare (unbracketed), the form ``bind()`` wants; ``_url_host`` puts it
+    in URL form. Same split as uni-agent's GatewayActor."""
     try:
         import ray.util  # type: ignore[import-not-found]
 
@@ -89,6 +93,14 @@ def _node_ip() -> str:
         return ip.strip("[]")
     except Exception:
         return "127.0.0.1"
+
+
+def _url_host(host: str) -> str:
+    """``host`` in the authority form a URL needs: an IPv6 literal must be
+    bracketed, or its own colons make the ``:port`` suffix ambiguous and parsers
+    reject the address (``http://2001:db8::1:8080``). Mirrors verl's own
+    convention for advertised server addresses (see sglang/vllm rollout servers)."""
+    return f"[{host}]" if is_valid_ipv6_address(host) else host
 
 
 def _serve_in_thread(app: web.Application, host: str, port: int, start_timeout: float = 15.0):
@@ -160,7 +172,7 @@ def get_or_start_gateway(
             fork_threshold_tokens=fork_threshold_tokens,
         )
         loop, runner, bound_port, thread = _serve_in_thread(gateway.app, host, port)
-        base_url = f"http://{public_host or _node_ip()}:{bound_port}"
+        base_url = f"http://{_url_host(public_host or _node_ip())}:{bound_port}"
         _HANDLE = GatewayHandle(
             gateway=gateway,
             backend=backend,
