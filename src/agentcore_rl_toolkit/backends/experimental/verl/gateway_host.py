@@ -55,6 +55,9 @@ class GatewayHandle:
     backend, and the base_url ACR agents should dial."""
 
     gateway: RolloutGateway
+    # Same object as gateway.backend, but narrowed: that one is typed as the
+    # SamplingBackend protocol, which has no pop_extra_fields (VerlSamplingBackend
+    # only, for verl's staleness tags).
     backend: VerlSamplingBackend
     base_url: str
     _loop: asyncio.AbstractEventLoop
