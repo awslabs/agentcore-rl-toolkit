@@ -34,6 +34,13 @@ curl -X POST http://localhost:8080/invocations \
      -d '{"prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?"}'
 ```
 
+> **Security note:** The `/invocations` payloads shown above are validated by the
+> entrypoint before they reach the agent. Both basic app and RL app in subsequent section
+> construct an `InvocationRequest` (see `models.py`) whose `prompt` field is typed `str`, so
+> a non-string value — e.g. a `toolUse` content block — is rejected before the agent runs.
+> When adapting this example, keep that typed field: passing a `toolUse` content block to
+> a Strands agent can bypass model invocation and dispatch a tool directly.
+
 ## Run Basic App Hosted on ACR
 
 ### Deploy

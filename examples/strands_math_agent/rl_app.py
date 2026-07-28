@@ -1,5 +1,6 @@
 import logging
 
+from models import InvocationRequest
 from reward import GSM8KReward
 from strands import Agent
 from strands.models.openai import OpenAIModel
@@ -58,8 +59,12 @@ def invoke_agent(payload: dict, context):
         system_prompt=system_prompt,
     )
 
-    user_input = payload.get("prompt")
-    answer = payload.get("answer")  # used for computing reward
+    # Validate the payload: `prompt: str` rejects non-string input (e.g. toolUse
+    # content blocks) before it reaches the agent. Malformed payloads raise a
+    # pydantic ValidationError, which the entrypoint surfaces as an error result.
+    request = InvocationRequest(**payload)
+    user_input = request.prompt
+    answer = request.answer  # used for computing reward
 
     logger.info("User input: %s", user_input)
 

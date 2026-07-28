@@ -158,6 +158,14 @@ curl -X POST http://localhost:8080/invocations \
   }'
 ```
 
+> **Security note — `repo_uri` is a trust boundary.** Each invocation carries a `repo_uri`
+> S3 URI; the agent downloads that repo tarball, extracts it, and runs with `shell` + `editor`
+> tools against the extracted tree. The extraction uses `filter="data"` so a crafted tar
+> cannot escape the work directory via path traversal, and `prompt` is a typed `str` (see
+> `models.py`) so a `toolUse` content block cannot bypass the model. Even so, only point this
+> agent at `repo_uri`s from a **bucket you control** — the extracted code and the prompt both
+> drive a powerful agent.
+
 ## Docker
 
 ### Build & run locally

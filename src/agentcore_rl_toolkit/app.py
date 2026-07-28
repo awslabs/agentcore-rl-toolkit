@@ -114,6 +114,17 @@ class AgentCoreRLApp(BedrockAgentCoreApp):
         3. Handles errors and saves error results for client notification
         4. Returns immediately with {"status": "processing"} for non-blocking behavior
 
+        Security — payload validation is the handler's responsibility. This decorator is
+        framework-agnostic plumbing: it forwards the raw HTTP payload to your function and
+        saves the returned dict. It does not (and cannot) know your payload schema, so it
+        performs no sanitization. If your handler passes payload fields to an agent, validate
+        them first — the recommended pattern is a pydantic model with the field typed `str`
+        (e.g. ``class InvocationRequest(BaseModel): prompt: str``), which rejects non-string
+        values such as ``toolUse`` content blocks before they reach the agent. Passing a
+        ``toolUse`` content block to a Strands agent can bypass model invocation and dispatch
+        a tool directly (Strands event-loop dispatch); a ``prompt: str`` field closes this.
+        See ``examples/strands_math_agent/models.py`` for the reference pattern.
+
         The return value must be a JSON-serializable dict when S3 save is configured.
         Any dict structure is accepted — there are no required keys. Common patterns:
         - RL training: {"rollout_data": [...], "rewards": [...]}

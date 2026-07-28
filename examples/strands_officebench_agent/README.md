@@ -119,6 +119,25 @@ Results are saved to:
 - `results/{exp_id}/summary.json` — scores by category
 - `s3://{s3_output_bucket}/{exp_id}/...` — rollout data on S3
 
+> **Security note — where `task_uri`/`testbed_uri` come from, and why they are a trust
+> boundary.** `benchmark.py` lists the S3 prefix you populated in step 1
+> (`list_all_subtasks`) and, for each subtask, derives a `task_uri`
+> (`.../{task_id}/{subtask_id}/config.json`) and a `testbed_uri`
+> (`.../{task_id}/testbed.tar.gz`). It puts both into each invocation payload
+> (`{"task_uri": ..., "testbed_uri": ...}`) sent to the ACR agent. At rollout time the
+> agent **downloads the task config and testbed from those URIs** and then runs with
+> `shell` + all office tools against the extracted testbed and the task instruction —
+> so whoever controls those S3 objects controls what a powerful agent executes.
+>
+> This example hardens the mechanics: the task config is validated against a pydantic
+> `TaskConfig` (so `task` must be a string, never a `toolUse` content block that could
+> bypass model invocation), and the testbed tarball is extracted with `filter="data"`
+> (so a crafted archive cannot escape `/testbed` via `..`/absolute-path traversal). But
+> hardening the mechanics does not make the **content** of a task instruction safe — it
+> is free-form text driving `shell`. Only point the benchmark at a prefix in a **bucket
+> you control**; do not accept `task_uri`/`testbed_uri` values that originate from
+> untrusted principals.
+
 ## Configuration
 
 Example configuration is in `config.toml`:

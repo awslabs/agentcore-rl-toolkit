@@ -2,6 +2,7 @@ import logging
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from dotenv import load_dotenv
+from models import InvocationRequest
 from strands import Agent
 from strands.models import BedrockModel
 from strands_tools import calculator
@@ -31,7 +32,10 @@ def invoke_agent(payload):
     """
     Invoke the agent with a payload
     """
-    user_input = payload.get("prompt")
+    # Validate the payload: `prompt: str` rejects non-string input (e.g. toolUse
+    # content blocks) before it reaches the agent.
+    request = InvocationRequest(**payload)
+    user_input = request.prompt
 
     logger.info("User input: %s", user_input)
 

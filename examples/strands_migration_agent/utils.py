@@ -129,8 +129,13 @@ def load_repo_from_s3(s3_uri: str) -> str:
     if os.path.exists(repo_path):
         shutil.rmtree(repo_path)
 
+    # The repo archive is fetched from an attacker-influenceable S3 URI, so use
+    # filter="data" (Python 3.9+) to reject members with absolute paths or ".."
+    # traversal that would escape workdir (CVE-2007-4559). Without this, a crafted
+    # tar could overwrite files on sys.path (e.g. /app) before the agent — which
+    # holds shell + editor tools — runs against the extracted tree.
     with tarfile.open(tar_path, "r:gz") as tar:
-        tar.extractall(path=workdir)
+        tar.extractall(path=workdir, filter="data")
 
     if not os.path.exists(repo_path):
         raise ValueError(

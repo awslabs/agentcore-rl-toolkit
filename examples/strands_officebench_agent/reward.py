@@ -4,8 +4,10 @@ Adapts evaluation logic from OfficeBench's utils/evaluate.py to run locally
 on the testbed directory. All evaluation is outcome-based: check files on disk.
 """
 
+import ast
 import difflib
 import logging
+import operator
 import os
 import re
 from glob import glob
@@ -17,6 +19,141 @@ import pytz
 from agentcore_rl_toolkit import RewardFunction
 
 logger = logging.getLogger(__name__)
+
+
+# ── Safe comparator evaluation ──────────────────────────────────────────────
+# OfficeBench task configs express a comparator as a Python lambda *string*
+# (e.g. "lambda x: x in ['1', '2', '3']"). These configs are loaded from an S3
+# URI supplied in the invocation payload, so they are untrusted input. Passing
+# them to eval() is arbitrary code execution (RCE). Instead we parse the lambda
+# with ast.parse() and evaluate it with a small allowlist interpreter: only a
+# single-arg lambda whose body is built from comparisons (including membership),
+# boolean/arithmetic/unary ops, numeric/string literals, list/tuple/set literals,
+# the lambda's own parameter, and a handful of pure numeric-coercion builtins is
+# permitted. Every other node type (attribute access, arbitrary names/calls,
+# subscripts, comprehensions, imports, ...) is rejected before any code runs, so
+# there is no reachable path to import, reflection, or the filesystem. ** is
+# deliberately excluded to avoid cheap CPU/memory blow-ups (e.g. 2 ** 10**9).
+
+# Builtins the comparator body may call. All are pure, side-effect-free coercions.
+_SAFE_COMPARATOR_BUILTINS = {
+    "int": int,
+    "float": float,
+    "str": str,
+    "len": len,
+    "abs": abs,
+    "round": round,
+    "bool": bool,
+}
+
+_SAFE_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+}
+
+_SAFE_COMPARES = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.In: lambda a, b: a in b,
+    ast.NotIn: lambda a, b: a not in b,
+}
+
+_SAFE_UNARYOPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+    ast.Not: operator.not_,
+}
+
+
+class UnsafeComparatorError(ValueError):
+    """Raised when a comparator string contains constructs outside the allowlist."""
+
+
+def _make_safe_comparator(expr: str):
+    """Compile an OfficeBench comparator lambda string into a safe callable.
+
+    Accepts only a single-argument ``lambda`` whose body is composed of
+    comparisons (including ``in``/``not in``), boolean/arithmetic/unary ops,
+    numeric/string literals, list/tuple/set literals, the lambda parameter, and
+    the coercion builtins in ``_SAFE_COMPARATOR_BUILTINS``. Raises
+    ``UnsafeComparatorError`` for anything else, so a malicious task config can
+    never execute arbitrary code.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as e:
+        raise UnsafeComparatorError(f"Comparator is not a valid expression: {expr!r}") from e
+
+    if not isinstance(tree.body, ast.Lambda):
+        raise UnsafeComparatorError(f"Comparator must be a lambda expression: {expr!r}")
+
+    lam = tree.body
+    args = lam.args
+    if args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg or args.defaults or len(args.args) != 1:
+        raise UnsafeComparatorError(f"Comparator lambda must take exactly one positional arg: {expr!r}")
+
+    param_name = args.args[0].arg
+    # Filled in per-call by the returned closure before evaluating the body.
+    param_holder = {}
+
+    def _eval(node):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float, bool, str)):
+                return node.value
+            raise UnsafeComparatorError(f"Disallowed literal type: {type(node.value).__name__}")
+        if isinstance(node, ast.Name):
+            if node.id == param_name:
+                return param_holder["value"]
+            raise UnsafeComparatorError(f"Disallowed name reference: {node.id!r}")
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            elts = [_eval(e) for e in node.elts]
+            if isinstance(node, ast.List):
+                return elts
+            if isinstance(node, ast.Tuple):
+                return tuple(elts)
+            return set(elts)
+        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_BINOPS:
+            return _SAFE_BINOPS[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_UNARYOPS:
+            return _SAFE_UNARYOPS[type(node.op)](_eval(node.operand))
+        if isinstance(node, ast.BoolOp):
+            values = [_eval(v) for v in node.values]
+            if isinstance(node.op, ast.And):
+                return all(values)
+            return any(values)
+        if isinstance(node, ast.Compare):
+            left = _eval(node.left)
+            result = True
+            for op, comparator_node in zip(node.ops, node.comparators, strict=True):
+                op_type = type(op)
+                if op_type not in _SAFE_COMPARES:
+                    raise UnsafeComparatorError(f"Disallowed comparison operator: {op_type.__name__}")
+                right = _eval(comparator_node)
+                if not _SAFE_COMPARES[op_type](left, right):
+                    result = False
+                    break
+                left = right
+            return result
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_COMPARATOR_BUILTINS or node.keywords:
+                raise UnsafeComparatorError("Only calls to allowlisted numeric builtins are permitted")
+            fn = _SAFE_COMPARATOR_BUILTINS[node.func.id]
+            return fn(*[_eval(a) for a in node.args])
+        raise UnsafeComparatorError(f"Disallowed expression: {type(node).__name__}")
+
+    def comparator(value):
+        param_holder["value"] = value
+        return bool(_eval(lam.body))
+
+    return comparator
 
 
 # ── File reading helpers (adapted from OfficeBench apps) ────────────────────
@@ -234,7 +371,13 @@ def evaluate_excel_cell_comparator(testbed_dir: str, args: dict) -> bool:
         x = re.search(pattern, content)
         if x:
             value = x.group(1)
-            if eval(match["comparator"])(value):  # noqa: S307
+            try:
+                comparator = _make_safe_comparator(match["comparator"])
+            except UnsafeComparatorError as e:
+                # Untrusted comparator outside the safe allowlist — never execute it.
+                logger.warning("Rejected unsafe comparator %r: %s", match.get("comparator"), e)
+                return False
+            if comparator(value):
                 continue
             else:
                 return False

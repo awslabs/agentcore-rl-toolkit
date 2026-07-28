@@ -5,6 +5,7 @@ import shutil
 import tarfile
 
 import boto3
+from models import TaskConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,23 @@ def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
 
 
 def load_task_from_s3(task_uri: str) -> dict:
-    """Download task config JSON from S3 and return as dict."""
+    """Download task config JSON from S3, validate its shape, and return as dict.
+
+    The task config is untrusted (task_uri comes from the invocation payload).
+    We validate it against TaskConfig before use so that `task` is guaranteed to
+    be a string — it is handed to an agent holding shell + ALL_TOOLS — and the
+    evaluation list is well-formed. A malformed config raises a pydantic
+    ValidationError, which the entrypoint surfaces as an error result instead of
+    letting a non-string/content-block value reach the agent.
+    """
     s3 = boto3.client("s3")
     bucket, key = parse_s3_uri(task_uri)
     response = s3.get_object(Bucket=bucket, Key=key)
     content = response["Body"].read().decode("utf-8")
-    return json.loads(content)
+    task_config = json.loads(content)
+    # Validate shape; raises pydantic.ValidationError on malformed configs.
+    TaskConfig(**task_config)
+    return task_config
 
 
 def setup_testbed(testbed_uri: str | None) -> str:
@@ -67,10 +79,13 @@ def setup_testbed(testbed_uri: str | None) -> str:
         s3.download_file(bucket, key, tar_path)
 
         # Extract tar.gz — the archive should contain the testbed contents
-        # (data/, calendar/, emails/ directories)
+        # (data/, calendar/, emails/ directories). The archive is fetched from an
+        # attacker-influenceable S3 URI, so use filter="data" (Python 3.9+) to reject
+        # members with absolute paths or ".." traversal that would escape TESTBED_DIR
+        # (CVE-2007-4559).
         os.makedirs(TESTBED_DIR, exist_ok=True)
         with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(path=TESTBED_DIR)
+            tar.extractall(path=TESTBED_DIR, filter="data")
 
         os.remove(tar_path)
         logger.info(f"Extracted testbed from {testbed_uri} to {TESTBED_DIR}")
