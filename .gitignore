@@ -18,9 +18,11 @@ build/
 # Logs and experiment tracking
 wandb/
 *.log
+*.jsonl
 
-# Local slime backend config (contains ARN/bucket; commit config.yaml.example only)
-src/agentcore_rl_toolkit/backends/slime/examples/**/config.yaml
+# Local backend config (contains ARN/bucket; commit config.yaml.example only).
+# Covers backends/slime and backends/experimental/*.
+src/agentcore_rl_toolkit/backends/**/examples/**/config.yaml
 
 # Training/example run artifacts, wherever generated. Convention-level patterns:
 # hydra run dirs, verl checkpoint dirs (scripts use CKPTS_DIR=exp_*), wandb run

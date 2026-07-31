@@ -109,7 +109,8 @@ def main():
     )
 
     response = agent(task_config["task"])
-    response_text = response.message["content"][0]["text"]
+    content = response.message.get("content") or []
+    response_text = "".join(b["text"] for b in content if "text" in b)
     logger.info(f"Agent response: {response_text}")
 
     reward_fn = OfficeBenchReward()

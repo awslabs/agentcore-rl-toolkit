@@ -80,6 +80,9 @@ def _setup_rollout(payload: dict) -> RolloutContext:
     """
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
+    # During training the rollout gateway keys the session off the api-key slot;
+    # "EMPTY" (the vLLM convention) is fine for plain evaluation endpoints.
+    api_key = payload["_rollout"].get("api_key", "EMPTY")
     # Copy so we don't mutate the caller's payload while applying defaults.
     params = copy.deepcopy(payload["_rollout"].get("sampling_params", {}))
     for k, v in ASSISTANT_MODEL_DEFAULTS.items():
@@ -95,7 +98,7 @@ def _setup_rollout(payload: dict) -> RolloutContext:
 
     # Assistant model (RL-trained, served via vLLM)
     assistant_model = OpenAIModel(
-        client_args={"api_key": "EMPTY", "base_url": base_url},
+        client_args={"api_key": api_key, "base_url": base_url},
         model_id=model_id,
         params=params,
     )

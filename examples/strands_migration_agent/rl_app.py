@@ -46,6 +46,9 @@ def invoke_agent(payload: dict):
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
     params = payload["_rollout"].get("sampling_params", {})
+    # During training the rollout gateway keys the session off the api-key slot;
+    # "EMPTY" (the vLLM convention) is fine for plain evaluation endpoints.
+    api_key = payload["_rollout"].get("api_key", "EMPTY")
     tools = [shell, editor]
 
     request = InvocationRequest(**payload)
@@ -76,7 +79,7 @@ def invoke_agent(payload: dict):
         )
         tools.append(search_dependency_version)
 
-    model = OpenAIModel(client_args={"api_key": "EMPTY", "base_url": base_url}, model_id=model_id, params=params)
+    model = OpenAIModel(client_args={"api_key": api_key, "base_url": base_url}, model_id=model_id, params=params)
 
     agent = Agent(
         model=model,

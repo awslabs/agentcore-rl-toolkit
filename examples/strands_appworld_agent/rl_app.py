@@ -95,8 +95,10 @@ requested - not full sentences.
 def invoke_agent(payload: dict):
     rollout_config = payload.get("_rollout", {})
 
+    # During training the rollout gateway keys the session off the api-key slot;
+    # "EMPTY" (the vLLM convention) is fine for plain evaluation endpoints.
     model = OpenAIModel(
-        client_args={"api_key": "EMPTY", "base_url": rollout_config["base_url"]},
+        client_args={"api_key": rollout_config.get("api_key", "EMPTY"), "base_url": rollout_config["base_url"]},
         model_id=rollout_config["model_id"],
         params=rollout_config.get("sampling_params", {}),
     )
@@ -157,7 +159,8 @@ def invoke_agent(payload: dict):
             )
 
             response = agent(user_message)
-            logger.info(f"Agent response: {response.message['content'][0]['text']}")
+            content = response.message.get("content") or []
+            logger.info("Agent response: %s", "".join(b["text"] for b in content if "text" in b))
 
             # Save state and evaluate
             world.save()
