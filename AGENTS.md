@@ -315,14 +315,22 @@ drains the tree into `list[TraceRecord]`.
 
 **Dependencies.** The gateway is trainer-side and lives behind extras — the base install
 (agent-side `AgentCoreRLApp` / `RolloutClient`) stays lean:
-- `pip install agentcore-rl-toolkit[gateway]` → `aiohttp` + `transformers`.
-- Tool/reasoning parsing defaults to a dependency-free regex (the `<tool_call><function=...>`
-  XML format) and `</think>` split; the gateway itself never imports an inference engine.
-  For any other model format (e.g. Qwen3's JSON `<tool_call>`), inject an `output_parser`
-  callable (`(raw_output, tools_schema) -> ParsedOutput`) into `HfTemplateRenderer` — it
-  replaces the built-in derender entirely. The slime backend ships such a parser built from
+- `pip install agentcore-rl-toolkit[gateway]` → `aiohttp` + `transformers` + `jmespath`.
+- Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
+  lookup in `rollout_gateway/response_schemas.py`), `HfTemplateRenderer` derenders the
+  whole output in one pass via `tokenizer.parse_response(text, schema=...)` — reasoning,
+  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6, Llama 3.x,
+  GLM4-MoE, GPT-OSS, Nemotron-3; schemas vendored from huggingface/trl, see NOTICE). A
+  parse failure degrades to raw text with `ill_formed=True`, never an exception.
+  Unrecognized templates fall back to a `</think>` split for tool-free parsing, but
+  tool-bearing requests are **rejected** (there is no implicit tool parser — the
+  dependency-free `<tool_call><function=...>` XML regex understands one format and
+  would silently miss every other; opt into it explicitly with
+  `tool_parser=parse_tool_uses`); the gateway itself never imports an inference
+  engine. Injecting a `reasoning_parser` / `tool_parser` callable into
+  `HfTemplateRenderer` disables schema detection and takes full control. The slime backend injects parsers built from
   SGLang's own detectors (`backends/slime/integration/sglang_parsing.py`, composing
-  `FunctionCallParser` + `ReasoningParser`) and wires it automatically from slime's
+  `FunctionCallParser` + `ReasoningParser`) wired from slime's
   `--sglang-tool-call-parser` / `--sglang-reasoning-parser` args (names must match the
   served model); sglang is always importable there because the trainer serves SGLang.
 - For the Tinker backend (`TinkerSdkBackend` + `TinkerRenderer`), install `tinker` and
@@ -373,30 +381,36 @@ Key pieces (see `backends/experimental/verl/README.md` for the full design):
   (`reward_mode="separate"`) is rejected at startup: verl's reward managers require
   `data_source`/`reward_model.ground_truth` columns the payload-first dataset contract
   doesn't provide.
-- Agent-side contract: the app sets `api_key = context.session_id or "EMPTY"` so the
-  gateway can key capture off the Bearer/api-key slot (`"EMPTY"` keeps local runs and
-  the legacy per-session-URL gateways working). Adopted by `strands_math_agent`
+- Agent-side contract: the app sets `api_key = payload["_rollout"].get("api_key") or
+  "EMPTY"` — the loop supplies the capture session key in the payload (it also equals
+  the ACR `runtimeSessionId`, so older images reading `context.session_id` still work)
+  and the gateway keys capture off the Bearer/api-key slot (`"EMPTY"` keeps local runs
+  and the legacy per-session-URL gateways working). Adopted by `strands_math_agent`
   (validated end to end); the other examples still send `"EMPTY"` and migrate as
   they're validated against this backend.
 - Validated end to end: `examples/math_agent/fsdp_fft_sync_grpo.sh` (GRPO, Qwen3-4B
   full-FT, TIS + KL trust region) reaches ~0.93 GSM8K val reward in one epoch against
   a live ACR agent.
 
-**Vendored from slime (upstream baselines).** Several files are adapted from
-[slime](https://github.com/THUDM/slime) (Apache-2.0; see `NOTICE`). To check what changed
-upstream before re-syncing, diff the source file against the baseline commit below:
+**Vendored from upstream projects (baselines).** Several files are adapted from
+[slime](https://github.com/THUDM/slime) and [trl](https://github.com/huggingface/trl)
+(both Apache-2.0; see `NOTICE`). To check what changed upstream before re-syncing, diff
+the source against the baseline commit below:
 
-| This repo | slime source | Baseline commit |
+| This repo | upstream source | Baseline commit |
 |---|---|---|
 | `rollout_gateway/trajectory.py` | `slime/agent/trajectory.py` | `90c212b5` |
 | `rollout_gateway/adapters/{common,openai,anthropic}.py` | `slime/agent/adapters/` | `90c212b5` |
 | `rollout_gateway/parsing.py` | `slime/agent/parsing.py` | `90c212b5` |
 | `rollout_gateway/server.py` | `slime/agent/aiohttp_threaded.py` | `fa3c990a` |
+| `rollout_gateway/response_schemas.py` | `trl/chat_template_utils.py` (schema dicts) + `trl/chat_templates/*.jinja` (hash table) | `7073af94` |
 
 Re-sync workflow: `git -C <slime> diff 90c212b5..HEAD -- slime/agent/<file>` shows upstream
-changes since the lift. Our copies are intentionally modified (torch-free; `Sample` →
-`TraceRecord`; injected backend/renderer seams; sglang parser hook removed), so treat the diff
-as a review aid, not an automatic merge. Bump the baseline commit here when you re-sync.
+changes since the lift (same pattern for trl). Our copies are intentionally modified
+(torch-free; `Sample` → `TraceRecord`; injected backend/renderer seams; sglang parser hook
+removed), so treat the diff as a review aid, not an automatic merge. For
+`response_schemas.py`, re-sync means updating the schema dicts and recomputing the
+sha256 hashes of the covered chat templates. Bump the baseline commit here when you re-sync.
 
 ### Sandbox SDK
 
@@ -479,7 +493,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 - Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
 - Optional `sampling_params` (e.g., `max_completion_tokens`, `temperature`) can also be passed via `_rollout` for training-engine-controlled generation settings
 - Use standard `OpenAIModel` — no custom model wrappers needed. For evaluation, `base_url` can point directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` directly
-- `api_key` is set from `context.session_id` (the ACR runtime session id, available when the entrypoint declares a second `context` parameter) — trajectory-capture gateways like the experimental verl backend key token capture off the api-key slot. Fall back to `"EMPTY"` (the standard vLLM convention for unauthenticated servers) for local runs and gateways with per-session URLs, which ignore the api key
+- `api_key` is set from `payload["_rollout"].get("api_key")` — the training engine passes the trajectory-capture session key in the `_rollout` config (gateways like the experimental verl backend key token capture off the api-key slot). Fall back to `"EMPTY"` (the standard vLLM convention for unauthenticated servers) for local runs, evaluation endpoints, and gateways with per-session URLs, which ignore the api key
 - Model and agent are created per-invocation inside the entrypoint
 - This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
 - This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
@@ -496,7 +510,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 +     base_url = payload["_rollout"]["base_url"]
 +     model_id = payload["_rollout"]["model_id"]
 +     params = payload["_rollout"].get("sampling_params", {})
-+     api_key = context.session_id or "EMPTY"  # session key for trajectory-capture gateways
++     api_key = payload["_rollout"].get("api_key") or "EMPTY"  # session key for trajectory-capture gateways
 +     model = OpenAIModel(client_args={"api_key": api_key, "base_url": base_url}, model_id=model_id, params=params)
 +     agent = Agent(model=model, tools=[calculator], system_prompt="...")
 +     response = agent(user_input)

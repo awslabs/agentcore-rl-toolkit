@@ -36,9 +36,10 @@ dev = [
     "mypy>=1.0",
     "pre-commit>=3.0",
     # rollout_gateway test deps (so the full suite runs without a separate install):
-    # aiohttp for adapter/server tests, transformers for renderer round-trip / E2E.
+    # aiohttp for adapter/server tests, transformers for renderer round-trip / E2E
+    # (>=5.0 matches the [gateway] extra: tokenizer.parse_response).
     "aiohttp>=3.9",
-    "transformers>=4.44",
+    "transformers>=5.0",
     # openai: real-SDK wire-contract test for the gateway (Bearer-slot session capture).
     "openai>=1.0",
 ]
@@ -46,9 +47,14 @@ gateway = [
     # The rollout capture gateway (agentcore_rl_toolkit.rollout_gateway). Trainer-side
     # only — the agent-side surface (AgentCoreRLApp, RolloutClient) needs none of this.
     # aiohttp: the gateway HTTP server + HTTP sampling backends.
-    # transformers: HF tokenizer for HfTemplateRenderer (apply_chat_template).
+    # transformers: HF tokenizer for HfTemplateRenderer — apply_chat_template plus
+    # tokenizer.parse_response for the schema derender (>=5.0; the legacy schema
+    # engine incl. jmespath transforms shipped in 5.0.0).
+    # jmespath: transform expressions in response schemas;
+    # transitively present via boto3 already, declared because the gateway relies on it.
     "aiohttp>=3.9",
-    "transformers>=4.44",
+    "transformers>=5.0",
+    "jmespath>=1.0",
 ]
 # NOTE: the Tinker backend (TinkerSdkBackend + TinkerRenderer) needs `tinker` and
 # `tinker-cookbook`, which require Python >=3.11. They are intentionally NOT declared as
@@ -103,7 +109,10 @@ verl-experimental = [
     "transferqueue==0.1.8",  # v1 trainer data plane (main_ppo.py)
     "orjson",  # verl.utils.tracking (undeclared even in verl's requirements.txt)
     "aiohttp>=3.9",
-    "transformers>=4.44",
+    # Pinned: newest release below verl main's later <5.12 cap (our pinned verl
+    # commit itself only requires !=5.6.0; vllm 0.23.0 allows >=4.56 outside 5.0-5.5.0).
+    # The gateway's schema derender needs tokenizer.parse_response (transformers >=5.0).
+    "transformers==5.12.1",
     "numpy",
     "ray",
     "torch>=2.10.0",
@@ -132,7 +141,7 @@ verl-experimental-ci = [
     "fastapi",
     "uvicorn",
     "aiohttp>=3.9",
-    "transformers>=4.44",
+    "transformers==5.12.1",  # keep in lockstep with [verl-experimental]
     "numpy",
     "ray",
     "torch>=2.10.0",

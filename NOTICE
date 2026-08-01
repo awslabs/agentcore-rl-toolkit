@@ -15,3 +15,15 @@ slime, notably:
   - parsing.py     — output-parsing helpers, adapted from slime/agent/parsing.py.
   - server.py      — background-thread serving mechanics and FilteredAccessLogger,
                      adapted from slime/agent/aiohttp_threaded.py.
+
+------------------------------------------------------------------------------
+
+This product includes data developed as part of the TRL project
+(https://github.com/huggingface/trl), licensed under the Apache License,
+Version 2.0.
+
+The rollout gateway's response-schema registry
+(src/agentcore_rl_toolkit/rollout_gateway/response_schemas.py) vendors the
+response-schema dicts from trl/chat_template_utils.py and derives its
+chat-template hash table from trl/chat_templates/*.jinja (baseline commit
+7073af94).

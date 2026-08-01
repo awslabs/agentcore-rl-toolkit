@@ -52,15 +52,18 @@ def test_parse_empty_output():
 
 def test_xml_tool_calls_parsed_dependency_free():
     """<tool_call><function=...> output is parsed by the regex path with no inference
-    engine (sglang/vllm) imported."""
+    engine (sglang/vllm) imported. The regex requires explicit injection — with tools
+    in play, an unrecognized template plus no injected parser is rejected."""
     import sys
+
+    from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 
     # decode returns the raw XML tool-call text
     class XmlTok(StubTokenizer):
         def decode(self, ids, skip_special_tokens=False):
             return "<tool_call>\n<function=search>\n<parameter=q>cats</parameter>\n</function>\n</tool_call>"
 
-    r = HfTemplateRenderer(XmlTok())
+    r = HfTemplateRenderer(XmlTok(), tool_parser=parse_tool_uses)
     tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
     out = r.parse([1], tools_schema=tools)
     assert "sglang" not in sys.modules and "vllm" not in sys.modules
@@ -129,12 +132,26 @@ def test_tool_parser_override_keeps_default_reasoning_split():
     assert out.tool_uses == [{"name": "x", "input": {"got": "body"}}]
 
 
-def test_reasoning_parser_override_keeps_default_tool_regex():
+def test_reasoning_parser_override_requires_explicit_tool_parser_for_tools():
+    """Overriding only the reasoning stage says nothing about the tool format, so
+    tool parsing still refuses to run on the implicit default regex; injecting
+    parse_tool_uses opts back in and the stages compose as before."""
+    import pytest
+
+    from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
+
     class XmlTok(StubTokenizer):
         def decode(self, ids, skip_special_tokens=False):
             return "REASON||<tool_call><function=x><parameter=q>v</parameter></function></tool_call>"
 
-    r = HfTemplateRenderer(XmlTok(), reasoning_parser=lambda raw: tuple(raw.split("||", 1)))
+    def split_on_bars(raw):
+        left, right = raw.split("||", 1)
+        return left, right
+
+    with pytest.raises(ValueError, match="matched no response schema"):
+        HfTemplateRenderer(XmlTok(), reasoning_parser=split_on_bars).parse([1], tools_schema=TOOLS)
+
+    r = HfTemplateRenderer(XmlTok(), reasoning_parser=split_on_bars, tool_parser=parse_tool_uses)
     out = r.parse([1], tools_schema=TOOLS)
     assert out.reasoning == "REASON"
     assert out.tool_uses == [{"name": "x", "input": {"q": "v"}}]
@@ -157,3 +174,31 @@ def test_tool_parser_skipped_without_tools_schema():
 def test_tool_parser_ill_formed_propagates():
     r = HfTemplateRenderer(ThinkTok(), tool_parser=lambda body, tools: (body, [], True))
     assert r.parse([1], tools_schema=TOOLS).ill_formed is True
+
+
+def test_recognized_chat_template_switches_to_schema_derender():
+    """A tokenizer whose chat template hash is registered parses via its response
+    schema instead of the two-stage path (see test_response_schemas.py for the
+    schema-path behavior itself)."""
+    import hashlib
+
+    from agentcore_rl_toolkit.rollout_gateway.response_schemas import _TEMPLATE_HASHES
+
+    template = "{# render-test: qwen3 #}"
+    _TEMPLATE_HASHES[hashlib.sha256(template.encode()).hexdigest()] = "qwen3"
+
+    class SchemaTok(StubTokenizer):
+        chat_template = template
+
+        def decode(self, ids, skip_special_tokens=False):
+            return '<tool_call>\n{"name": "x", "arguments": {"q": "v"}}\n</tool_call><|im_end|>'
+
+        def parse_response(self, response, schema=None):
+            from transformers.utils.chat_parsing_utils import recursive_parse
+
+            return recursive_parse(response, schema)
+
+    out = HfTemplateRenderer(SchemaTok()).parse([1], tools_schema=TOOLS)
+    # JSON tool call extracted — the default XML regex could never produce this.
+    assert out.tool_uses == [{"name": "x", "input": {"q": "v"}}]
+    assert out.ill_formed is False

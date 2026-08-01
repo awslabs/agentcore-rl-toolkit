@@ -23,6 +23,11 @@
 #      (auto-assigned; open the trainer CPU nodes' ports to ACR egress).
 #   3. python preprocess_gsm8k.py --output-dir gsm8k   (once)
 #
+# Tool-call parsing happens in the rollout gateway's renderer, auto-detected from
+# the model's chat template (rollout_gateway/response_schemas.py) — engine-level
+# parser flags (vllm tool_call_parser etc.) have no effect on this token-in/token-out
+# path and are deliberately not set.
+#
 # Logging is console-only by default; for wandb (recommended for real runs):
 #   wandb login   # once
 #   ./fsdp_fft_sync_grpo.sh trainer.logger='["console","wandb"]'
@@ -82,8 +87,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.n=4 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
-    +actor_rollout_ref.rollout.engine_kwargs.vllm.enable_auto_tool_choice=true \
-    +actor_rollout_ref.rollout.engine_kwargs.vllm.tool_call_parser=hermes \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
