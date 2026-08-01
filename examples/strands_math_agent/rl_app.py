@@ -40,14 +40,10 @@ def invoke_agent(payload: dict, context):
     base_url = payload["_rollout"]["base_url"]
     model_id = payload["_rollout"]["model_id"]
     params = payload["_rollout"].get("sampling_params", {})
-    # During training the rollout gateway keys the session off the api-key slot;
-    # "EMPTY" (the vLLM convention) is fine for plain evaluation endpoints.
-    api_key = payload["_rollout"].get("api_key", "EMPTY")
-
-    # The ACR session id doubles as the trajectory-capture session key: rollout
-    # gateways read it from the api-key slot. "EMPTY" for local runs and
-    # gateways with per-session URLs (which ignore the api key).
-    api_key = context.session_id or "EMPTY"
+    # During training the rollout gateway keys trajectory capture off the api-key
+    # slot, and the trainer supplies the session key in the payload. "EMPTY" (the
+    # vLLM convention) for local runs and plain evaluation endpoints, which ignore it.
+    api_key = payload["_rollout"].get("api_key") or "EMPTY"
 
     model = OpenAIModel(
         client_args={"api_key": api_key, "base_url": base_url},

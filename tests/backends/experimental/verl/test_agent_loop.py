@@ -95,6 +95,8 @@ async def test_run_end_to_end_inline_reward():
     # invoke wiring: sid is a 36-char uuid used as both ACR session id and Bearer sid
     call = invoke.calls[0]
     assert len(call["session_id"]) == 36
+    # this loop hands the agent its gateway session key via _rollout.api_key
+    assert call["api_key"] == call["session_id"]
     # OpenAI-SDK convention: the advertised base_url carries the /v1 prefix
     assert call["base_url"] == f"{loop._gateway.base_url}/v1"
     assert call["model_id"] == "test/model"

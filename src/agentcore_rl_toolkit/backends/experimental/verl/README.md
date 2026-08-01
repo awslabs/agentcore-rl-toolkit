@@ -32,9 +32,12 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
                                              │  4. finish_session -> TraceRecords -> AgentLoopOutputs
 ```
 
-- The ACR **session id doubles as the capture session key**: the loop passes it as
-  `runtimeSessionId`; the agent container reads `context.session_id` and puts it in its
-  LLM client's api-key slot; the gateway reads it back from the Bearer/`X-Api-Key` slot.
+- The **capture session key travels in the payload**: the loop generates one sid per
+  rollout, passes it as both the ACR `runtimeSessionId` and `_rollout.api_key`; the
+  agent container puts `payload["_rollout"]["api_key"]` in its LLM client's api-key
+  slot; the gateway reads it back from the Bearer/`X-Api-Key` slot. (Because sid ==
+  runtimeSessionId, older agent images that still send `context.session_id` produce
+  the same value and keep working.)
 - The advertised `base_url` follows the OpenAI-SDK convention and **includes `/v1`**
   (the SDK appends `/chat/completions`) — pass it to an OpenAI-compatible client
   verbatim. TODO: it is not directly usable by Anthropic-SDK agents (that SDK
@@ -187,13 +190,13 @@ training step. Budget `trainer.test_freq` and `data.val_batch_size` accordingly.
 
 ## Agent-side contract
 
-The agent app sets its api key from the ACR session id (see
+The agent app sets its api key from the trainer-supplied `_rollout` config (see
 `examples/strands_math_agent/rl_app.py`):
 
 ```python
 @app.rollout_entrypoint
 def invoke_agent(payload: dict, context):
-    api_key = context.session_id or "EMPTY"   # trajectory-capture session key
+    api_key = payload["_rollout"].get("api_key") or "EMPTY"   # trajectory-capture session key
     model = OpenAIModel(client_args={"api_key": api_key, "base_url": payload["_rollout"]["base_url"]}, ...)
 ```
 
@@ -203,9 +206,9 @@ working unchanged.
 ## Troubleshooting
 
 - **Every rollout degenerates, warning about "static session 'EMPTY'"**: the deployed
-  agent image predates the `context.session_id` contract and sends a fixed api key —
-  its turns accumulate under one shared session while each rollout's real session
-  drains empty. Rebuild/redeploy the agent image with the contract above.
+  agent image predates the session-key contract and sends a fixed api key — its turns
+  accumulate under one shared session while each rollout's real session drains empty.
+  Rebuild/redeploy the agent image with the contract above.
 - **Agent-side 404s on every rollout**: an agent constructing its own URL paths
   instead of using an OpenAI/Anthropic SDK may miss the `/v1` convention (see above).
 - **Run finishes instantly at "Training Progress: 100%"**: verl auto-resumed from a

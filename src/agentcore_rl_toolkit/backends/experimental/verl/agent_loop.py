@@ -202,6 +202,12 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 # appends /v1/messages without normalizing an existing /v1).
                 base_url=f"{self._gateway.base_url}/v1",
                 model_id=self.model_id,
+                # The gateway keys trajectory capture off the api-key slot; hand the
+                # agent its session key explicitly instead of relying on the agent
+                # deriving it from the ACR runtime session id (sid doubles as the
+                # runtimeSessionId, so older agent images that still send
+                # context.session_id produce the same value).
+                api_key=sid,
             )
             result = await future.result_async(timeout=self.max_rollout_time)
         except asyncio.TimeoutError:
