@@ -319,7 +319,7 @@ drains the tree into `list[TraceRecord]`.
 - Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
   lookup in `rollout_gateway/response_schemas.py`), `HfTemplateRenderer` derenders the
   whole output in one pass via `tokenizer.parse_response(text, schema=...)` — reasoning,
-  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6, Llama 3.x,
+  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6,
   GLM4-MoE, GPT-OSS, Nemotron-3; schemas vendored from huggingface/trl, see NOTICE). A
   parse failure degrades to raw text with `ill_formed=True`, never an exception.
   Unrecognized templates fall back to a `</think>` split for tool-free parsing, but

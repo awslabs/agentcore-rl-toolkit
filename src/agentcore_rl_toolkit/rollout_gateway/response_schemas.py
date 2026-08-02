@@ -94,45 +94,6 @@ QWEN3_5_SCHEMA = {
     },
 }
 
-# Llama 3.1 / 3.2: a single bare JSON object per turn using "parameters" instead of
-# "arguments"; no surrounding marker, no content alongside a tool call.
-LLAMA3_SCHEMA = {
-    "x-regex": r'^(?:(?P<tool_calls>\{"name":\s*".+?",\s*"parameters":\s*.+\})|(?P<content>.*?))(?:<\|eot_id\|>|$)',
-    "type": "object",
-    "properties": {
-        "role": {"const": "assistant"},
-        "content": {"type": "string"},
-        "tool_calls": {
-            "type": "array",
-            "x-regex-iterator": r'(\{"name":\s*".+?",\s*"parameters":\s*.+\})',
-            "items": {
-                # Rewrite "parameters" -> "arguments" so the JSON parses into the
-                # standard tool-call shape. Anchored on the leading {"name": "..."}
-                # so a stray "parameters" inside argument values is not touched.
-                "x-regex-substitutions": [
-                    [r'^(\{"name":\s*"[^"]+",\s*)"parameters":', r'\1"arguments":'],
-                ],
-                "x-parser": "json",
-                "x-parser-args": {"transform": "{type: 'function', function: @}"},
-                "type": "object",
-                "properties": {
-                    "type": {"const": "function"},
-                    "function": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "arguments": {
-                                "type": "object",
-                                "additionalProperties": {},
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    },
-}
-
 # GLM4-MoE: tool name on the <tool_call> line, arguments as <arg_key>/<arg_value> pairs.
 GLM4MOE_SCHEMA = {
     "x-regex": r"^(?:\n?<think>\n?(?:(?P<reasoning_content>.*?\S.*?)\n?|[\s]*)</think>\s*)?(?P<content>(?:(?!<tool_call>)[\s\S])*?)(?:\n(?=<tool_call>))?(?=(?:<tool_call>|$))(?P<tool_calls>(?:<tool_call>(?:(?!</tool_call>)[\s\S])+</tool_call>\s*)+)?$",  # noqa: E501
@@ -217,7 +178,6 @@ GPTOSS_SCHEMA = {
 RESPONSE_SCHEMAS: dict[str, dict] = {
     "qwen3": QWEN3_SCHEMA,
     "qwen3_5": QWEN3_5_SCHEMA,
-    "llama3": LLAMA3_SCHEMA,
     "glm4moe": GLM4MOE_SCHEMA,
     "gptoss": GPTOSS_SCHEMA,
 }
@@ -231,8 +191,6 @@ RESPONSE_SCHEMAS: dict[str, dict] = {
 _TEMPLATE_HASHES: dict[str, str] = {
     "44f815868bf02fa458dd2f741a338046f4bf45f398eb6d067766726b9d96cce3": "glm4moe",  # GLM4-MoE
     "a4c9919cbbd4acdd51ccffe22da049264b1b73e59055fa58811a99efbd7c8146": "gptoss",  # GPT-OSS
-    "e10ca381b1ccc5cf9db52e371f3b6651576caee0a630b452e2816b2d404d4b65": "llama3",  # Llama 3.1
-    "5816fce10444e03c2e9ee1ef8a4a1ea61ae7e69e438613f3b17b69d0426223a4": "llama3",  # Llama 3.2
     "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f": "qwen3",  # Qwen2.5 / Qwen2-VL
     "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8": "qwen3",  # Qwen3 (thinking)
     "64f85b198065d0fba2a81f37e10ed68161ce2c19a754c7100e67e0ca2ee9c326": "qwen3",  # Qwen3-Instruct-2507
