@@ -3,6 +3,8 @@
 Uses a tiny stub tokenizer (no transformers download) to assert the renderer calls
 apply_chat_template with the expected kwargs and decodes/parses output correctly. A
 real-tokenizer parity check lives in the Step 2 E2E path (against the live server).
+The schema-derender path (recognized chat template -> tokenizer.parse_response) is
+covered in test_response_schemas.py; this module covers the two-stage fallback.
 """
 
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
@@ -173,36 +175,3 @@ def test_tool_parser_skipped_without_tools_schema():
     assert calls == []  # no tools -> tool stage never runs
     assert out.reasoning == "hmm"
     assert out.text == "body"
-
-
-def test_tool_parser_ill_formed_propagates():
-    r = HfTemplateRenderer(ThinkTok(), tool_parser=lambda body, tools: (body, [], True))
-    assert r.parse([1], tools_schema=TOOLS).ill_formed is True
-
-
-def test_recognized_chat_template_switches_to_schema_derender():
-    """A tokenizer whose chat template hash is registered parses via its response
-    schema instead of the two-stage path (see test_response_schemas.py for the
-    schema-path behavior itself)."""
-    import hashlib
-
-    from agentcore_rl_toolkit.rollout_gateway.response_schemas import _TEMPLATE_HASHES
-
-    template = "{# render-test: qwen3 #}"
-    _TEMPLATE_HASHES[hashlib.sha256(template.encode()).hexdigest()] = "qwen3"
-
-    class SchemaTok(StubTokenizer):
-        chat_template = template
-
-        def decode(self, ids, skip_special_tokens=False):
-            return '<tool_call>\n{"name": "x", "arguments": {"q": "v"}}\n</tool_call><|im_end|>'
-
-        def parse_response(self, response, schema=None):
-            from transformers.utils.chat_parsing_utils import recursive_parse
-
-            return recursive_parse(response, schema)
-
-    out = HfTemplateRenderer(SchemaTok()).parse([1], tools_schema=TOOLS)
-    # JSON tool call extracted — the default XML regex could never produce this.
-    assert out.tool_uses == [{"name": "x", "input": {"q": "v"}}]
-    assert out.ill_formed is False
