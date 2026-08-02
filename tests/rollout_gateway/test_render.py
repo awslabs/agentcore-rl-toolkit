@@ -7,6 +7,11 @@ The schema-derender path (recognized chat template -> tokenizer.parse_response) 
 covered in test_response_schemas.py; this module covers the two-stage fallback.
 """
 
+import sys
+
+import pytest
+
+from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
 
 
@@ -60,9 +65,6 @@ def test_xml_tool_calls_parsed_dependency_free():
     """<tool_call><function=...> output is parsed by the regex path with no inference
     engine (sglang/vllm) imported. The regex requires explicit injection — with tools
     in play, an unrecognized template plus no injected parser is rejected."""
-    import sys
-
-    from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 
     # decode returns the raw XML tool-call text
     class XmlTok(StubTokenizer):
@@ -142,9 +144,6 @@ def test_reasoning_parser_override_requires_explicit_tool_parser_for_tools():
     """Overriding only the reasoning stage says nothing about the tool format, so
     tool parsing still refuses to run on the implicit default regex; injecting
     parse_tool_uses opts back in and the stages compose as before."""
-    import pytest
-
-    from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 
     class XmlTok(StubTokenizer):
         def decode(self, ids, skip_special_tokens=False):
