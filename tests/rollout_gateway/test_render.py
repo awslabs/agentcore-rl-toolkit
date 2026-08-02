@@ -12,13 +12,17 @@ class StubTokenizer:
     def __init__(self):
         self.last_kwargs = None
 
-    def apply_chat_template(self, messages, *, tools=None, tokenize=True, add_generation_prompt=True):
-        self.last_kwargs = dict(tools=tools, tokenize=tokenize, add_generation_prompt=add_generation_prompt)
+    def apply_chat_template(self, messages, *, tools=None, tokenize=True, add_generation_prompt=True, return_dict=True):
+        self.last_kwargs = dict(
+            tools=tools, tokenize=tokenize, add_generation_prompt=add_generation_prompt, return_dict=return_dict
+        )
         # deterministic: one id per message, +99 sentinel for the generation prompt
         ids = [len(m.get("content") or "") for m in messages]
         if add_generation_prompt:
             ids.append(99)
-        return ids
+        # mirror the real API: the default dict form bundles extras the renderer
+        # must opt out of with return_dict=False
+        return ids if not return_dict else {"input_ids": ids, "attention_mask": [1] * len(ids)}
 
     def decode(self, ids, skip_special_tokens=False):
         return " ".join(str(i) for i in ids)
@@ -29,7 +33,7 @@ def test_render_passes_expected_kwargs_and_returns_list():
     r = HfTemplateRenderer(tok)
     ids = r.render([{"role": "user", "content": "abc"}], tools=None, add_generation_prompt=True)
     assert ids == [3, 99]
-    assert tok.last_kwargs == {"tools": None, "tokenize": True, "add_generation_prompt": True}
+    assert tok.last_kwargs == {"tools": None, "tokenize": True, "add_generation_prompt": True, "return_dict": False}
 
 
 def test_parse_no_tools_returns_plain_text():

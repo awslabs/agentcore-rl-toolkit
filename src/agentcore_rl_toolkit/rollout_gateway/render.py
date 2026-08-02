@@ -152,15 +152,16 @@ class HfTemplateRenderer:
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
     ) -> list[int]:
-        enc = self.tokenizer.apply_chat_template(
+        # return_dict=False: we want only the token ids. The dict form (the
+        # transformers>=5 default) bundles an attention mask, but that is a padding
+        # artifact the training backend builds itself when it batches rows.
+        ids = self.tokenizer.apply_chat_template(
             messages,
             tools=tools,
             tokenize=True,
             add_generation_prompt=add_generation_prompt,
+            return_dict=False,
         )
-        # apply_chat_template may return a BatchEncoding (dict-like with "input_ids")
-        # or a bare list of ids depending on transformers version / return_dict.
-        ids = enc["input_ids"] if hasattr(enc, "__getitem__") and "input_ids" in enc else enc
         return list(ids)
 
     def get_stop_sequences(self) -> list[str] | list[int]:
