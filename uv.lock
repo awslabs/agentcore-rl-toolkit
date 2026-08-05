@@ -210,8 +210,8 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.40.55" },
     { name = "cachetools", marker = "extra == 'verl-experimental-ci'" },
     { name = "fastapi", marker = "extra == 'verl-experimental-ci'" },
-    { name = "flash-attn", marker = "extra == 'verl'", specifier = "==2.8.3" },
-    { name = "flash-attn", marker = "extra == 'verl-experimental'", specifier = "==2.8.3" },
+    { name = "flash-attn", marker = "extra == 'verl'", specifier = "==2.8.3", index = "https://wheels.astral.sh/simple/cu130/" },
+    { name = "flash-attn", marker = "extra == 'verl-experimental'", specifier = "==2.8.3", index = "https://wheels.astral.sh/simple/cu130/" },
     { name = "flash-linear-attention", marker = "extra == 'verl'" },
     { name = "flash-linear-attention", marker = "extra == 'verl-experimental'" },
     { name = "jmespath", marker = "extra == 'gateway'", specifier = ">=1.0" },
@@ -2197,13 +2197,24 @@ wheels = [
 
 [[package]]
 name = "flash-attn"
-version = "2.8.3"
-source = { registry = "https://pypi.org/simple" }
+version = "2.8.3+cu.13.0.torch.2.11"
+source = { registry = "https://wheels.astral.sh/simple/cu130/" }
 dependencies = [
     { name = "einops" },
     { name = "torch", version = "2.11.0", source = { registry = "https://pypi.org/simple" } },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
+wheels = [
+    { url = "https://wheels.astral.sh/artifacts/7bd1f1e688dca0b93f00adc76996980276c79bddcd19c86ac55217af7e87e580/flash_attn-2.8.3+cu.13.0.torch.2.11-cp310-cp310-manylinux_2_24_aarch64.whl", hash = "sha256:7bd1f1e688dca0b93f00adc76996980276c79bddcd19c86ac55217af7e87e580", size = 242271993, upload-time = "2026-06-17T15:44:27Z" },
+    { url = "https://wheels.astral.sh/artifacts/32ec82eabdd90b438955978c93be9953a80b9bb232fdc033dbc25d574f469ed5/flash_attn-2.8.3+cu.13.0.torch.2.11-cp310-cp310-manylinux_2_24_x86_64.whl", hash = "sha256:32ec82eabdd90b438955978c93be9953a80b9bb232fdc033dbc25d574f469ed5", size = 242446351, upload-time = "2026-06-17T15:18:20Z" },
+    { url = "https://wheels.astral.sh/artifacts/13c1aaa366ad41995b94bb59a1a4def05445c677552e008135b2b1f08ad3660c/flash_attn-2.8.3+cu.13.0.torch.2.11-cp311-cp311-manylinux_2_24_aarch64.whl", hash = "sha256:13c1aaa366ad41995b94bb59a1a4def05445c677552e008135b2b1f08ad3660c", size = 242281063, upload-time = "2026-06-17T15:45:02Z" },
+    { url = "https://wheels.astral.sh/artifacts/707c7246bc684aac14fa7847f7b09c4bfd234d1244ef3db6b8777c3c44260f6e/flash_attn-2.8.3+cu.13.0.torch.2.11-cp311-cp311-manylinux_2_24_x86_64.whl", hash = "sha256:707c7246bc684aac14fa7847f7b09c4bfd234d1244ef3db6b8777c3c44260f6e", size = 242456674, upload-time = "2026-06-17T15:22:55Z" },
+    { url = "https://wheels.astral.sh/artifacts/916227eae888b57db7668a449bafb404cff19363ed2335df389819bf255c4582/flash_attn-2.8.3+cu.13.0.torch.2.11-cp312-cp312-manylinux_2_24_aarch64.whl", hash = "sha256:916227eae888b57db7668a449bafb404cff19363ed2335df389819bf255c4582", size = 242284587, upload-time = "2026-06-17T15:22:50Z" },
+    { url = "https://wheels.astral.sh/artifacts/a7aab3f4de4624f0b83efa050b78aa273c98359d5b98527c2eefc7130d7d028e/flash_attn-2.8.3+cu.13.0.torch.2.11-cp312-cp312-manylinux_2_24_x86_64.whl", hash = "sha256:a7aab3f4de4624f0b83efa050b78aa273c98359d5b98527c2eefc7130d7d028e", size = 242459200, upload-time = "2026-06-17T15:21:42Z" },
+    { url = "https://wheels.astral.sh/artifacts/9b5ca7ab4e40f9b8ff9181e2d5297cc72a1104be65865932216b006075c4cd3b/flash_attn-2.8.3+cu.13.0.torch.2.11-cp313-cp313-manylinux_2_24_aarch64.whl", hash = "sha256:9b5ca7ab4e40f9b8ff9181e2d5297cc72a1104be65865932216b006075c4cd3b", size = 242283681, upload-time = "2026-06-17T15:23:31Z" },
+    { url = "https://wheels.astral.sh/artifacts/b8efde71bc5a3d685aa8d3b31f7540537b5318abbeae8b2233052c27dd7187a3/flash_attn-2.8.3+cu.13.0.torch.2.11-cp313-cp313-manylinux_2_24_x86_64.whl", hash = "sha256:b8efde71bc5a3d685aa8d3b31f7540537b5318abbeae8b2233052c27dd7187a3", size = 242459368, upload-time = "2026-06-17T15:21:51Z" },
+    { url = "https://wheels.astral.sh/artifacts/235a3ad70db8e27f47fbf6ae09803d0dd48beeaeaeb8d0367d364cbd627ed426/flash_attn-2.8.3+cu.13.0.torch.2.11-cp314-cp314-manylinux_2_24_aarch64.whl", hash = "sha256:235a3ad70db8e27f47fbf6ae09803d0dd48beeaeaeb8d0367d364cbd627ed426", size = 242284376, upload-time = "2026-06-17T15:47:03Z" },
+    { url = "https://wheels.astral.sh/artifacts/db2b30238a98bb64f78c602874840d13199e4fe521f8d2328d49586f91df9187/flash_attn-2.8.3+cu.13.0.torch.2.11-cp314-cp314-manylinux_2_24_x86_64.whl", hash = "sha256:db2b30238a98bb64f78c602874840d13199e4fe521f8d2328d49586f91df9187", size = 242458161, upload-time = "2026-06-17T15:23:20Z" },
+]
 
 [[package]]
 name = "flash-linear-attention"

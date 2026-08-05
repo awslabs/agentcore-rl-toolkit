@@ -152,11 +152,6 @@ verl-experimental-ci = [
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
 [tool.uv]
-# flash-attn's setup.py imports torch at build time and must see the SAME torch
-# it will run against; uv's isolated build env broke this (CUDA version probing
-# fails/mismatches). Build it in the venv instead — torch resolves first, flash-attn
-# builds last. CUDA toolkit requirements: see backends/experimental/verl/README.md.
-no-build-isolation-package = ["flash-attn"]
 # Declaring verl and rllm as conflicting extras lets uv resolve each
 # in its own fork instead of forcing one universal lock.
 conflicts = [
@@ -194,10 +189,17 @@ torch = [
 torchvision = [
     { index = "pytorch-cpu", extra = "verl-experimental-ci" },
 ]
+# Prebuilt wheels; building flash-attn from PyPI's sdist takes ~an hour of nvcc.
+flash-attn = { index = "astral-cu130" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "astral-cu130"
+url = "https://wheels.astral.sh/simple/cu130/"
 explicit = true
 
 

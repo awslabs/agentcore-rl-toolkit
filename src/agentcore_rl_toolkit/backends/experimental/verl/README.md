@@ -67,11 +67,12 @@ Notes from the field:
 - The extra adds `transferqueue` and `orjson` explicitly: verl declares its runtime
   deps in `requirements.txt` (which its Docker images install), not in setup.py, so a
   git install of verl alone misses them.
-- `flash-attn` builds from source against the venv's torch (`no-build-isolation-package`
-  in `[tool.uv]`). torch 2.11 wheels are CUDA 13.0 builds, so the build needs a CUDA 13
-  toolkit: `CUDA_HOME=/usr/local/cuda-13.0 uv sync --extra verl-experimental` on hosts
-  whose default toolkit is older (e.g. AWS DLAMI defaults to 12.9). Runtime needs no
-  CUDA_HOME — torch bundles its own CUDA libraries.
+- `flash-attn` installs as a prebuilt wheel from Astral's GPU index
+  (`https://wheels.astral.sh/simple/cu130/`, wired in `[tool.uv.sources]`), so there is no
+  hour-long local build and no local CUDA toolkit (`nvcc`) is needed.
+- The stack is cu130 throughout, matching verl's reference stack at the pinned commit:
+  needs driver >= 580.65.06 and compute capability >= 7.5 (CUDA 13 dropped Pascal and
+  Volta, so V100 and older are out).
 
 ## Dataset contract: the `payload` column
 
