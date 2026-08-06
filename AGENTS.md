@@ -2,27 +2,6 @@
 
 This document provides context, patterns, and guidelines for AI coding assistants working in this repository. For human contributors, see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## Table of Contents
-
-- [Quick Reference](#quick-reference)
-- [Project Structure](#project-structure)
-- [Product Overview](#product-overview)
-  - [What is ACR](#what-is-acr)
-  - [Why This SDK](#why-this-sdk)
-  - [Background: BedrockAgentCoreApp](#background-bedrockagentcoreapp)
-  - [What agentcore-rl-toolkit Provides](#what-agentcore-rl-toolkit-provides)
-  - [Rollout Gateway](#rollout-gateway)
-  - [Sandbox SDK](#sandbox-sdk)
-  - [Migration Guide (basic_app → rl_app)](#migration-guide-basic_app--rl_app)
-  - [Deployment to ACR](#deployment-to-acr)
-  - [Evaluation](#evaluation)
-- [Environment Variables](#environment-variables)
-- [Common Tasks](#common-tasks)
-- [Development Tips](#development-tips)
-- [External References](#external-references)
-
----
-
 ## Quick Reference
 
 ### Key Commands
@@ -62,82 +41,6 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 
 ---
 
-## Project Structure
-
-```
-agentcore-rl-toolkit/
-├── src/agentcore_rl_toolkit/
-│   ├── __init__.py                 # Public exports
-│   ├── app.py                      # AgentCoreRLApp base class
-│   ├── client.py                   # RolloutClient for batch evaluation
-│   ├── reward_function.py          # RewardFunction base class
-│   ├── sandbox/                    # Sandbox SDK (sync client for command execution)
-│   │   ├── client.py               # SandboxClient (start/attach) + Sandbox (exec/terminate)
-│   │   └── types.py                # ExecResult, SandboxProtocolError
-│   ├── rollout_gateway/            # Token-level trajectory capture layer (trainer-side)
-│   │   ├── trace.py                # TraceRecord — torch-free output boundary
-│   │   ├── trajectory.py           # TrajectoryManager — per-session message tree
-│   │   ├── render.py               # Renderer protocol; HfTemplateRenderer, TinkerRenderer
-│   │   ├── parsing.py              # tool/reasoning output parsing (sglang optional)
-│   │   ├── gateway.py              # RolloutGateway — assembles the serving unit
-│   │   ├── server.py               # ThreadedGatewayServer — serve the gateway from sync trainers
-│   │   ├── adapters/               # OpenAI + Anthropic wire protocol adapters
-│   │   └── sampling_backends/      # SamplingBackend impls (vLLM/SGLang HTTP, Tinker SDK)
-│   └── backends/experimental/verl/ # Experimental verl backend on the rollout gateway
-│       ├── sampling_backend.py     # VerlSamplingBackend over verl's LLMServerClient
-│       ├── gateway_host.py         # per-worker-process gateway singleton (threaded aiohttp)
-│       ├── agent_loop.py           # AgentCoreAgentLoop (verl custom agent loop)
-│       ├── dataset.py              # PayloadDataset (payload-column dataset contract)
-│       └── examples/               # GSM8K example: run script + per-run agent-loop YAML
-├── examples/
-│   ├── strands_math_agent/         # GSM8K example
-│   │   ├── .bedrock_agentcore/     # Dockerfiles for deployment
-│   │   ├── basic_app.py            # Production agent
-│   │   ├── rl_app.py               # RL-adapted agent
-│   │   ├── reward.py               # GSM8KReward implementation
-│   │   └── pyproject.toml          # Example-specific dependencies
-│   ├── strands_migration_agent/    # Java migration example
-│   │   ├── rl_app.py               # RL-adapted migration agent
-│   │   ├── evaluate.py             # Batch evaluation script (sync)
-│   │   ├── evaluate_async.py       # Batch evaluation script (async)
-│   │   ├── reward.py               # MigrationReward implementation
-│   │   └── pyproject.toml          # Example-specific dependencies
-│   ├── strands_officebench_agent/  # OfficeBench example
-│   │   ├── dev_app.py              # RL-adapted office automation agent
-│   │   ├── evaluate.py             # Batch evaluation script
-│   │   ├── reward.py               # OfficeBenchReward implementation
-│   │   ├── tools.py                # Office automation tools
-│   │   └── pyproject.toml          # Example-specific dependencies
-│   ├── strands_appworld_agent/    # AppWorld example
-│   │   ├── rl_app.py               # RL-adapted AppWorld code agent
-│   │   ├── evaluate.py             # Async batch evaluation script
-│   │   ├── deploy.py               # Deploy container to AgentCore
-│   │   ├── reward.py               # AppWorldReward implementation
-│   │   ├── Dockerfile              # ACR container (AppWorld data baked in)
-│   │   └── pyproject.toml          # Example-specific dependencies
-│   └── sandbox_quickstart/         # Sandbox SDK example (no agent server)
-│       ├── Dockerfile              # debian-slim + prebuilt sandboxd binary
-│       ├── build_and_push.sh       # binary + image + ECR push in one command
-│       ├── deploy.py               # create the sandbox runtime (temp scaffolding)
-│       ├── run_sandbox.py          # start -> exec -> terminate demo
-│       └── README.md               # binary build + deploy + run walkthrough
-├── sandboxd/                       # Go health shim (self-contained module, stdlib only)
-│   ├── main.go                     # /ping + /invocations busy-state server
-│   ├── main_test.go
-│   └── build.sh                    # cross-compile (arm64 default; docker fallback)
-├── tests/
-│   ├── test_rollout_entrypoint.py
-│   ├── test_client.py
-│   ├── test_async_client.py
-│   └── sandbox/                    # Sandbox SDK tests (mocked boto3)
-├── scripts/
-│   └── build_docker_image_and_push_to_ecr.sh
-├── pyproject.toml
-└── uv.lock
-```
-
----
-
 ## Product Overview
 
 ### What is ACR
@@ -162,67 +65,13 @@ For online RL training techniques like GRPO, developers need to:
 
 ### Background: BedrockAgentCoreApp
 
-When deploying an agent on ACR, developers follow the [HTTP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http):
-- `/invocations` endpoint: Receives requests and processes them through agent logic
-- `/ping` endpoint: Health checks for AWS monitoring
-
-AWS provides `BedrockAgentCoreApp` from the [bedrock-agentcore-sdk-python](https://github.com/aws/bedrock-agentcore-sdk-python):
-
-**BedrockAgentCoreApp features:**
-- HTTP service wrapper with `/invocations`, `/ping`, `/ws` endpoints
-- Built-in logging, error handling, and session management
-
-**Key Decorators:**
-- `@app.entrypoint` - Define your agent's main logic
-- `@app.websocket` - WebSocket handler for bi-directional streaming
-- `@app.ping` - Custom health checks
-- `@app.async_task` - Background processing
-
-**Example:**
-
-```python
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from dotenv import load_dotenv
-from strands import Agent
-from strands.models import BedrockModel
-from strands_tools import calculator
-
-app = BedrockAgentCoreApp()
-
-load_dotenv()
-
-model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
-
-agent = Agent(
-    model=model,
-    tools=[calculator],
-    system_prompt=(
-        "Your task is to solve the math problem. "
-        + "Use calculator when applicable. "
-        + 'Let\'s think step by step and output the final answer after "####".'
-    ),
-)
-
-
-@app.entrypoint
-def invoke_agent(payload):
-    """
-    Invoke the agent with a payload
-    """
-    user_input = payload.get("prompt")
-
-    print("User input:", user_input)
-
-    response = agent(user_input)
-
-    return response.message["content"][0]["text"]
-
-
-if __name__ == "__main__":
-    app.run()
-```
-
-More details can be found at https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html.
+ACR containers must serve `/invocations` (agent logic) and `/ping` (health) on port 8080 —
+see the [HTTP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http).
+AWS's [`BedrockAgentCoreApp`](https://github.com/aws/bedrock-agentcore-sdk-python) wraps that
+contract (`@app.entrypoint`, `@app.websocket`, `@app.ping`, `@app.async_task`); see
+`examples/*/basic_app.py` for the production shape this repo adapts from, and the
+[runtime overview](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html)
+for the full API.
 
 ### What agentcore-rl-toolkit Provides
 
@@ -664,33 +513,9 @@ they run in `.github/workflows/experimental-verl-integration.yml`, which syncs t
 `verl-experimental-ci` extra (same pinned verl, but CPU torch and no vllm/flash-attn —
 the LLM server client is the faked seam, so no inference engine is needed).
 
-### Building and Pushing Docker Images
-
-```bash
-# Ensure .env is configured with AWS_REGION, AWS_ACCOUNT, ECR_REPO_NAME
-./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
-  --tag=my-tag \
-  --context=examples/strands_math_agent
-```
-
-### Running an Example Locally
-
-```bash
-cd examples/strands_math_agent
-uv sync
-uv run python rl_app.py
-```
-
 ---
 
 ## Development Tips
-
-### Package Management
-
-- This package uses **uv** for dependency management
-- All dependencies are installed in `.venv` at each level
-- You can inspect source code of dependencies in `.venv/lib/python*/site-packages/`
 
 ### Per-Example Environments
 
@@ -706,28 +531,9 @@ To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unre
 uv pip install -e ../../ --force-reinstall --no-deps
 ```
 
-### Finding Source Code
-
-When source locations are unclear:
-```python
-import module_name
-print(module_name.__file__)  # Shows the file path
-```
-
-### Pre-commit Hooks
-
-This repo uses pre-commit hooks that run automatically on `git commit`:
-- **ruff**: Linting and auto-formatting (will fix issues automatically)
-- **commitizen**: Enforces [Conventional Commits](https://www.conventionalcommits.org/) format (e.g., `feat:`, `fix:`, `docs:`)
-- Standard checks: trailing whitespace, YAML/TOML validation
-
-To install hooks locally:
-```bash
-uv run pre-commit install
-```
-
 ### Code Conventions
 
+- Commit messages must be [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`) — a commitizen pre-commit hook rejects anything else
 - Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)
