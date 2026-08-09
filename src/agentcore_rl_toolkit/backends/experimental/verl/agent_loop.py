@@ -106,6 +106,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
         *,
         agent_runtime_arn: str,
         s3_bucket: str,
+        max_tokens_per_turn: int,
         exp_id: str | None = None,
         tps_limit: int = 5,
         max_pool_connections: int = 100,
@@ -141,6 +142,12 @@ class AgentCoreAgentLoop(AgentLoopBase):
 
         self.prompt_length = self.rollout_config.prompt_length
         self.response_length = self.rollout_config.response_length
+        self.max_model_len = self.rollout_config.max_model_len
+        self._validate_token_budgets(max_tokens_per_turn)
+        self.max_tokens_per_turn = max_tokens_per_turn
+        # The gateway cannot emit more tokens than verl's response region can store.
+        # The two padded regions may sum past max_model_len; valid tokens never do.
+        self.max_context_tokens = self.response_length
         self.max_rollout_time = max_rollout_time
         # Kept as config, not inlined, so a validated trainer-side mode can land
         # without a signature change. Reward semantics: see the README.
@@ -171,6 +178,35 @@ class AgentCoreAgentLoop(AgentLoopBase):
             max_pool_connections=max_pool_connections,
         )
 
+    def _validate_token_budgets(self, max_tokens_per_turn: int) -> None:
+        if self.max_model_len is None or self.max_model_len <= 0:
+            raise ValueError(
+                "AgentCoreAgentLoop requires an explicit positive "
+                "actor_rollout_ref.rollout.max_model_len. This is the model context "
+                "capacity; verl validates it against the Hugging Face model config."
+            )
+        if self.prompt_length > self.max_model_len:
+            raise ValueError(
+                f"rollout.prompt_length ({self.prompt_length}) cannot exceed "
+                f"rollout.max_model_len ({self.max_model_len})"
+            )
+        if self.response_length > self.max_model_len:
+            raise ValueError(
+                f"rollout.response_length ({self.response_length}) cannot exceed "
+                f"rollout.max_model_len ({self.max_model_len})"
+            )
+        if (
+            not isinstance(max_tokens_per_turn, int)
+            or isinstance(max_tokens_per_turn, bool)
+            or max_tokens_per_turn <= 0
+        ):
+            raise ValueError(f"max_tokens_per_turn must be a positive integer, got {max_tokens_per_turn!r}")
+        if max_tokens_per_turn > self.max_model_len:
+            raise ValueError(
+                f"max_tokens_per_turn ({max_tokens_per_turn}) cannot exceed "
+                f"rollout.max_model_len ({self.max_model_len})"
+            )
+
     # Returning a list deliberately widens AgentLoopBase.run's annotation: the v1
     # TQ path accepts AgentLoopOutput | list[AgentLoopOutput] (one row per
     # trajectory-tree leaf); __init__ asserts trainer.use_v1 accordingly.
@@ -186,7 +222,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
         self._gateway.gateway.create_session(
             sid,
             sampling_defaults=self._sampling_defaults(sampling_params),
-            max_context_tokens=self.prompt_length + self.response_length,
+            max_context_tokens=self.max_context_tokens,
         )
 
         result: dict[str, Any] = {}
@@ -306,7 +342,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 break
 
     def _sampling_defaults(self, sampling_params: dict[str, Any]) -> dict[str, Any]:
-        defaults: dict[str, Any] = {"max_new_tokens": self.response_length}
+        defaults: dict[str, Any] = {"max_new_tokens": self.max_tokens_per_turn}
         for key in ("temperature", "top_p", "top_k"):
             if key in sampling_params:
                 defaults[key] = sampling_params[key]
@@ -338,19 +374,22 @@ class AgentCoreAgentLoop(AgentLoopBase):
         shared_extra: dict[str, Any],
         elapsed: float,
     ) -> AgentLoopOutput:
-        resp_len = len(record.loss_mask)
-        prompt_ids = record.token_ids[:-resp_len] if resp_len else list(record.token_ids)
-        response_ids = record.token_ids[-resp_len:] if resp_len else []
+        response_region_len = len(record.loss_mask)
+        prompt_end = len(record.token_ids) - response_region_len
+        initial_prompt = list(record.token_ids[:prompt_end])
+        response_region_ids = list(record.token_ids[prompt_end:])
         response_mask = list(record.loss_mask)
         response_logprobs = list(record.logprobs)
-        assert len(response_ids) == len(response_mask) == len(response_logprobs)
 
-        # verl pads prompts to prompt_length (left) and responses to
-        # response_length (right); anything longer must be truncated here.
-        prompt_ids = prompt_ids[-self.prompt_length :]
-        response_ids = response_ids[: self.response_length]
-        response_mask = response_mask[: self.response_length]
-        response_logprobs = response_logprobs[: self.response_length]
+        # verl stores prompts and responses in fixed-width regions. Preserve the
+        # complete token order when the initial prompt exceeds its region by placing
+        # the overflow at the start of the response region. These are input tokens:
+        # they remain attended to, but carry no policy loss or rollout logprob.
+        prompt_ids = initial_prompt[: self.prompt_length]
+        prompt_overflow = initial_prompt[self.prompt_length :]
+        response_ids = prompt_overflow + response_region_ids
+        response_mask = [0] * len(prompt_overflow) + response_mask
+        response_logprobs = [0.0] * len(prompt_overflow) + response_logprobs
 
         return AgentLoopOutput(
             prompt_ids=prompt_ids,

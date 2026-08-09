@@ -21,6 +21,7 @@ def test_instantiate_from_yaml_entry():
             "_target_": "agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop",
             "agent_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
             "s3_bucket": "test-bucket",
+            "max_tokens_per_turn": 8,
             "max_rollout_time": 60,
             "gateway_bind_host": "127.0.0.1",
             "gateway_public_host": "127.0.0.1",

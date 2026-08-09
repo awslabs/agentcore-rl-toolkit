@@ -15,13 +15,14 @@ from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make
 pytestmark = pytest.mark.asyncio
 
 
-def _make_loop(llm_client=None, *, use_v1=True, **loop_kwargs):
+def _make_loop(llm_client=None, *, use_v1=True, trainer_config=None, **loop_kwargs):
     from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
 
+    loop_kwargs.setdefault("max_tokens_per_turn", 8)
     with patch("agentcore_rl_toolkit.backends.experimental.verl.agent_loop.RolloutClient") as client_cls:
         client_cls.return_value = MagicMock()
         loop = AgentCoreAgentLoop(
-            make_trainer_config(use_v1=use_v1),
+            trainer_config or make_trainer_config(use_v1=use_v1),
             llm_client or FakeLLMServerClient(),
             FakeTokenizer(),
             None,
@@ -169,6 +170,7 @@ async def test_invalid_reward_mode_rejected():
                 gateway_bind_host="127.0.0.1",
                 gateway_public_host="127.0.0.1",
                 reward_mode="nope",
+                max_tokens_per_turn=8,
             )
 
 
@@ -297,16 +299,42 @@ async def test_payload_column_forwarded_verbatim():
     assert invoke.calls[0]["payload"] == {"prompt": "What is 2+2?", "answer": "4"}
 
 
-async def test_truncation_caps():
+async def test_output_conversion_preserves_prompt_overflow():
+    from agentcore_rl_toolkit.rollout_gateway import TraceRecord
+
+    loop = _make_loop(
+        trainer_config=make_trainer_config(prompt_length=2, response_length=6, max_model_len=6),
+        max_tokens_per_turn=4,
+    )
+    record = TraceRecord(
+        token_ids=[1, 2, 3, 4, 5, 6],
+        loss_mask=[1, 1],
+        logprobs=[-0.5, -0.6],
+    )
+
+    out = loop._record_to_output(record, 0, 1.0, 1, {}, 0.1)
+
+    assert out.prompt_ids == [1, 2]
+    assert out.response_ids == [3, 4, 5, 6]
+    assert out.response_mask == [0, 0, 1, 1]
+    assert out.response_logprobs == [0.0, 0.0, -0.5, -0.6]
+
+
+async def test_session_budget_matches_response_storage():
     llm = FakeLLMServerClient()
-    loop = _make_loop(llm)
-    loop.response_length = 1  # force response truncation
+    loop = _make_loop(
+        llm,
+        trainer_config=make_trainer_config(prompt_length=8, response_length=24, max_model_len=32),
+    )
     _wire_result(loop, {"status_code": 200, "rewards": 1.0})
-    outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
-    out = outputs[0]
-    assert len(out.response_ids) == 1
-    assert len(out.response_mask) == 1
-    assert len(out.response_logprobs) == 1
+    gateway = loop._gateway.gateway
+    with patch.object(gateway, "create_session", wraps=gateway.create_session) as create_session:
+        await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"})
+
+    max_context_tokens = create_session.call_args.kwargs["max_context_tokens"]
+    assert max_context_tokens == 24
+    assert max_context_tokens == loop.response_length
+    assert max_context_tokens != loop.prompt_length + loop.response_length
 
 
 async def test_sampling_defaults_passed_to_gateway():
@@ -322,5 +350,22 @@ async def test_sampling_defaults_passed_to_gateway():
     assert sp["temperature"] == 0.3
     assert sp["top_p"] == 0.8
     assert sp["top_k"] == 20
-    # max_new_tokens defaults to response_length
-    assert sp["max_new_tokens"] == 32
+    assert sp["max_new_tokens"] == 8
+
+
+async def test_explicit_max_model_len_is_required():
+    with pytest.raises(ValueError, match="explicit positive.*max_model_len"):
+        _make_loop(trainer_config=make_trainer_config(max_model_len=None))
+
+
+@pytest.mark.parametrize("field", ["prompt_length", "response_length"])
+async def test_padded_region_cannot_exceed_max_model_len(field):
+    lengths = {field: 129}
+    with pytest.raises(ValueError, match=rf"{field} \(129\) cannot exceed .*max_model_len \(128\)"):
+        _make_loop(trainer_config=make_trainer_config(max_model_len=128, **lengths))
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 129])
+async def test_invalid_max_tokens_per_turn_rejected(value):
+    with pytest.raises(ValueError, match="max_tokens_per_turn"):
+        _make_loop(max_tokens_per_turn=value)

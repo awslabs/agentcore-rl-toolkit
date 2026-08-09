@@ -32,7 +32,13 @@ from verl.workers.rollout.replica import TokenOutput  # noqa: E402
 # -- config helpers -------------------------------------------------------------
 
 
-def make_trainer_config(*, use_v1: bool = True, prompt_length: int = 64, response_length: int = 32) -> DictConfigWrap:
+def make_trainer_config(
+    *,
+    use_v1: bool = True,
+    prompt_length: int = 64,
+    response_length: int = 32,
+    max_model_len: int | None = 128,
+) -> DictConfigWrap:
     """The slice of verl's trainer config AgentLoopBase + AgentCoreAgentLoop read."""
     return DictConfigWrap(
         OmegaConf.create(
@@ -40,7 +46,11 @@ def make_trainer_config(*, use_v1: bool = True, prompt_length: int = 64, respons
                 "trainer": {"use_v1": use_v1},
                 "actor_rollout_ref": {
                     "model": {"path": "test/model"},
-                    "rollout": {"prompt_length": prompt_length, "response_length": response_length},
+                    "rollout": {
+                        "prompt_length": prompt_length,
+                        "response_length": response_length,
+                        "max_model_len": max_model_len,
+                    },
                 },
             }
         )

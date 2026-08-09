@@ -8,6 +8,8 @@ propagation. No torch, no aiohttp, no network.
 import subprocess
 import sys
 
+import pytest
+
 from agentcore_rl_toolkit.rollout_gateway import (
     BaseTrace,
     Status,
@@ -15,6 +17,16 @@ from agentcore_rl_toolkit.rollout_gateway import (
     TrajectoryManager,
     TurnRecord,
 )
+
+
+def test_trace_record_rejects_loss_mask_longer_than_tokens():
+    with pytest.raises(ValueError, match="loss_mask has 3 entries.*token_ids has only 2"):
+        TraceRecord(token_ids=[1, 2], loss_mask=[1, 0, 1], logprobs=[-0.1, 0.0, -0.2])
+
+
+def test_trace_record_rejects_misaligned_logprobs():
+    with pytest.raises(ValueError, match="logprobs has 1 entries.*loss_mask has 2"):
+        TraceRecord(token_ids=[1, 2, 3], loss_mask=[1, 1], logprobs=[-0.1])
 
 
 def test_core_imports_without_torch_or_aiohttp():

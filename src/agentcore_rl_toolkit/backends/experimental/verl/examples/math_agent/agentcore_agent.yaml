@@ -1,13 +1,17 @@
 # Per-run agent-loop config for verl's `rollout.agent.agent_loop_config_path` —
 # part of this example, edit freely. Every key besides `name` and `_target_` is
-# passed to AgentCoreAgentLoop.__init__; unset keys use the constructor defaults
-# (see the backend README for the full kwarg reference). `${oc.env:VAR}` is
+# passed to AgentCoreAgentLoop.__init__; `max_tokens_per_turn` is required and
+# other unset keys use the constructor defaults (see the backend README).
+# `${oc.env:VAR}` is
 # OmegaConf env-var interpolation (errors if VAR is unset), keeping ARNs/buckets
 # out of committed config.
 - name: agentcore_agent
   _target_: agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop
   agent_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
   s3_bucket: ${oc.env:ACR_S3_BUCKET}
+  # Maximum output from one model call. The cumulative rollout remains bounded
+  # separately by min(rollout.max_model_len, rollout.response_length).
+  max_tokens_per_turn: 2048
   # math rollouts finish in well under 2 minutes; fail hung sessions fast
   # instead of holding a TransferQueue slot for the 1800s library default
   max_rollout_time: 180

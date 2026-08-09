@@ -166,11 +166,36 @@ python preprocess_gsm8k.py --output-dir gsm8k
 The example owns two config files, split by which config tree they feed:
 `fsdp_fft_sync_grpo.sh` sets verl-tree knobs (overridable from the CLI via its
 trailing `"$@"`), and `agentcore_agent.yaml` — the per-run agent-loop config —
-carries the loop's kwargs (ARN, bucket, `max_rollout_time`, ...).
+carries the loop's kwargs (ARN, bucket, `max_tokens_per_turn`,
+`max_rollout_time`, ...).
 Loop kwargs are NOT CLI-addressable (verl loads the YAML worker-side, outside
 hydra's override grammar): edit the YAML, or use `${oc.env:...}` interpolation
-for values that should vary per launch. Unset kwargs fall back to
-`AgentCoreAgentLoop.__init__` defaults.
+for values that should vary per launch. Except for required
+`max_tokens_per_turn`, unset kwargs fall back to `AgentCoreAgentLoop.__init__`
+defaults.
+
+## Token budgets
+
+The integration keeps three limits separate:
+
+- `rollout.max_model_len` is the inference engine's model-context capacity. It
+  must be set explicitly; stock verl validates it against the model's Hugging
+  Face `max_position_embeddings`.
+- `response_length` is verl's storage width for everything after the initial
+  prompt region and the gateway's cumulative trajectory budget. It must not
+  exceed `max_model_len`.
+- `max_tokens_per_turn` is a required `agentcore_agent.yaml` setting. It becomes
+  the gateway's default `max_new_tokens` for each model call; a smaller request
+  limit and the remaining model context can clamp it further.
+
+To let variable-length prompts use the full model window, set
+`response_length = max_model_len` and enable
+`actor_rollout_ref.model.use_remove_padding=true`. This gives verl a nominal
+`prompt_length + response_length` padded width, but the gateway limits valid
+tokens to `max_model_len`. If the initial rendered prompt exceeds
+`prompt_length`, the adapter preserves its overflow at the front of the
+response region with loss mask and rollout logprob zero; the adapter performs
+no additional token slicing.
 
 The script name encodes the configuration axes: FSDP engine, full fine-tune, sync
 trainer mode, GRPO. Its defaults are the validated stable configuration; three

@@ -66,5 +66,16 @@ class TraceRecord:
     # Off-policy / MoE fields (weight_version, routed_experts) are intentionally
     # omitted for now; add them as optional fields if a consumer needs them.
 
+    def __post_init__(self) -> None:
+        if len(self.loss_mask) > len(self.token_ids):
+            raise ValueError(
+                f"TraceRecord loss_mask has {len(self.loss_mask)} entries but token_ids "
+                f"has only {len(self.token_ids)}"
+            )
+        if len(self.logprobs) != len(self.loss_mask):
+            raise ValueError(
+                f"TraceRecord logprobs has {len(self.logprobs)} entries but loss_mask " f"has {len(self.loss_mask)}"
+            )
+
 
 __all__ = ["BaseTrace", "Status", "TraceRecord"]
