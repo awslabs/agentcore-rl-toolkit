@@ -10,14 +10,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
+from agentcore_rl_toolkit.backends.experimental.verl import agent_loop as al
+from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
+from agentcore_rl_toolkit.rollout_gateway import TraceRecord
+
 from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make_trainer_config
 
 pytestmark = pytest.mark.asyncio
 
 
 def _make_loop(llm_client=None, *, use_v1=True, trainer_config=None, **loop_kwargs):
-    from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
-
     loop_kwargs.setdefault("max_tokens_per_turn", 8)
     with patch("agentcore_rl_toolkit.backends.experimental.verl.agent_loop.RolloutClient") as client_cls:
         client_cls.return_value = MagicMock()
@@ -154,8 +156,6 @@ async def test_separate_reward_mode_rejected():
 
 
 async def test_invalid_reward_mode_rejected():
-    from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
-
     with pytest.raises(ValueError, match="reward_mode"):
         with patch("agentcore_rl_toolkit.backends.experimental.verl.agent_loop.RolloutClient"):
             AgentCoreAgentLoop(
@@ -265,8 +265,6 @@ async def test_exp_id_derived_from_trainer_config():
 
 
 async def test_client_cached_by_config():
-    from agentcore_rl_toolkit.backends.experimental.verl import agent_loop as al
-
     loop1 = _make_loop()
     n_after_first = len(al._CLIENTS)
     loop2 = _make_loop()  # same config -> same cached client
@@ -300,8 +298,6 @@ async def test_payload_column_forwarded_verbatim():
 
 
 async def test_output_conversion_preserves_prompt_overflow():
-    from agentcore_rl_toolkit.rollout_gateway import TraceRecord
-
     loop = _make_loop(
         trainer_config=make_trainer_config(prompt_length=2, response_length=6, max_model_len=6),
         max_tokens_per_turn=4,

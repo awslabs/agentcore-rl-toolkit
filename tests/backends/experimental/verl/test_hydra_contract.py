@@ -9,12 +9,12 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from verl.experimental.agent_loop.agent_loop import ToolListWrap
 
+from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
+
 from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make_trainer_config
 
 
 def test_instantiate_from_yaml_entry():
-    from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
-
     entry = OmegaConf.create(
         {
             "name": "agentcore_agent",
