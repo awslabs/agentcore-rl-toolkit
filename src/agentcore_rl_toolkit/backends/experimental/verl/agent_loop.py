@@ -195,11 +195,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 f"rollout.response_length ({self.response_length}) cannot exceed "
                 f"rollout.max_model_len ({self.max_model_len})"
             )
-        if (
-            not isinstance(max_tokens_per_turn, int)
-            or isinstance(max_tokens_per_turn, bool)
-            or max_tokens_per_turn <= 0
-        ):
+        if type(max_tokens_per_turn) is not int or max_tokens_per_turn <= 0:  # noqa: E721 - reject bool
             raise ValueError(f"max_tokens_per_turn must be a positive integer, got {max_tokens_per_turn!r}")
         if max_tokens_per_turn > self.max_model_len:
             raise ValueError(
