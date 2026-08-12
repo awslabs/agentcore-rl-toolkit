@@ -1,0 +1,24 @@
+# Toolkit + slime backend settings for the rollout function.
+# Copy to config.yaml (gitignored) and fill in your deployment values.
+#
+#   cp config.yaml.example config.yaml
+#   # edit agent_runtime_arn + s3_bucket
+#
+# Passed to slime via --custom-config-path config.yaml.
+# All keys become attributes on slime's args namespace.
+
+# ACR deployment pointers (from `bedrock-agentcore-starter-toolkit launch`)
+agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
+s3_bucket: "your-s3-bucket-name"
+
+# Toolkit tunables
+exp_id: "gsm8k-grpo-train"
+gateway_port: 9090                  # rollout gateway port
+max_rollout_time: 900               # per-session rollout timeout (s)
+tps_limit: 5                        # ACR service TPS quota
+
+# Number of network connections the AWS client keeps open (and reuses) to talk
+# to ACR/S3. This is NOT a concurrency cap: it caps reused connections, not how many
+# sessions run at once. Too small value causes "Connection pool is full" warnings,
+# they are NOT errors. Setting a too large value wastes resources (idle open sockets).
+max_pool_connections: 10
