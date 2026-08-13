@@ -47,6 +47,7 @@ test_files="['$gsm8k_test_path']"
 PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo_experimental}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-gsm8k_qwen3_4b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
 
 python3 -m verl.trainer.main_ppo \
     trainer.use_v1=true \
@@ -61,7 +62,7 @@ python3 -m verl.trainer.main_ppo \
     data.train_batch_size=64 \
     data.val_batch_size=256 \
     data.max_prompt_length=14336 \
-    data.max_response_length=2048 \
+    data.max_response_length=$MAX_MODEL_LEN \
     data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.experimental.verl.dataset \
     data.custom_cls.name=PayloadDataset \
     actor_rollout_ref.model.path=Qwen/Qwen3-4B-Instruct-2507 \
@@ -69,7 +70,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.optim.lr=5e-6 \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16384 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=$MAX_MODEL_LEN \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -79,8 +80,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.calculate_log_probs=true \
     actor_rollout_ref.rollout.prompt_length=14336 \
-    actor_rollout_ref.rollout.response_length=2048 \
-    actor_rollout_ref.rollout.max_model_len=16384 \
+    actor_rollout_ref.rollout.response_length=$MAX_MODEL_LEN \
+    actor_rollout_ref.rollout.max_model_len=$MAX_MODEL_LEN \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
@@ -95,7 +96,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.agent.agent_loop_config_path="$AGENT_LOOP_CONFIG" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     trainer.critic_warmup=0 \
-    trainer.default_local_dir=$CKPTS_DIR \
+    trainer.default_local_dir="$CKPTS_DIR" \
     trainer.resume_mode=disable \
     trainer.logger='["console"]' \
     trainer.project_name="$PROJECT_NAME" \

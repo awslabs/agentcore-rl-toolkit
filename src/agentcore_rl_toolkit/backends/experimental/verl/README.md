@@ -181,7 +181,12 @@ The integration keeps three limits separate:
 - `rollout.max_model_len` is the inference engine's model-context capacity. It
   must be set explicitly; stock verl validates it against the model's Hugging
   Face `max_position_embeddings`.
-- `response_length` is verl's storage width for everything after the initial
+- `prompt_length` is verl's fixed storage width for the leading context of each
+  emitted training row; it does not cap the prompts the gateway sends to the
+  inference engine. A row may begin at the first model turn or at a later
+  trajectory fork, so its leading context can include a long accumulated
+  multi-turn prompt.
+- `response_length` is verl's storage width for everything after the leading
   prompt region and the gateway's cumulative trajectory budget. It must not
   exceed `max_model_len`.
 - `max_tokens_per_turn` is a required `agentcore_agent.yaml` setting. It becomes
@@ -192,10 +197,16 @@ To let variable-length prompts use the full model window, set
 `response_length = max_model_len` and enable
 `actor_rollout_ref.model.use_remove_padding=true`. This gives verl a nominal
 `prompt_length + response_length` padded width, but the gateway limits valid
-tokens to `max_model_len`. If the initial rendered prompt exceeds
-`prompt_length`, the adapter preserves its overflow at the front of the
-response region with loss mask and rollout logprob zero; the adapter performs
-no additional token slicing.
+tokens to `max_model_len`. If both lengths equal `max_model_len`, the nominal
+row width is therefore `2 * max_model_len`; remove-padding avoids most model
+compute on padding, but the wider fixed-width staging tensors still increase
+memory and transfer overhead. Set `prompt_length` high enough for the leading
+contexts expected in emitted rows (or to `max_model_len` to rule out overflow).
+If a leading context does exceed `prompt_length`, the adapter preserves its
+overflow at the front of the response region with loss mask and rollout logprob
+zero. Training remains correct, but verl's stock length metrics count those
+overflow tokens as part of the response region, so overflow should be a
+fallback rather than the normal configuration.
 
 The script name encodes the configuration axes: FSDP engine, full fine-tune, sync
 trainer mode, GRPO. Its defaults are the validated stable configuration; three
