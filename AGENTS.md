@@ -257,8 +257,16 @@ the source against the baseline commit below:
 Re-sync workflow: `git -C <slime> diff 90c212b5..HEAD -- slime/agent/<file>` shows upstream
 changes since the lift (same pattern for trl). Our copies are intentionally modified
 (torch-free; `Sample` → `TraceRecord`; injected backend/renderer seams; sglang parser hook
-removed), so treat the diff as a review aid, not an automatic merge. For
-`response_schemas.py`, re-sync means updating the schema dicts and recomputing the
+removed), so treat the diff as a review aid, not an automatic merge.
+
+`adapters/openai.py` additionally returns the assistant's text alongside `tool_calls`
+and every parallel call, where upstream sends `content=null` and only the first call.
+Do not re-adopt upstream's shape: it costs the agent its own text in the replayed
+history, and the replayed history then no longer reproduces the sampled tokens (see the
+mixed text + parallel tool-call test in
+`tests/rollout_gateway/test_gateway_integration.py`).
+
+For `response_schemas.py`, re-sync means updating the schema dicts and recomputing the
 sha256 hashes of the covered chat templates. Bump the baseline commit here when you re-sync.
 
 ### Sandbox SDK

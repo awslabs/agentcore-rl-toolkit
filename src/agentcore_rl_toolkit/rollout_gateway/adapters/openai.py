@@ -245,27 +245,20 @@ def _build_reply_parts(parsed: ParsedOutput, finish: str) -> tuple[dict[str, Any
 
     wire_message: dict[str, Any] = {
         "role": "assistant",
-        # send content=null when there are tool_calls: some OpenAI clients split
-        # a mixed text+tool_calls turn into two echoed messages otherwise, which
-        # diverges the history match against our leaf
-        "content": None if wire_tool_calls else (parsed.text or None),
+        "content": parsed.text or None,
     }
-    # manager_message must match what the client echoes on the next request, or
-    # the manager's history match (dict equality) diverges and every turn forks.
-    # Differences from wire_message, each needed to match the echo:
-    #   * no reasoning_content -- some clients strip it on echo (the reasoning
-    #     token ids are still kept in the trained tokens, only the text drops)
-    #   * only the first tool_call -- some clients drop extra parallel tool_calls
-    #   * empty content when tool_calls are present -- mirrors content=null above
+    # manager_message must equal what the client echoes on the next request, or the
+    # history match (dict equality) diverges and the turn mounts as a new branch. It
+    # mirrors wire_message minus reasoning_content
     manager_message: dict[str, Any] = {
         "role": "assistant",
-        "content": "" if wire_tool_calls else (parsed.text or ""),
+        "content": parsed.text or "",
     }
     if parsed.reasoning:
         wire_message["reasoning_content"] = parsed.reasoning
     if wire_tool_calls:
-        wire_message["tool_calls"] = wire_tool_calls[:1]
-        manager_message["tool_calls"] = manager_tool_calls[:1]
+        wire_message["tool_calls"] = wire_tool_calls
+        manager_message["tool_calls"] = manager_tool_calls
 
     if parsed.tool_uses:
         wire_finish = "tool_calls"

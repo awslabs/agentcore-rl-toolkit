@@ -51,12 +51,18 @@ class FakeRenderer:
         return []
 
     def parse(self, output_ids, *, tools_schema=None):
+        """Split a reply into leading text plus one tool use per ``CALL`` segment,
+        mirroring render()'s ``content`` then ``CALL name k=v`` layout."""
         text = self.decode(output_ids)
-        if text.startswith("CALL "):
-            parts = text.split()
-            args = dict(p.split("=", 1) for p in parts[2:])
-            return ParsedOutput(reasoning="", text="", tool_uses=[{"name": parts[1], "input": args}], ill_formed=False)
-        return ParsedOutput(reasoning="", text=text, tool_uses=[], ill_formed=False)
+        parts = text.split()
+        if "CALL" not in parts:
+            return ParsedOutput(reasoning="", text=text, tool_uses=[], ill_formed=False)
+        head = parts[: parts.index("CALL")]
+        tool_uses = []
+        for seg in " ".join(parts[parts.index("CALL") :]).split("CALL ")[1:]:
+            toks = seg.split()
+            tool_uses.append({"name": toks[0], "input": dict(p.split("=", 1) for p in toks[1:])})
+        return ParsedOutput(reasoning="", text=" ".join(head), tool_uses=tool_uses, ill_formed=False)
 
 
 class FakeBackend:
@@ -172,6 +178,58 @@ async def test_openai_tool_loop_end_to_end():
     assert all(lp == -0.5 for lp, m in zip(rec.logprobs, rec.loss_mask, strict=True) if m)
     # finish_session decoded the response tail via the tokenizer
     assert rec.response == "CALL calculator expr=2+2 tool: 4 assistant: the answer is 4"
+
+
+# ---------------------------------------------------------------------------
+# a mixed text + parallel tool-call turn reaches the client intact
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mixed_text_and_parallel_tool_calls_reach_the_client():
+    """The reply must carry the assistant's text *and* every tool call.
+
+    Withholding either makes the client echo a history that no longer re-renders to
+    the sampled tokens, so the next turn drifts: the previous response span is
+    overwritten at loss_mask=0 (REALIGN) or split off (FORK). The trained-token
+    assertion below is what catches that -- it fails long before any reward metric
+    moves, and the damage grows with turn count.
+    """
+    reply1 = "checking both sums CALL calculator expr=2+2 CALL calculator expr=3+3"
+    gateway, backend = make_gateway(replies=[reply1, "the answers are 4 and 6"])
+    tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
+    sid = "ep-mixed"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid)
+        body1 = {"model": "m", "messages": [{"role": "user", "content": "two sums"}], "tools": tools}
+        resp1 = await client.post("/v1/chat/completions", json=body1, headers=bearer(sid))
+        msg1 = (await resp1.json())["choices"][0]["message"]
+
+        assert msg1["content"] == "checking both sums"
+        assert [json.loads(c["function"]["arguments"])["expr"] for c in msg1["tool_calls"]] == ["2+2", "3+3"]
+
+        # echo the assistant turn back verbatim, then both tool results
+        body2 = {
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "two sums"},
+                {"role": "assistant", "content": msg1["content"], "tool_calls": msg1["tool_calls"]},
+                {"role": "tool", "tool_call_id": msg1["tool_calls"][0]["id"], "content": "4"},
+                {"role": "tool", "tool_call_id": msg1["tool_calls"][1]["id"], "content": "6"},
+            ],
+            "tools": tools,
+        }
+        resp2 = await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))
+        assert resp2.status == 200
+
+        records = await gateway.finish_session(sid, base_sample=BaseTrace(rollout_id="ep-mixed"))
+
+    assert len(records) == 1  # no drift -> one branch, not a fork
+    rec = records[0]
+    tail = rec.token_ids[-rec.response_length :]
+    trained = [tok for tok, m in zip(tail, rec.loss_mask, strict=True) if m]
+    assert gateway.renderer.decode(trained) == f"{reply1} the answers are 4 and 6"
 
 
 # ---------------------------------------------------------------------------
