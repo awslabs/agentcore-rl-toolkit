@@ -1,0 +1,12 @@
+# Toolkit + harbor_sandbox staged into a harness build context by build_push.sh
+harness/*/_toolkit/
+harness/*/harbor_sandbox/
+# sandboxd health-shim binary is staged from the repo-root sandboxd/, not vendored
+harbor_sandbox/wrapper/agentcore-sandboxd-linux-*
+# real account-specific values (copy .env.example); never committed
+harbor_sandbox/.env
+# Run outputs
+*.jsonl
+# Standalone uv project: users run `uv sync` themselves; examples don't track lockfiles
+uv.lock
+__pycache__/
