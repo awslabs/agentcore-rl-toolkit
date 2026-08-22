@@ -79,8 +79,12 @@ def _resolve_sandbox(payload):
     bench, task = payload.get("benchmark"), payload.get("task_id")
     if not (bench and task):
         raise ValueError("payload must include either 'task_runtime_arn' or " "'benchmark' + 'task_id'")
-    client = HarborSandboxClient.create(bench, task, read_timeout=SANDBOX_READ_TIMEOUT_S)
-    if payload.get("lease"):
+    # lease => a PRIVATE uniquely-named runtime: concurrent rollouts of the same
+    # task (GRPO groups) must not share a deletable runtime, or the first
+    # release() kills the siblings mid-rollout.
+    lease = bool(payload.get("lease"))
+    client = HarborSandboxClient.create(bench, task, read_timeout=SANDBOX_READ_TIMEOUT_S, unique=lease)
+    if lease:
         return client, client.release  # instance path: deletes its OWN runtime
     return client, (lambda: None)
 

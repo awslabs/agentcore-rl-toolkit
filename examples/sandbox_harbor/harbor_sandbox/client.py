@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 
 import boto3
 from botocore.config import Config
@@ -58,14 +59,26 @@ class HarborSandboxClient(SandboxClient):
 
     @classmethod
     def create(
-        cls, benchmark: str, task_id: str, arch: str = "arm64", wait_ready_s: int = 180, **client_kwargs
+        cls,
+        benchmark: str,
+        task_id: str,
+        arch: str = "arm64",
+        wait_ready_s: int = 180,
+        unique: bool = False,
+        **client_kwargs,
     ) -> "HarborSandboxClient":
         """Ensure the task's runtime exists and is READY; return a client bound
         to it (identical whether it created the runtime or reused a live one).
 
+        ``unique=True`` creates a PRIVATE runtime (name gets a random suffix)
+        instead of the shared per-task one. Required whenever the caller will
+        ``release()`` while concurrent rollouts of the same task may be live
+        (e.g. GRPO groups): releasing the shared deterministic name deletes the
+        runtime out from under the siblings.
+
         Raises ImageNotFoundError if the conventional ECR tag is absent.
         """
-        names = resolve(benchmark, task_id, arch=arch)
+        names = resolve(benchmark, task_id, arch=arch, suffix=uuid.uuid4().hex[:8] if unique else None)
 
         # the ECR tag is the single source of truth for "this task exists AND is
         # built" (task existence + built-ness in one check).
