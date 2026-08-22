@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Harbor harness — agent_type "strands": Strands Agent, bash tool -> sb.exec.
 
-SEPARATED agent, framework-run: a Strands ``Agent`` backed by a Bedrock
-``BedrockModel`` reasons IN THIS PROCESS (arm64 microVM); its single tool,
+SEPARATED agent, framework-run: a Strands ``Agent`` — backed by a Bedrock
+``BedrockModel`` for evaluation, or by an ``OpenAIModel`` wired from the
+trainer-injected ``_rollout`` config (base_url/model_id/api_key) for RL
+training — reasons IN THIS PROCESS (arm64 microVM); its single tool,
 ``bash``, is overridden to ship each command into the task session via
 ``SandboxClient.exec`` and return the output:
 
@@ -29,6 +31,7 @@ from harbor_sandbox import REGION, HarborSandboxClient
 from strands import Agent, tool
 from strands.hooks import BeforeToolCallEvent, HookProvider
 from strands.models import BedrockModel
+from strands.models.openai import OpenAIModel
 
 from agentcore_rl_toolkit import AgentCoreRLApp
 from agentcore_rl_toolkit.sandbox import SandboxClient
@@ -119,7 +122,7 @@ def grade_with_verifier(sb, tests_tar_b64: str, verifier_timeout_s: float = DEFA
     the task's own [verifier].timeout_sec, clamped to exec's 3600s ceiling — a
     hardcoded cap would silently truncate heavy verifiers into reward=None."""
     if not tests_tar_b64:
-        return {"reward": None, "verifier_tail": "(no tests supplied)"}
+        return {"reward": None, "rewards": None, "verifier_tail": "(no tests supplied)"}
     verify_s = min(int(verifier_timeout_s), EXEC_TIMEOUT_MAX_S)
     sb.exec("rm -rf /tests && mkdir -p /tests /logs/verifier", timeout=30)
     _stage_b64(sb, tests_tar_b64, "/tmp/_tests.tgz")
@@ -133,6 +136,10 @@ def grade_with_verifier(sb, tests_tar_b64: str, verifier_timeout_s: float = DEFA
         pass
     return {
         "reward": reward,
+        # Plural alias: training backends read result["rewards"] (e.g.
+        # backends/experimental/verl/agent_loop.py); the singular key stays for
+        # the eval launcher. None (verifier wrote no reward.txt) scores 0.
+        "rewards": reward,
         "verifier_tail": (run.stdout or "")[-1500:],
         "unpack_err": (unpack.stdout or "")[:300] if unpack.exit_code != 0 else "",
         "verifier_budget_s": verify_s,
@@ -148,6 +155,7 @@ def run_rollout(
     tests_tar_b64,
     agent_timeout_s,
     verifier_timeout_s=DEFAULT_VERIFIER_TIMEOUT_S,
+    rollout_cfg=None,
 ) -> dict:
     client = sb_client
     commands: list[str] = []
@@ -165,7 +173,21 @@ def run_rollout(
             r = sb.exec(command, timeout=120)
             return f"exit={r.exit_code}\nstdout:\n{r.stdout[:4000]}\nstderr:\n{r.stderr[:1500]}"
 
-        model_obj = BedrockModel(model_id=model, region_name=REGION, max_tokens=4096, temperature=1.0)
+        rc = rollout_cfg or {}
+        if rc.get("base_url"):
+            # Training: the trainer injects the inference endpoint (the rollout
+            # gateway) via _rollout, and the api-key slot carries the trajectory-
+            # capture session key — it MUST reach the LLM client or every rollout
+            # degenerates into one shared gateway session. "EMPTY" keeps plain
+            # OpenAI-compatible eval endpoints (vLLM etc.) working unchanged.
+            model = rc["model_id"]
+            model_obj = OpenAIModel(
+                client_args={"api_key": rc.get("api_key") or "EMPTY", "base_url": rc["base_url"]},
+                model_id=model,
+                params=rc.get("sampling_params", {}),
+            )
+        else:
+            model_obj = BedrockModel(model_id=model, region_name=REGION, max_tokens=4096, temperature=1.0)
         t0 = time.time()
         limiter = _Budget(max_steps, deadline=t0 + agent_timeout_s)
         agent = Agent(
@@ -218,6 +240,7 @@ def invoke(payload: dict) -> dict:
             tests_tar_b64=payload.get("tests_tar_b64", ""),
             agent_timeout_s=float(payload.get("agent_timeout_s", DEFAULT_AGENT_TIMEOUT_S)),
             verifier_timeout_s=float(payload.get("verifier_timeout_s", DEFAULT_VERIFIER_TIMEOUT_S)),
+            rollout_cfg=payload.get("_rollout"),
         )
     finally:
         # guarded so a delete failure (AccessDenied, or ResourceNotFound when the
