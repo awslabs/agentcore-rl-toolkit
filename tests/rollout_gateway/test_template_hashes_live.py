@@ -28,6 +28,7 @@ REPO_EXPECTATIONS = [
     ("Qwen/Qwen3.5-0.8B", "qwen3_5"),  # nothink template variant
     ("Qwen/Qwen3.5-27B", "qwen3_5"),  # think template variant
     ("Qwen/Qwen3.6-27B", "qwen3_5"),
+    ("Qwen/Qwen3-Coder-30B-A3B-Instruct", "qwen3_5"),  # XML tool calls despite Qwen3 era
     ("nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16", "qwen3_5"),
     ("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "qwen3_5"),
     ("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16", "qwen3_5"),

@@ -198,6 +198,9 @@ _TEMPLATE_HASHES: dict[str, str] = {
     "ab7813c3abdd9cb655905a410728b26c7884eca45ddfab8d9f931553485a7862": "qwen3_5",  # Nemotron-3 Nano
     "575fb74f54ed264df9047d0ecce3c98938aae953fb4f50356675706264cbb68a": "qwen3_5",  # Nemotron-3 Super
     "82753bef5cedc4932c1ed509b5c9a12be680fd86d1adb65bc3f7398d11c8eebc": "qwen3_5",  # Nemotron-3 Ultra
+    # Local additions without TRL equivalents; keep below the vendored entries.
+    # Qwen3-Coder uses Qwen3.5's XML tool-call syntax.
+    "5a38bfa05833266240066aedc497decc9b00cc0d3e3b8cceea98cf530196ab06": "qwen3_5",  # Qwen3-Coder
 }
 
 
