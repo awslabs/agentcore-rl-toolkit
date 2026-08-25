@@ -235,8 +235,9 @@ Key pieces (see `backends/experimental/verl/README.md` for the full design):
   the ACR `runtimeSessionId`, so older images reading `context.session_id` still work)
   and the gateway keys capture off the Bearer/api-key slot (`"EMPTY"` keeps local runs
   and the legacy per-session-URL gateways working). Adopted by `strands_math_agent`
-  (validated end to end); the other examples still send `"EMPTY"` and migrate as
-  they're validated against this backend.
+  (validated end to end) and `strands_migration_agent`. `strands_appworld_agent`,
+  `strands_officebench_agent`, and `strands_taubench_agent` still hard-code `"EMPTY"`
+  and do not forward the trainer-supplied capture key.
 - Validated end to end: `examples/math_agent/fsdp_fft_sync_grpo.sh` (GRPO, Qwen3-4B
   full-FT, TIS + KL trust region) reaches ~0.93 GSM8K val reward in one epoch against
   a live ACR agent.
@@ -267,7 +268,9 @@ mixed text + parallel tool-call test in
 `tests/rollout_gateway/test_gateway_integration.py`).
 
 For `response_schemas.py`, re-sync means updating the schema dicts and recomputing the
-sha256 hashes of the covered chat templates. Bump the baseline commit here when you re-sync.
+sha256 hashes of the covered chat templates — preserving the marked local-additions
+block at the end of `_TEMPLATE_HASHES` (templates with no TRL equivalent, e.g.
+Qwen3-Coder → `qwen3_5`). Bump the baseline commit here when you re-sync.
 
 ### Sandbox SDK
 

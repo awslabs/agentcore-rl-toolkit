@@ -68,11 +68,24 @@ Notes from the field:
   deps in `requirements.txt` (which its Docker images install), not in setup.py, so a
   git install of verl alone misses them.
 - `flash-attn` installs as a prebuilt wheel from Astral's GPU index
-  (`https://wheels.astral.sh/simple/cu130/`, wired in `[tool.uv.sources]`), so there is no
-  hour-long local build and no local CUDA toolkit (`nvcc`) is needed.
+  (`https://wheels.astral.sh/simple/cu130/`, wired in `[tool.uv.sources]`), so no local
+  CUDA toolkit (`nvcc`) is needed.
 - The stack is cu130 throughout, matching verl's reference stack at the pinned commit:
   needs driver >= 580.65.06 and compute capability >= 7.5 (CUDA 13 dropped Pascal and
   Volta, so V100 and older are out).
+
+### Megatron engine
+
+Megatron requires Python 3.12:
+
+```bash
+uv sync --extra verl-experimental --group verl-experimental-megatron
+```
+
+- Use NVIDIA Megatron-Bridge with `megatron.use_mbridge=True` and
+  `megatron.vanilla_mbridge=False`.
+- LoRA recipes without NVIDIA Apex must set
+  `++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False`.
 
 ## Dataset contract: the `payload` column
 
@@ -208,22 +221,13 @@ zero. Training remains correct, but verl's stock length metrics count those
 overflow tokens as part of the response region, so overflow should be a
 fallback rather than the normal configuration.
 
-The script name encodes the configuration axes: FSDP engine, full fine-tune, sync
-trainer mode, GRPO. Its defaults are the validated stable configuration; three
-settings act as the trust region and matter for stability (an early run with lr=2e-5
-and no KL/TIS collapsed to reward 0 around step 60 — see the script header):
-`lr=5e-6`, `use_kl_loss=true`, and truncated importance sampling
-(`algorithm.rollout_correction.rollout_is=token`), which corrects the vLLM-sampler vs
-FSDP-trainer probability gap using the gateway-captured rollout logprobs.
-
 Checkpoints land under `checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}` (verl's own
 layout), and the script sets `trainer.resume_mode=disable` so no run auto-resumes.
 If you re-enable resume, the per-experiment dir keeps it scoped: verl's `auto` mode
 only ever searches `trainer.default_local_dir`.
 
-**Wall-clock note:** validation dominates. Each val prompt is a live ACR agent
-round-trip (the GSM8K test split is 1319 prompts ≈ 12 min/eval), versus ~100 s per
-training step. Budget `trainer.test_freq` and `data.val_batch_size` accordingly.
+Use `data.val_max_samples` to limit validation. `data.val_batch_size` is deprecated
+and does not limit the validation set.
 
 ## Agent-side contract
 

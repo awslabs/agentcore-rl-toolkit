@@ -148,6 +148,19 @@ verl-experimental-ci = [
     "torchvision>=0.23.0",
 ]
 
+[dependency-groups]
+verl-experimental-megatron = [
+    # Root-pin TE's transitive packages so uv applies the explicit Astral index to each;
+    # otherwise transformer-engine-torch and transformer-engine-cu13 resolve from PyPI.
+    "transformer-engine[pytorch]==2.16.0",
+    "transformer-engine-torch==2.16.0",
+    "transformer-engine-cu13==2.16.0",
+    "megatron-core==0.18.0",
+    "megatron-bridge==0.5.0",
+    # Required at import time after stripping megatron-bridge's dependencies below.
+    "nvidia-modelopt>=0.37.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
@@ -161,10 +174,26 @@ conflicts = [
         { extra = "verl-experimental" },
         { extra = "verl-experimental-ci" },
     ],
+    # Installed alongside verl-experimental, so it needs a separate conflict group.
+    [
+        { extra = "verl" },
+        { extra = "rllm" },
+        { extra = "verl-experimental-ci" },
+        { group = "verl-experimental-megatron" },
+    ],
 ]
 override-dependencies = [
     "numpy>=1.26.0",
 ]
+
+[tool.uv.dependency-groups]
+verl-experimental-megatron = { requires-python = ">=3.12,<3.13" }
+
+# Megatron-Bridge's published dependencies conflict with the verl stack.
+[[tool.uv.dependency-metadata]]
+name = "megatron-bridge"
+version = "0.5.0"
+requires-dist = []
 
 [tool.uv.sources]
 # rllm is not published to PyPI; install it from GitHub. The git source is
@@ -189,8 +218,11 @@ torch = [
 torchvision = [
     { index = "pytorch-cpu", extra = "verl-experimental-ci" },
 ]
-# Prebuilt wheels; building flash-attn from PyPI's sdist takes ~an hour of nvcc.
+# Prebuilt GPU wheels avoid local source builds from PyPI.
 flash-attn = { index = "astral-cu130" }
+transformer-engine = { index = "astral-cu130" }
+transformer-engine-torch = { index = "astral-cu130" }
+transformer-engine-cu13 = { index = "astral-cu130" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

@@ -70,6 +70,18 @@ def test_qwen3_5_schema_parses_native_output():
     assert out.ill_formed is False
 
 
+def test_qwen3_5_schema_parses_qwen3_coder_output():
+    out = _parse(
+        "I'll list the directory.\n\n<tool_call>\n<function=shell>\n"
+        "<parameter=command>\nls -la\n</parameter>\n</function>\n</tool_call><|im_end|>",
+        schema="qwen3_5",
+    )
+    assert out.reasoning == ""
+    assert out.text == "I'll list the directory."
+    assert out.tool_uses == [{"name": "shell", "input": {"command": "ls -la"}}]
+    assert out.ill_formed is False
+
+
 def test_malformed_tool_json_degrades_flagged():
     raw = '<tool_call>\n{"name": "calculator", "arguments": {oops}\n</tool_call><|im_end|>'
     out = _parse(raw)

@@ -1,0 +1,11 @@
+- name: agentcore_agent
+  _target_: agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop
+  agent_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
+  s3_bucket: ${oc.env:ACR_S3_BUCKET}
+  # Applied per AgentLoopWorker process; account for worker count when tuning.
+  tps_limit: 8
+  # Per model call; cumulative context is configured in the training script.
+  max_tokens_per_turn: 8192
+  max_rollout_time: 1800
+  # Preserve sampled tokens by forking rather than realigning across turn drift.
+  fork_threshold_tokens: 0

@@ -116,6 +116,10 @@ class SandboxClient:
         qualifier: Runtime endpoint qualifier.
         max_retry_attempts: Max boto3 retry attempts (adaptive mode).
         max_pool_connections: Max boto3 connection pool size.
+        read_timeout: Per-request socket read timeout in seconds. Defaults to
+            900s so a long, silent command (a heavy verifier, or a runtime still
+            warming up) is not cut off by boto3's short default.
+        connect_timeout: TCP connect timeout in seconds.
         shell: Shell used to interpret ``exec()`` commands in the container.
             Defaults to ``/bin/sh`` (present in any image with a shell,
             including busybox/alpine); set to ``/bin/bash`` if your image has
@@ -150,6 +154,8 @@ class SandboxClient:
         qualifier: str = "DEFAULT",
         max_retry_attempts: int = 5,
         max_pool_connections: int = 10,
+        read_timeout: int = 900,
+        connect_timeout: int = 15,
         shell: str = "/bin/sh",
     ):
         self.runtime_arn = runtime_arn
@@ -160,6 +166,8 @@ class SandboxClient:
         config = Config(
             retries={"max_attempts": max_retry_attempts, "mode": "adaptive"},
             max_pool_connections=max_pool_connections,
+            read_timeout=read_timeout,
+            connect_timeout=connect_timeout,
         )
         self._client = boto3.client("bedrock-agentcore", region_name=self.region, config=config)
 

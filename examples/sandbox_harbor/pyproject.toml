@@ -1,0 +1,22 @@
+[project]
+name = "sandbox-harbor-example"
+version = "0.1.0"
+description = "One-command evaluation of a Harbor benchmark on AgentCore Runtime"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agentcore-rl-toolkit>=0.1.3",
+    "boto3>=1.43.68",
+]
+
+[project.optional-dependencies]
+# Only needed to auto-pull tasks from the Harbor registry (bench.py /
+# ensure_dataset when --task-root is empty). Install with `uv sync --extra harbor`.
+harbor = ["harbor"]
+
+[tool.setuptools]
+packages = ["harbor_sandbox"]
+py-modules = ["bench"]
+
+[tool.setuptools.package-data]
+harbor_sandbox = ["wrapper/*"]
