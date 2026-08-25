@@ -3,6 +3,11 @@
 Run ``examples/strands_migration_agent/preprocess.py`` first to upload repository
 tarballs and metadata. Training excludes repositories without tests; validation
 uses every prepared test repository.
+
+The payload shape is the agent's invoke contract (``models.InvocationRequest`` in
+that example) and is also built by its ``eval_utils.prepare_payload`` for batch
+evaluation — the example is a standalone uv project, not importable from the
+trainer env, so a contract change has to be applied in both places.
 """
 
 import argparse
