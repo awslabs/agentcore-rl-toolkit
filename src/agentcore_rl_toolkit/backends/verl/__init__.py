@@ -1,44 +1,22 @@
-import logging
-import os
+"""verl integration built on the in-repo rollout gateway.
 
-from agentcore_rl_toolkit.backends.verl.config import (
-    AgentCoreConfig,
-    AgentCoreFSDPActorConfig,
-    AgentCoreMcoreActorConfig,
-    AgentCoreRolloutConfig,
-)
-from agentcore_rl_toolkit.backends.verl.dataset import AgentCoreDataset
-from agentcore_rl_toolkit.backends.verl.loop_manager import AgentCoreLoopManager
-from agentcore_rl_toolkit.backends.verl.trainer import AgentCoreTrainer
+Plugs into verl as a custom agent loop (``rollout.agent.agent_loop_config_path``)
+running under the stock ``python -m verl.trainer.main_ppo`` entrypoint with
+``trainer.use_v1=true``. See README.md in this directory for setup.
 
+``AgentCoreAgentLoop`` (which imports verl) is exposed lazily so that importing
+this package — e.g. for ``VerlSamplingBackend`` in tests — does not require verl.
+"""
 
-def _configure_package_logger() -> None:
-    """Attach a dedicated handler to this package's logger with propagation off.
-
-    Loggers in this package have no logger handler of their own, so their records
-    could be silently dropped. Giving the package logger its own handler and setting
-    ``propagate = False`` keep our logs flowing regardless of how other libraries
-    reconfigure the root logger.
-    """
-    pkg_logger = logging.getLogger(__name__)
-    if any(getattr(h, "_agentcore_verl_handler", False) for h in pkg_logger.handlers):
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(levelname)s:%(asctime)s:%(message)s"))
-    handler._agentcore_verl_handler = True
-    pkg_logger.addHandler(handler)
-    pkg_logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))
-    pkg_logger.propagate = False
+from .sampling_backend import VerlSamplingBackend
 
 
-_configure_package_logger()
+def __getattr__(name: str):
+    if name == "AgentCoreAgentLoop":
+        from .agent_loop import AgentCoreAgentLoop
 
-__all__ = [
-    "AgentCoreConfig",
-    "AgentCoreDataset",
-    "AgentCoreFSDPActorConfig",
-    "AgentCoreLoopManager",
-    "AgentCoreMcoreActorConfig",
-    "AgentCoreRolloutConfig",
-    "AgentCoreTrainer",
-]
+        return AgentCoreAgentLoop
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ["AgentCoreAgentLoop", "VerlSamplingBackend"]

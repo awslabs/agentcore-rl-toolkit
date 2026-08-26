@@ -83,7 +83,7 @@ def _extract_agent_reward(result: dict) -> float | None:
         raise ValueError(
             f"The agent returned a non-numeric built-in reward: rewards={rewards!r} ({e}). "
             "It must be a float, or a list of floats whose last element is the reward — "
-            "see the reward contract in backends/experimental/verl/README.md."
+            "see the reward contract in backends/verl/README.md."
         ) from e
 
 
@@ -312,7 +312,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
             logger.warning(
                 "The agent returned no {'rewards': ...} for rollout %s; scoring 0.0. "
                 "The agent owns scoring — return the reward in its session result "
-                "(see the reward contract in backends/experimental/verl/README.md).",
+                "(see the reward contract in backends/verl/README.md).",
                 sid,
             )
             return 0.0
@@ -331,7 +331,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
                     "Rollout %s captured no trace, but turns are accumulating under the "
                     "static session %r — the deployed agent is likely sending a fixed "
                     "api_key instead of context.session_id (stale agent image?). "
-                    "See the agent-side contract in backends/experimental/verl/README.md.",
+                    "See the agent-side contract in backends/verl/README.md.",
                     sid,
                     static_sid,
                 )

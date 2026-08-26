@@ -94,9 +94,10 @@ requested - not full sentences.
 @app.rollout_entrypoint
 def invoke_agent(payload: dict):
     rollout_config = payload.get("_rollout", {})
+    api_key = rollout_config.get("api_key") or "EMPTY"
 
     model = OpenAIModel(
-        client_args={"api_key": "EMPTY", "base_url": rollout_config["base_url"]},
+        client_args={"api_key": api_key, "base_url": rollout_config["base_url"]},
         model_id=rollout_config["model_id"],
         params=rollout_config.get("sampling_params", {}),
     )

@@ -44,7 +44,7 @@ train_files="['$gsm8k_train_path']"
 test_files="['$gsm8k_test_path']"
 
 # One checkpoint dir per experiment (mirrors verl's own default layout).
-PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo_experimental}
+PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-gsm8k_qwen3_4b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
@@ -63,7 +63,7 @@ python3 -m verl.trainer.main_ppo \
     data.val_batch_size=256 \
     data.max_prompt_length=14336 \
     data.max_response_length=$MAX_MODEL_LEN \
-    data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.experimental.verl.dataset \
+    data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.verl.dataset \
     data.custom_cls.name=PayloadDataset \
     actor_rollout_ref.model.path=Qwen/Qwen3-4B-Instruct-2507 \
     actor_rollout_ref.model.use_remove_padding=True \

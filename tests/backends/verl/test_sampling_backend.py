@@ -4,7 +4,7 @@ the sampling-params whitelist, against scripted verl ``TokenOutput`` responses."
 import pytest
 from verl.workers.rollout.replica import TokenOutput
 
-from agentcore_rl_toolkit.backends.experimental.verl.sampling_backend import (
+from agentcore_rl_toolkit.backends.verl.sampling_backend import (
     VerlSamplingBackend,
     _verl_sampling_params,
 )

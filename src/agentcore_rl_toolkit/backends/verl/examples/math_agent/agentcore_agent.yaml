@@ -6,7 +6,7 @@
 # OmegaConf env-var interpolation (errors if VAR is unset), keeping ARNs/buckets
 # out of committed config.
 - name: agentcore_agent
-  _target_: agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop
+  _target_: agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop
   agent_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
   s3_bucket: ${oc.env:ACR_S3_BUCKET}
   # Maximum output from one model call. The cumulative rollout remains bounded

@@ -1,4 +1,4 @@
-"""Build payload-only MigrationBench parquet files from prepared S3 metadata.
+"""Build payload-only MigrationBench parquet files for the verl AgentCore example.
 
 Run ``examples/strands_migration_agent/preprocess.py`` first to upload repository
 tarballs and metadata. Training excludes repositories without tests; validation
