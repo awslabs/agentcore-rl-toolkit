@@ -32,6 +32,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
 | `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl backend: `AgentCoreAgentLoop` plugged into stock verl main_ppo via the rollout gateway (successor to `backends/verl`) |
+| `src/agentcore_rl_toolkit/backends/experimental/sagemaker/` | Experimental SageMaker Training Sessions backend: single-process GRPO loop (`train_grpo.py`) over the rollout gateway, no local GPUs |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
 | `sandboxd/` | Go health shim (`agentcore-sandboxd`) that makes arbitrary Docker images satisfy the ACR container contract |
 | `examples/strands_math_agent/` | GSM8K math agent example |
@@ -135,7 +136,7 @@ sample-only backends like Tinker, which cannot render themselves.
 | `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`. Each training backend converts this to its native sample type in its own process. |
 | `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation, parallel tool-call branches, and heals re-tokenization drift between turns (CLEAN / REALIGN / FORK). Tokenizer-free and torch-free. |
 | `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (default, HF `apply_chat_template`) or `TinkerRenderer` (needs `tinker-cookbook`, installed manually). |
-| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
+| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`, `SageMakerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker and SageMaker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
 | Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
 | `RolloutGateway` | `gateway.py` | Assembles tokenizer + renderer + backend + adapters onto one aiohttp app sharing one `TrajectoryManager`. Session identity rides in the api-key / Bearer slot; `base_url` is a fixed gateway address (no per-session URLs). |
 | `ThreadedGatewayServer` | `server.py` | Serves an assembled gateway on a background thread with its own event loop — the deployment shape for synchronous trainers (slime, verl). Async trainers can mount `gateway.app` into their own loop instead. |
@@ -185,14 +186,19 @@ drains the tree into `list[TraceRecord]`.
 - For the Tinker backend (`TinkerSdkBackend` + `TinkerRenderer`), install `tinker` and
   `tinker-cookbook` manually — they require Python ≥3.11, so they are not declared as an
   extra (this package supports ≥3.10). Both pull torch.
+- For the SageMaker backend (`SageMakerSdkBackend`), install the Training Sessions SDK
+  manually (`pip install sagemaker-train`) — not declared as an extra. Unlike the other
+  sampling backends it imports `sagemaker.train.training_session` at module scope, so the
+  module is only importable with the SDK present; nothing else in the gateway imports it.
 
 The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBackend`
 protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so
 importing the package never requires aiohttp. Tests live in `tests/rollout_gateway/`.
 
-**Status.** The capture layer above is implemented and tested. Its first training-backend
-consumer is the **experimental verl backend** (`backends/experimental/verl/`, see below);
-other backends' dispatch/reward-join glue is not yet on the main branch — a prototype
+**Status.** The capture layer above is implemented and tested. Its training-backend
+consumers are the **experimental verl backend** (`backends/experimental/verl/`) and the
+**experimental SageMaker backend** (`backends/experimental/sagemaker/`), both below; the
+remaining backends' dispatch/reward-join glue is not yet on the main branch — a prototype
 dispatcher is parked on the `wip/online-rl-dispatch` branch.
 
 ### Experimental verl backend (`backends/experimental/verl/`)
@@ -241,6 +247,58 @@ Key pieces (see `backends/experimental/verl/README.md` for the full design):
 - Validated end to end: `examples/math_agent/fsdp_fft_sync_grpo.sh` (GRPO, Qwen3-4B
   full-FT, TIS + KL trust region) reaches ~0.93 GSM8K val reward in one epoch against
   a live ACR agent.
+
+### Experimental SageMaker backend (`backends/experimental/sagemaker/`)
+
+GRPO against **Amazon SageMaker Training Sessions**: SageMaker hosts the policy weights,
+the sampler, and the optimizer behind an SDK, so **no local GPU cluster is needed** — the
+RL loop is a single-process asyncio program driven by one YAML config. Contrast with
+slime/verl, where the trainer owns the GPUs and the gateway is embedded in it. Requires
+the `sagemaker-train` wheel (installed manually, see above); user-facing setup lives in
+`SETUP.md` and `docs/site/src/content/docs/guides/sagemaker-backend-setup.md`.
+
+Key pieces:
+- `rollout_gateway/sampling_backends/sagemaker_sdk.py` — `SageMakerSdkBackend`: gateway
+  `SamplingBackend` over the SageMaker `SamplingClient`. Renderer-free like
+  `TinkerSdkBackend` (the SDK cannot render; the gateway owns tokenization). Two SDK
+  properties shape it: **(a)** weights are pinned at sampling-client creation, so
+  `save_weights_and_get_sampling_client()` returns a *new* client each update and reusing
+  the old one silently samples stale weights — `set_sampling_client()` rebinds under a
+  `threading.Lock` while the gateway's background thread may be mid-`generate()`
+  (in-flight calls finish against the old weights, subsequent calls use the new client);
+  **(b)** `APIFuture.result()` blocks by polling, so `generate()` wraps it in
+  `asyncio.to_thread` to keep the gateway loop responsive under concurrent rollouts.
+  Both are covered in `tests/rollout_gateway/test_sagemaker_sdk_backend.py`, which stubs
+  the `sagemaker` module so the tests need no SDK wheel and no AWS calls.
+- `train_grpo.py` — the loop, run as
+  `python -m agentcore_rl_toolkit.backends.experimental.sagemaker.train_grpo --config config.yaml`.
+  Per step: pop `batch_size` payloads, run `responses_per_prompt` ACR rollouts per payload
+  concurrently, center/normalize rewards within each group, convert every trajectory-tree
+  leaf to a datum, `forward_backward(loss_fn=...)` + `optim_step(AdamParams(...))`, then
+  rebind the sampler to the updated weights. LoRA only
+  (`create_lora_training_client`); `loss` selects the surrogate
+  (`ppo` | `importance_sampling` | `cispo`). The training session bills until stopped, so
+  `tc.stop()` is the first statement in the `finally` and a `SIGTERM` handler cancels the
+  task rather than letting the signal kill the interpreter before teardown.
+- `rollout.py` — `run_one_rollout()`: one UUID per rollout serves as gateway session id,
+  ACR `runtimeSessionId`, **and** `api_key`, so the same capture-key contract the verl
+  backend uses applies unchanged. Returns reward 0.0 (logged, never raised) on timeout,
+  ACR error, non-200 agent status, or a missing/non-numeric reward.
+- `datum.py` — `trace_record_to_datum()`: `TraceRecord` + advantage → a SageMaker datum
+  (shifted `input`/`target_tokens`, with `weights` / `logprobs` / `advantages` left-padded
+  over the prompt span). Returns `None` for an empty or all-zero loss mask; a step with no
+  valid datums is skipped rather than submitted.
+- `config.py` / `config.yaml.example` — typed dataclass + template; `load_config` silently
+  drops unknown YAML keys. Local `config.yaml` is gitignored (holds ARNs).
+- `prepare_datasets/prepare_gsm8k.py` — GSM8K → Parquet. Same payload-first dataset
+  contract as the verl backend (one `payload` column forwarded verbatim to
+  `@rollout_entrypoint`), but read directly by `rollout.load_dataset()` (Parquet or JSONL)
+  with no synthesized `prompt` column, since there is no verl dataloader to satisfy.
+
+Current limits: GRPO only (`SageMakerSdkBackend`, `run_one_rollout()`,
+`trace_record_to_datum()`, and the gateway assembly are reusable for another algorithm),
+LoRA only, rewards agent-side only, and one gateway in one process — it scales by ACR
+concurrency, not by local hardware.
 
 **Vendored from upstream projects (baselines).** Several files are adapted from
 [slime](https://github.com/THUDM/slime) and [trl](https://github.com/huggingface/trl)
