@@ -106,7 +106,7 @@ verl = [
     "torchvision>=0.23.0",
     # matches verl's reference stack at the pinned commit
     # (docker/Dockerfile.stable.vllm: vllm 0.23.0 / torch 2.11.0 / cu130 / flash-attn 2.8.3)
-    "vllm==0.23.0",
+    "vllm==0.26.0",
     "flash-linear-attention",
     "flash-attn==2.8.3",
     "qwen-vl-utils",
