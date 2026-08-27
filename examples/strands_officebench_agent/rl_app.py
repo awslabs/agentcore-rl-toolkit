@@ -38,11 +38,12 @@ reward_fn = OfficeBenchReward()
 @app.rollout_entrypoint
 def invoke_agent(payload: dict):
     rollout_config = payload.get("_rollout", {})
+    api_key = rollout_config.get("api_key") or "EMPTY"
 
     # Choose model based on config
     if rollout_config.get("base_url"):
         model = OpenAIModel(
-            client_args={"api_key": "EMPTY", "base_url": rollout_config["base_url"]},
+            client_args={"api_key": api_key, "base_url": rollout_config["base_url"]},
             model_id=rollout_config["model_id"],
             params=rollout_config.get("sampling_params", {}),
         )

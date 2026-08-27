@@ -9,7 +9,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from verl.experimental.agent_loop.agent_loop import ToolListWrap
 
-from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
+from agentcore_rl_toolkit.backends.verl.agent_loop import AgentCoreAgentLoop
 
 from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make_trainer_config
 
@@ -18,7 +18,7 @@ def test_instantiate_from_yaml_entry():
     entry = OmegaConf.create(
         {
             "name": "agentcore_agent",
-            "_target_": "agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop",
+            "_target_": "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop",
             "agent_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
             "s3_bucket": "test-bucket",
             "max_tokens_per_turn": 8,
@@ -28,7 +28,7 @@ def test_instantiate_from_yaml_entry():
         }
     )
 
-    with patch("agentcore_rl_toolkit.backends.experimental.verl.agent_loop.RolloutClient"):
+    with patch("agentcore_rl_toolkit.backends.verl.agent_loop.RolloutClient"):
         loop = hydra.utils.instantiate(
             config=entry,
             trainer_config=make_trainer_config(),

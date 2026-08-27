@@ -12,7 +12,7 @@ import uuid
 import openai
 import pytest
 
-from agentcore_rl_toolkit.backends.experimental.verl.gateway_host import get_or_start_gateway
+from agentcore_rl_toolkit.backends.verl.gateway_host import get_or_start_gateway
 
 from .conftest import FakeLLMServerClient, FakeTokenizer
 

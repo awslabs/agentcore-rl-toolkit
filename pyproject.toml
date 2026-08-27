@@ -87,21 +87,8 @@ rllm = [
     "rllm",
 ]
 verl = [
-    "transformers==5.8.1",
-    "numpy",
-    "verl==0.8.0",
-    "ray",
-    "torch>=2.10.0",
-    "torchvision>=0.23.0",
-    "vllm==0.22.0",
-    "flash-linear-attention",
-    "flash-attn==2.8.3",
-    "qwen-vl-utils",
-    "rllm-model-gateway>=0.1.0",
-]
-verl-experimental = [
-    # For backends/experimental/verl — see its README for the design and install
-    # notes. verl is pinned via [tool.uv.sources] below.
+    # For backends/verl — see its README for design and install notes.
+    # verl is pinned via [tool.uv.sources] below.
     "verl",
     # verl declares runtime deps in requirements.txt (its Docker images pip-install
     # it), not in setup.py install_requires — so a git install of verl misses them.
@@ -124,13 +111,14 @@ verl-experimental = [
     "flash-attn==2.8.3",
     "qwen-vl-utils",
 ]
-verl-experimental-ci = [
-    # CI slice of [verl-experimental] for the experimental-verl-integration
-    # workflow: same pinned verl (the [tool.uv.sources] entry applies) and
-    # declared runtime deps, but CPU torch (index steering below) and no
-    # inference engines (vllm / flash-attn / qwen-vl-utils) — the backend's
-    # integration tests fake the LLM-server seam, and none of those install on
-    # a GitHub runner (CUDA wheels, source builds).
+[dependency-groups]
+verl-ci = [
+    # CI-only slice of the [verl] extra for the verl-integration workflow:
+    # same pinned verl (the [tool.uv.sources] entry applies) and declared
+    # runtime deps, but CPU torch (index steering below) and no inference
+    # engines (vllm / flash-attn / qwen-vl-utils). The backend's integration
+    # tests fake the LLM-server seam, and none of those install on a GitHub
+    # runner (CUDA wheels, source builds).
     "verl",
     "transferqueue==0.1.8",
     "orjson",
@@ -141,15 +129,13 @@ verl-experimental-ci = [
     "fastapi",
     "uvicorn",
     "aiohttp>=3.9",
-    "transformers==5.12.1",  # keep in lockstep with [verl-experimental]
+    "transformers==5.12.1",  # keep in lockstep with the [verl] extra
     "numpy",
     "ray",
     "torch>=2.10.0",
     "torchvision>=0.23.0",
 ]
-
-[dependency-groups]
-verl-experimental-megatron = [
+verl-megatron = [
     # Root-pin TE's transitive packages so uv applies the explicit Astral index to each;
     # otherwise transformer-engine-torch and transformer-engine-cu13 resolve from PyPI.
     "transformer-engine[pytorch]==2.16.0",
@@ -171,15 +157,13 @@ conflicts = [
     [
         { extra = "verl" },
         { extra = "rllm" },
-        { extra = "verl-experimental" },
-        { extra = "verl-experimental-ci" },
+        { group = "verl-ci" },
     ],
-    # Installed alongside verl-experimental, so it needs a separate conflict group.
+    # Installed alongside verl, so it needs a separate conflict group.
     [
-        { extra = "verl" },
         { extra = "rllm" },
-        { extra = "verl-experimental-ci" },
-        { group = "verl-experimental-megatron" },
+        { group = "verl-ci" },
+        { group = "verl-megatron" },
     ],
 ]
 override-dependencies = [
@@ -187,7 +171,7 @@ override-dependencies = [
 ]
 
 [tool.uv.dependency-groups]
-verl-experimental-megatron = { requires-python = ">=3.12,<3.13" }
+verl-megatron = { requires-python = ">=3.12,<3.13" }
 
 # Megatron-Bridge's published dependencies conflict with the verl stack.
 [[tool.uv.dependency-metadata]]
@@ -202,21 +186,19 @@ requires-dist = []
 # dependencies, which PyPI rejects. uv reads this source when installing the
 # [rllm] extra from a checkout of this repo.
 rllm = { git = "https://github.com/rllm-org/rllm.git" }
-# verl pinned to uni-agent's blessed submodule commit for the experimental
-# backend (backends/experimental/verl). Applies only when the
-# [verl-experimental] extra is selected; the legacy [verl] extra resolves
-# verl==0.8.0 from PyPI in its own conflict fork.
+# verl pinned to uni-agent's blessed submodule commit for the direct
+# backend (backends/verl).
 verl = [
-    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl-experimental" },
-    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl-experimental-ci" },
+    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl" },
+    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", group = "verl-ci" },
 ]
-# CI fork only: CPU torch wheels so the CUDA distribution (plus nvidia-* wheels)
+# CI group only: CPU torch wheels so the CUDA distribution (plus nvidia-* wheels)
 # never resolves on GitHub runners. The other extras keep the default index.
 torch = [
-    { index = "pytorch-cpu", extra = "verl-experimental-ci" },
+    { index = "pytorch-cpu", group = "verl-ci" },
 ]
 torchvision = [
-    { index = "pytorch-cpu", extra = "verl-experimental-ci" },
+    { index = "pytorch-cpu", group = "verl-ci" },
 ]
 # Prebuilt GPU wheels avoid local source builds from PyPI.
 flash-attn = { index = "astral-cu130" }

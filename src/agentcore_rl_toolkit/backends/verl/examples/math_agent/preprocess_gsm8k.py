@@ -1,17 +1,20 @@
-"""Preprocess openai/gsm8k into the parquet format expected by run_agentcore_grpo.sh.
+"""Preprocess openai/gsm8k for the verl AgentCore GRPO example.
 
-Output schema (per row):
-    prompt: str - the question text (consumed by rl_app.py via payload["prompt"])
-    answer: str - the final numeric answer extracted from the "#### N" marker
-                  in the gold solution (consumed by rl_app.py via payload["answer"]
-                  and passed to GSM8KReward as ground_truth)
+Output schema (per row) — a single column:
+    payload: the exact ACR invoke payload, authored against the agent's own
+             contract (rl_app.py expects "prompt" as the question string and
+             "answer" as the ground truth). The agent loop forwards this dict
+             verbatim, keeping the agent free of any trainer/dataset knowledge.
+
+The chat-format ``prompt`` column verl's dataloader needs is synthesized at load
+time by ``PayloadDataset`` (see ../../dataset.py) from ``payload["prompt"]`` —
+dataset authors never write it.
 """
 
 import argparse
 import os
 import re
 
-import numpy as np
 import pandas as pd
 from datasets import load_dataset
 
@@ -26,7 +29,15 @@ def extract_final_answer(answer_field: str) -> str:
 
 
 def build_split(split):
-    return [{"prompt": ex["question"], "answer": extract_final_answer(ex["answer"])} for ex in split]
+    return [
+        {
+            "payload": {
+                "prompt": ex["question"],
+                "answer": extract_final_answer(ex["answer"]),
+            },
+        }
+        for ex in split
+    ]
 
 
 def main():
@@ -42,13 +53,8 @@ def main():
 
     ds = load_dataset("openai/gsm8k", "main")
 
-    str_dtype = pd.StringDtype(storage="pyarrow", na_value=np.nan)
-    columns = ["prompt", "answer"]
-
     for split_name, out_name in [("train", "gsm8k_agent_train.parquet"), ("test", "gsm8k_agent_test.parquet")]:
-        rows = build_split(ds[split_name])
-        df = pd.DataFrame(rows, columns=columns)
-        df = df.astype({col: str_dtype for col in df.columns})
+        df = pd.DataFrame(build_split(ds[split_name]), columns=["payload"])
         out_path = os.path.join(args.output_dir, out_name)
         df.to_parquet(out_path, index=False)
         print(f"wrote {out_path}: {len(df)} rows")

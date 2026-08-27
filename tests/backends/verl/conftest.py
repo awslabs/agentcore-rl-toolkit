@@ -1,7 +1,7 @@
-"""Shared fixtures for the experimental verl backend tests.
+"""Shared fixtures for the verl backend tests.
 
 These tests run against the installed verl distribution (the pinned
-``verl-experimental`` extra): ``AgentLoopBase.__init__`` (system-prompt /
+``verl`` extra): ``AgentLoopBase.__init__`` (system-prompt /
 turn-separator probing), pydantic ``AgentLoopOutput``/``TokenOutput``
 validation, ``DictConfigWrap``/OmegaConf config plumbing, and hydra
 instantiation are all verl's own. The whole directory is skipped when verl is
@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 import pytest
 
-verl = pytest.importorskip("verl", reason="requires the verl-experimental extra")
+verl = pytest.importorskip("verl", reason="requires the verl extra")
 
 from omegaconf import OmegaConf  # noqa: E402
 from verl.experimental.agent_loop.agent_loop import DictConfigWrap  # noqa: E402
@@ -114,7 +114,7 @@ class FakeTokenizer:
 @pytest.fixture(autouse=True)
 def reset_singletons():
     yield
-    from agentcore_rl_toolkit.backends.experimental.verl import agent_loop, gateway_host
+    from agentcore_rl_toolkit.backends.verl import agent_loop, gateway_host
 
     agent_loop._reset_client_for_tests()
     gateway_host._reset_for_tests()

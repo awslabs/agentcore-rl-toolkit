@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from agentcore_rl_toolkit.backends.experimental.verl import agent_loop as al
-from agentcore_rl_toolkit.backends.experimental.verl.agent_loop import AgentCoreAgentLoop
+from agentcore_rl_toolkit.backends.verl import agent_loop as al
+from agentcore_rl_toolkit.backends.verl.agent_loop import AgentCoreAgentLoop
 from agentcore_rl_toolkit.rollout_gateway import TraceRecord
 
 from .conftest import FakeLLMServerClient, FakeTokenizer, make_data_config, make_trainer_config
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.asyncio
 
 def _make_loop(llm_client=None, *, use_v1=True, trainer_config=None, **loop_kwargs):
     loop_kwargs.setdefault("max_tokens_per_turn", 8)
-    with patch("agentcore_rl_toolkit.backends.experimental.verl.agent_loop.RolloutClient") as client_cls:
+    with patch("agentcore_rl_toolkit.backends.verl.agent_loop.RolloutClient") as client_cls:
         client_cls.return_value = MagicMock()
         loop = AgentCoreAgentLoop(
             trainer_config or make_trainer_config(use_v1=use_v1),
@@ -157,7 +157,7 @@ async def test_separate_reward_mode_rejected():
 
 async def test_invalid_reward_mode_rejected():
     with pytest.raises(ValueError, match="reward_mode"):
-        with patch("agentcore_rl_toolkit.backends.experimental.verl.agent_loop.RolloutClient"):
+        with patch("agentcore_rl_toolkit.backends.verl.agent_loop.RolloutClient"):
             AgentCoreAgentLoop(
                 make_trainer_config(),
                 FakeLLMServerClient(),

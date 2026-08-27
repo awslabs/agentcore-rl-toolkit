@@ -15,7 +15,7 @@
 #      (auto-assigned; open the trainer CPU nodes' ports to ACR egress).
 #   3. python preprocess_migrationbench.py --s3-bucket-name <data-bucket>   (once)
 #   4. Megatron deps:
-#        uv sync --extra verl-experimental --group verl-experimental-megatron
+#        uv sync --extra verl --group verl-megatron
 #      Use a Python 3.12 venv (`uv venv --python 3.12`).
 #
 # LoRA without NVIDIA Apex requires gradient_accumulation_fusion=False below.
@@ -61,7 +61,7 @@ MAX_TOKENS_PER_GPU=$((MAX_CONTEXT_LENGTH / CP))
 LORA_RANK=64
 LORA_ALPHA=128
 
-PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo_experimental}
+PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-migrationbench_qwen3_coder_30b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 
@@ -80,7 +80,7 @@ python3 -m verl.trainer.main_ppo \
     data.val_batch_size=128 \
     data.max_prompt_length=$MAX_PROMPT_LENGTH \
     data.max_response_length=$MAX_RESPONSE_LENGTH \
-    data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.experimental.verl.dataset \
+    data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.verl.dataset \
     data.custom_cls.name=PayloadDataset \
     actor_rollout_ref.model.path=$MODEL_PATH \
     actor_rollout_ref.model.use_remove_padding=True \

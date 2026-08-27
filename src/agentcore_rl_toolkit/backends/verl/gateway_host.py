@@ -1,4 +1,4 @@
-"""Process-level RolloutGateway host for verl AgentLoopWorker processes.
+"""Process-level rollout gateway host for verl AgentLoopWorker processes.
 
 verl instantiates agent loop classes per trajectory (``hydra.utils.instantiate``
 in ``AgentLoopWorker._run_agent_loop``), so the gateway — an aiohttp server plus

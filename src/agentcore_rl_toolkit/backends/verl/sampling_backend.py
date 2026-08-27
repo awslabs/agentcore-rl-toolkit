@@ -1,4 +1,4 @@
-"""``VerlSamplingBackend`` — token-in/token-out sampling backend over verl's
+"""``VerlSamplingBackend`` — token-in/token-out sampling over verl's
 ``LLMServerClient``.
 
 The gateway renders canonical messages to ``prompt_ids`` and calls

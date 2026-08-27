@@ -1,5 +1,5 @@
 - name: agentcore_agent
-  _target_: agentcore_rl_toolkit.backends.experimental.verl.agent_loop.AgentCoreAgentLoop
+  _target_: agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop
   agent_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
   s3_bucket: ${oc.env:ACR_S3_BUCKET}
   # Applied per AgentLoopWorker process; account for worker count when tuning.

@@ -1,14 +1,14 @@
-# Integration tests for the experimental verl backend
-# (tests/backends/experimental/verl), which run against the verl distribution
+# Integration tests for the verl backend
+# (tests/backends/verl), which run against the verl distribution
 # and are skipped by the plain unit-test job (they importorskip verl).
 #
-# The full [verl-experimental] extra is not installable on a GitHub runner
+# The full [verl] extra is not installable on a GitHub runner
 # (vllm pin, flash-attn source build, CUDA torch), and the tests don't need an
 # inference engine — the LLM server client is the faked seam. So this job syncs
-# the [verl-experimental-ci] extra: the same pinned verl and runtime deps, but
+# the verl-ci dependency group: the same pinned verl and runtime deps, but
 # CPU torch and no inference engines (see pyproject.toml).
 
-name: Experimental verl Integration Tests
+name: verl Integration Tests
 
 permissions:
   contents: read
@@ -17,23 +17,23 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/agentcore_rl_toolkit/backends/experimental/verl/**"
+      - "src/agentcore_rl_toolkit/backends/verl/**"
       - "src/agentcore_rl_toolkit/rollout_gateway/**"
       - "src/agentcore_rl_toolkit/client.py"
-      - "tests/backends/experimental/verl/**"
+      - "tests/backends/verl/**"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/experimental-verl-integration.yml"
+      - ".github/workflows/verl-integration.yml"
   pull_request:
     branches: [main]
     paths:
-      - "src/agentcore_rl_toolkit/backends/experimental/verl/**"
+      - "src/agentcore_rl_toolkit/backends/verl/**"
       - "src/agentcore_rl_toolkit/rollout_gateway/**"
       - "src/agentcore_rl_toolkit/client.py"
-      - "tests/backends/experimental/verl/**"
+      - "tests/backends/verl/**"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/experimental-verl-integration.yml"
+      - ".github/workflows/verl-integration.yml"
   workflow_dispatch:
 
 jobs:
@@ -50,15 +50,15 @@ jobs:
           cache-dependency-glob: |
             pyproject.toml
             uv.lock
-            .github/workflows/experimental-verl-integration.yml
+            .github/workflows/verl-integration.yml
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --extra verl-experimental-ci --extra dev
+        run: uv sync --locked --group verl-ci --extra dev
 
       - name: Run verl integration tests
-        run: uv run --no-sync pytest tests/backends/experimental/verl -v
+        run: uv run --no-sync pytest tests/backends/verl -v
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"

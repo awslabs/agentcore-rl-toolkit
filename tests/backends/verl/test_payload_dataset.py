@@ -9,7 +9,7 @@ import pytest
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
-from agentcore_rl_toolkit.backends.experimental.verl.dataset import PayloadDataset
+from agentcore_rl_toolkit.backends.verl.dataset import PayloadDataset
 
 
 @pytest.fixture(scope="module")
