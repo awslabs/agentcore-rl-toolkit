@@ -12,11 +12,37 @@ import pytest
 
 from agentcore_rl_toolkit.rollout_gateway import (
     BaseTrace,
+    MessageNode,
     Status,
     TraceRecord,
     TrajectoryManager,
     TurnRecord,
 )
+
+
+def test_leaves_handles_chain_deeper_than_recursion_limit():
+    """leaves() drains a near-linear tree (one node per message, as long rollouts
+    produce) that is far deeper than the interpreter's recursion limit, bounding
+    stack use by the tree's breadth rather than its depth."""
+    depth = sys.getrecursionlimit() * 3
+    root = MessageNode()
+    node = root
+    for _ in range(depth):
+        node = node.add_child(MessageNode(role="assistant"))
+    leaves = list(root.leaves())
+    assert len(leaves) == 1
+    assert leaves[0] is node
+
+
+def test_leaves_preserves_left_to_right_dfs_order():
+    """leaves() yields in left-to-right DFS order: two branches off the root, each
+    two nodes deep, yield the left leaf before the right."""
+    root = MessageNode()
+    left = root.add_child(MessageNode(role="user", message={"content": "L"}))
+    left_leaf = left.add_child(MessageNode(role="assistant", message={"content": "L2"}))
+    right = root.add_child(MessageNode(role="user", message={"content": "R"}))
+    right_leaf = right.add_child(MessageNode(role="assistant", message={"content": "R2"}))
+    assert list(root.leaves()) == [left_leaf, right_leaf]
 
 
 def test_trace_record_rejects_loss_mask_longer_than_tokens():

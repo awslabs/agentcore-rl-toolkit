@@ -104,11 +104,16 @@ class MessageNode:
         return chain
 
     def leaves(self) -> Iterator[MessageNode]:
-        if not self.children:
-            yield self
-            return
-        for c in self.children:
-            yield from c.leaves()
+        # Iterative left-to-right DFS with an explicit stack: children are pushed
+        # in reverse so they pop in order, and depth is bounded by the tree's
+        # breadth rather than the interpreter's C stack.
+        stack: list[MessageNode] = [self]
+        while stack:
+            node = stack.pop()
+            if not node.children:
+                yield node
+            else:
+                stack.extend(reversed(node.children))
 
 
 # ===========================================================================
