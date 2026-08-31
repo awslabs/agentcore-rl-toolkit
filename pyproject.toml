@@ -88,38 +88,29 @@ rllm = [
 ]
 verl = [
     # For backends/verl — see its README for design and install notes.
-    # verl is pinned via [tool.uv.sources] below.
-    "verl",
-    # verl declares runtime deps in requirements.txt (its Docker images pip-install
-    # it), not in setup.py install_requires — so a git install of verl misses them.
-    # Declared here as proven needed (import-time failures on our training path):
-    "transferqueue==0.1.8",  # v1 trainer data plane (main_ppo.py)
-    "orjson",  # verl.utils.tracking (undeclared even in verl's requirements.txt)
+    "verl==0.9.0",
+    # verl 0.9.0 declares its core dependencies, but still omits these dependencies
+    # required at import time on our training path:
+    "transferqueue==0.1.8",  # required by the v1 trainer
+    "orjson",  # required for tracking
     "aiohttp>=3.9",
-    # Pinned: newest release below verl main's later <5.12 cap (our pinned verl
-    # commit itself only requires !=5.6.0; vllm 0.23.0 allows >=4.56 outside 5.0-5.5.0).
     # The gateway's schema derender needs tokenizer.parse_response (transformers >=5.0).
     "transformers==5.12.1",
     "numpy",
     "ray",
     "torch>=2.10.0",
     "torchvision>=0.23.0",
-    # matches verl's reference stack at the pinned commit
-    # (docker/Dockerfile.stable.vllm: vllm 0.23.0 / torch 2.11.0 / cu130 / flash-attn 2.8.3)
-    "vllm==0.23.0",
+    # matches verl 0.9.0's reference stack
+    "vllm==0.24.0",
     "flash-linear-attention",
     "flash-attn==2.8.3",
     "qwen-vl-utils",
 ]
 [dependency-groups]
 verl-ci = [
-    # CI-only slice of the [verl] extra for the verl-integration workflow:
-    # same pinned verl (the [tool.uv.sources] entry applies) and declared
-    # runtime deps, but CPU torch (index steering below) and no inference
-    # engines (vllm / flash-attn / qwen-vl-utils). The backend's integration
-    # tests fake the LLM-server seam, and none of those install on a GitHub
-    # runner (CUDA wheels, source builds).
-    "verl",
+    # CI uses CPU torch and omits inference-only dependencies because the
+    # integration tests fake the LLM-server seam.
+    "verl==0.9.0",
     "transferqueue==0.1.8",
     "orjson",
     # verl deps the full extra gets transitively via vllm: fastapi/uvicorn are
@@ -136,8 +127,7 @@ verl-ci = [
     "torchvision>=0.23.0",
 ]
 verl-megatron = [
-    # Root-pin TE's transitive packages so uv applies the explicit Astral index to each;
-    # otherwise transformer-engine-torch and transformer-engine-cu13 resolve from PyPI.
+    # Root-pin TE's transitive packages so uv applies the explicit Astral index to each.
     "transformer-engine[pytorch]==2.16.0",
     "transformer-engine-torch==2.16.0",
     "transformer-engine-cu13==2.16.0",
@@ -167,7 +157,7 @@ conflicts = [
     ],
 ]
 override-dependencies = [
-    "numpy>=1.26.0",
+    { package = { name = "verl", version = "0.9.0" }, dependencies = ["transformers==5.12.1"] },
 ]
 
 [tool.uv.dependency-groups]
@@ -186,12 +176,6 @@ requires-dist = []
 # dependencies, which PyPI rejects. uv reads this source when installing the
 # [rllm] extra from a checkout of this repo.
 rllm = { git = "https://github.com/rllm-org/rllm.git" }
-# verl pinned to uni-agent's blessed submodule commit for the direct
-# backend (backends/verl).
-verl = [
-    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", extra = "verl" },
-    { git = "https://github.com/volcengine/verl.git", rev = "78bba31d1a6b95084d83f8bddd59c190ca704144", group = "verl-ci" },
-]
 # CI group only: CPU torch wheels so the CUDA distribution (plus nvidia-* wheels)
 # never resolves on GitHub runners. The other extras keep the default index.
 torch = [

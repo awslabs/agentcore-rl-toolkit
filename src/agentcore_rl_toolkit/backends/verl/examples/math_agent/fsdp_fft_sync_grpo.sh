@@ -50,7 +50,6 @@ CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
 
 python3 -m verl.trainer.main_ppo \
-    trainer.use_v1=true \
     trainer.v1.trainer_mode=sync \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=true \

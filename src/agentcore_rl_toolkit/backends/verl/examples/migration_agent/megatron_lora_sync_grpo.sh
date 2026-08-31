@@ -29,12 +29,6 @@ set -x
 
 export HYDRA_FULL_ERROR=1
 
-# vLLM 0.23 kernel selection for weight sync on this stack: the symmetric-memory
-# allreduce and the FlashInfer TRT-LLM FP16 MoE kernel are both incompatible with
-# verl's in-place weight refit.
-export VLLM_ALLREDUCE_USE_SYMM_MEM=0
-export VLLM_USE_FLASHINFER_MOE_FP16=0
-
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AGENT_LOOP_CONFIG=$SCRIPT_DIR/agentcore_agent.yaml
 
@@ -65,9 +59,9 @@ PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-migrationbench_qwen3_coder_30b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 
+# moe_backend=triton is required on AWS P6-B200 (NVIDIA Blackwell) to avoid the default FlashInfer MoE kernel failure.
 python3 -m verl.trainer.main_ppo \
     --config-name ppo_megatron_trainer \
-    trainer.use_v1=true \
     trainer.v1.trainer_mode=sync \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=true \
@@ -104,7 +98,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.megatron.sequence_parallel=true \
     actor_rollout_ref.actor.megatron.use_dist_checkpointing=False \
     actor_rollout_ref.actor.megatron.use_mbridge=True \
-    actor_rollout_ref.actor.megatron.vanilla_mbridge=False \
     ++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
@@ -127,6 +120,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
     actor_rollout_ref.rollout.data_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.70 \
+    +actor_rollout_ref.rollout.engine_kwargs.vllm.moe_backend=triton \
     actor_rollout_ref.rollout.n=16 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=true \
