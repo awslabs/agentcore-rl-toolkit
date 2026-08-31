@@ -59,7 +59,7 @@ PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-migrationbench_qwen3_coder_30b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 
-# On AWS P6-B200 (NVIDIA Blackwell), use Triton to avoid the observed FlashInfer MoE kernel failure.
+# moe_backend=triton is required on AWS P6-B200 (NVIDIA Blackwell) to avoid the default FlashInfer MoE kernel failure.
 python3 -m verl.trainer.main_ppo \
     --config-name ppo_megatron_trainer \
     trainer.v1.trainer_mode=sync \
