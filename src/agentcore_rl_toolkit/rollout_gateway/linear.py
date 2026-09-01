@@ -8,9 +8,7 @@ The problem it removes: each turn the client replays the whole conversation as m
 re-rendering a prior assistant message from its parsed dict rarely reproduces the exact
 token ids the model actually generated (whitespace, tool-call JSON spacing, reasoning
 re-keying). The :class:`~.trajectory.TrajectoryManager` then sees that drift and FORKs the
-single rollout into multiple training samples (or REALIGNs and drops a turn's signal). On
-one real run (``fork_threshold_tokens=0``) 96.6% of linear sessions forked, ~6 samples
-each — pure training-efficiency loss.
+single rollout into multiple training samples (or REALIGNs and drops a turn's signal).
 
 The fix: because the gateway owns the tokens handed to the backend, it substitutes the
 exact ids it already served for the earlier turns **before** generation, so the model
@@ -28,14 +26,24 @@ Per turn the healer holds, per sid:
 
 Healing ``messages`` for the next turn (:meth:`heal`):
 
-1. ``r_prev = render(prev_messages, add_generation_prompt=False)`` — the drifted re-render
-   of the prior conversation (``= served_prompt' + O_n' + close_n``).
-2. ``r_full = render(messages, add_generation_prompt=True)`` — the full incoming render.
-3. Linearity check: ``r_full`` must start with ``r_prev`` (append-only). If not, the
-   history was edited/branched/compacted — handled per ``on_nonlinear``.
+1. Linearity check at the **message level**: ``prev_messages`` must be a prefix of the
+   incoming ``messages`` under dict equality (``==``, which is order-independent), and the
+   tools schema must be unchanged. This is the SAME notion the :class:`TrajectoryManager`
+   uses to match replayed history, so a prior turn the client re-serialized cosmetically
+   (e.g. tool-call ``arguments`` re-keyed, or JSON re-spaced — the wire form is emitted
+   ``sort_keys=True`` while the manager kept the model's emission order) still compares
+   equal and stays linear. Only a genuine edit/drop/branch/compaction (or a tools change)
+   is non-linear — handled per ``on_nonlinear``. ``new = messages[len(prev_messages):]``
+   is the genuinely-new observation(s).
+2. ``r_prev = render(prev_messages, add_generation_prompt=False)`` — the prior conversation
+   rendered from the gateway's OWN stored messages (``= served_prompt' + O_n' + close_n``).
+3. ``r_ext = render(prev_messages + new, add_generation_prompt=True)`` — the same stored
+   prefix extended by the new observation(s). ``r_ext`` starts with ``r_prev`` **by
+   construction** (same prefix list, same tools), so the client's re-serialization of prior
+   turns never enters the fed tokens.
 4. ``close_n`` — the template's assistant-closer after the last turn, extracted exactly by
    a common-suffix probe (:func:`_assistant_close`), independent of template internals.
-5. ``healed = served_prefix + close_n + r_full[len(r_prev):]`` — canonical prefix, the
+5. ``healed = served_prefix + close_n + r_ext[len(r_prev):]`` — canonical prefix, the
    template close, then the genuinely-new observation + generation-prompt tail.
 
 :meth:`commit` (after a successful turn) advances ``served_prefix`` to
@@ -90,7 +98,9 @@ class _State:
 class LinearHealer:
     """Per-sid generate-time prefix healing for linear histories.
 
-    ``on_nonlinear`` picks the behaviour when the append-only assumption breaks:
+    ``on_nonlinear`` picks the behaviour when the message-level linearity assumption breaks
+    (the stored history is not a dict-equality prefix of the incoming history, or the tools
+    schema changed):
 
     * ``"reset"`` (default) — re-anchor to the incoming render and keep healing forward,
       treating the jump as the start of a fresh linear segment. Cheapest; correct when the
@@ -128,34 +138,84 @@ class LinearHealer:
         otherwise the drift-healed canonical prompt described in the module docstring.
         ``commit`` must be called afterwards on the turns that are actually recorded.
         """
-        r_full = self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+        # canonical tokens = assistant message in token space as sampled from the llm
+        # drifted tokens = same message but with a different token-space representation
+        # some messages render into canonical tokens, some into drifted
+        # given canonical tokens, we can't compute a message that will render into canonical tokens
+        # but if two messages are equal, then we can use canonical tokens as context for the llm
 
         st = self._state.get(sid)
         if st is None or sid in self._disabled:
-            return r_full  # first turn, or healing disabled for this sid
+            # first turn, or healing disabled for this sid: feed the plain render
+            return self.renderer.render(messages, tools=tools, add_generation_prompt=True)
 
-        r_prev = self.renderer.render(st.prev_messages, tools=st.prev_tools, add_generation_prompt=False)
-
-        if r_full[: len(r_prev)] != r_prev:
+        # Linearity is decided in MESSAGE space, not token space. st.prev_messages is this
+        # session's history before this request (including the last assistant message). The
+        # history is linear iff those messages are a prefix of the incoming messages under
+        # dict equality -- the same order-independent match the TrajectoryManager uses -- and
+        # the tools schema is unchanged. A prior assistant turn the client re-serialized
+        # cosmetically (tool-call arguments re-keyed, or JSON re-spaced: the wire form is
+        # emitted sort_keys=True while the manager keeps the model's emission order) still
+        # compares equal, so it stays linear instead of tripping a token-level prefix check.
+        new = self._linear_delta(st, messages, tools)
+        if new is None:
+            # genuine edit/drop/branch/compaction (or a tools change): re-anchor
+            r_full = self.renderer.render(messages, tools=tools, add_generation_prompt=True)
             return self._handle_nonlinear(sid, r_full)
 
+        # r_prev is the token-space render of the gateway's OWN stored history. r_ext extends
+        # that same stored prefix by only the genuinely-new (non-assistant, drift-free)
+        # messages, so r_ext starts with r_prev by construction (identical prefix list and
+        # tools) -- the client's re-serialized prior turns never enter the fed tokens.
+        r_prev = self.renderer.render(st.prev_messages, tools=st.prev_tools, add_generation_prompt=False)
+        r_ext = self.renderer.render(st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True)
+        if r_ext[: len(r_prev)] != r_prev:
+            # template glue for the prior turns depends on the appended messages, so we
+            # cannot splice the canonical prefix safely; re-anchor rather than emit garbage.
+            return self._handle_nonlinear(sid, r_ext)
+
+        # close is the token-space marker of the end of the assistant turn
         close = self._assistant_close(st.prev_messages, st.prev_tools, r_prev)
         if close is None:
             # couldn't isolate the assistant-closer (e.g. a template whose glue depends on
             # message type); don't emit a subtly-wrong sequence — fall back.
             self._bump(sid, "close_unresolved")
-            return self._handle_nonlinear(sid, r_full)
+            return self._handle_nonlinear(sid, r_ext)
 
-        # don't duplicate closer tokens the model already emitted at the end of its served
+        # don't duplicate close tokens the model already emitted at the end of its served
         # output (e.g. a trailing stop token kept by no_stop_trim): drop the prefix of
         # `close` that the served prefix already ends with.
         close = self._trim_overlap(st.served_prefix, close)
 
-        tail = r_full[len(r_prev) :]  # new observation messages + generation prompt
+        # tail is the token representation of the new messages in the incoming request
+        # these are not assistant messages, so they are masked and drift-free
+        tail = r_ext[len(r_prev) :]  # new observation messages + generation prompt
+
         self._bump(sid, "healed_turns")
-        # canonical (drift-free) prefix tokens spliced over the client's drifted render
         self._bump(sid, "healed_prefix_tokens", len(st.served_prefix) + len(close))
+
+        # st.served_prefix is the accumulation of rendered non-assistant messages
+        # and canonical tokens of assistant messsages, therefore the concatenated
+        # sequence contains zero drifted tokens
         return list(st.served_prefix) + close + tail
+
+    @staticmethod
+    def _linear_delta(st: _State, messages: list[dict], tools: list[dict] | None) -> list[dict] | None:
+        """The genuinely-new messages appended since the last turn, or ``None`` if the
+        incoming history is not a linear extension of the stored history.
+
+        Linear iff ``st.prev_messages`` is a prefix of ``messages`` under dict equality
+        (order-independent, matching :class:`TrajectoryManager`) AND the tools schema is
+        unchanged. Returns ``messages[len(prev_messages):]`` when linear (possibly empty:
+        a bare re-generation of the same turn).
+        """
+        prev = st.prev_messages
+        k = len(prev)
+        if len(messages) < k or messages[:k] != prev:
+            return None
+        if (list(tools) if tools else None) != st.prev_tools:
+            return None
+        return messages[k:]
 
     def commit(
         self,
@@ -208,7 +268,7 @@ class LinearHealer:
         if self.on_nonlinear == "error":
             raise RuntimeError(
                 f"linear history mode: sid {sid!r} broke the append-only assumption "
-                "(prior render is not a prefix of the incoming render)"
+                "(stored history is not a message-level prefix of the incoming history)"
             )
         if self.on_nonlinear == "passthrough":
             self._disabled.add(sid)

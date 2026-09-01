@@ -33,9 +33,9 @@ REALIGN (drop a turn's signal).
 
 For a strictly linear, multi-turn tool-calling agent that safety is pure overhead. On a
 real multi-turn SWE-agent run (OpenHands driving Qwen3-Coder-30B, `fork_threshold_tokens=0`)
-**96.6% of sessions forked**, mean **6.3** records/session (max 16), even though every
-rollout was linear. Each fork re-emits the shared prefix as `loss_mask=0` context and splits
-the trajectory, so it is a large, avoidable training-efficiency loss.
+the large majority of sessions forked into several records each, even though every rollout
+was linear. Each fork re-emits the shared prefix as `loss_mask=0` context and splits the
+trajectory, so it is a large, avoidable training-efficiency loss.
 
 ## Design
 
@@ -58,21 +58,39 @@ context.
 
 ### Computing `delta_tail`
 
-`delta_tail` is computed with a two-render suffix diff, so no hand-rolled delimiter logic is
-needed:
+Linearity is decided in **message space**, at the same altitude `TrajectoryManager` matches
+replayed history: dict equality (which is order-independent), not raw token identity. The
+stored `prev_messages` (whose last element is the gateway's own parsed assistant message)
+must be a prefix of the incoming `messages` under `==`, and the tools schema must be
+unchanged. The genuinely-new messages are then `new = messages[len(prev_messages):]`, and
+`delta_tail` is rendered from the gateway's **own** stored messages, so no hand-rolled
+delimiter logic is needed and the client's re-serialization of prior turns never enters the
+fed tokens:
 
 ```
-r_prev = render(prev_messages, add_generation_prompt=False)   # drifted re-render of prior convo
-r_full = render(messages,      add_generation_prompt=True)    # full incoming render
-assert r_full[:len(r_prev)] == r_prev                          # append-only / linearity check
-delta_tail = r_full[len(r_prev):]                              # new messages + generation prompt
+assert messages[:len(prev_messages)] == prev_messages and tools == prev_tools  # linearity check
+new        = messages[len(prev_messages):]
+r_prev     = render(prev_messages,       tools=prev_tools, add_generation_prompt=False)
+r_ext      = render(prev_messages + new, tools=prev_tools, add_generation_prompt=True)
+delta_tail = r_ext[len(r_prev):]                                               # new messages + generation prompt
 ```
+
+Both renders share the literal `prev_messages` prefix and the same tools, so `r_ext` starts
+with `r_prev` **by construction** — the prior turns are re-rendered from the gateway's
+canonical dicts, not the client's replay.
+
+Deciding linearity at the message level (rather than by a raw token-prefix check on the
+client's render) is what keeps the healer in agreement with `TrajectoryManager`. A harness
+may replay a prior tool call with its arguments re-keyed or its JSON re-spaced: the resulting
+message is still `==` to what the gateway stored — so the manager, matching by dict equality,
+keeps it linear — but it renders to different tokens under an order-sensitive chat template.
+A token-prefix check would wrongly flag that cosmetic re-serialization as non-linear and
+reset, needlessly. Matching at dict equality keeps cosmetic drift healed and reserves the
+non-linear path for a genuine edit/branch (see *When the assumption breaks*).
 
 This relies only on chat templates being prefix-consistent with
 `add_generation_prompt=False` (rendering `[m0..mk]` is a prefix of `[m0..mk, mk+1]`), which
-holds for turn-delimited templates such as Qwen and Llama-3. The assertion is itself the
-linearity check: if it fails, the history was edited or branched (see *When the assumption
-breaks*).
+holds for turn-delimited templates such as Qwen and Llama-3.
 
 ### Isolating the assistant closer
 
@@ -124,11 +142,12 @@ correctly not treated as closer.
 
 ## When the assumption breaks
 
-The append-only check fails when the history is not linear from the healer's view: a
-dropped/edited/branched prior message, context compaction, or an LLM-client retry that
-re-issues the same prompt and produces a second generation from the same prefix. The same
-fallback path also fires when the closer probe cannot isolate the glue (a message-type-
-dependent template — `close_unresolved` counter). Behavior is controlled by
+The message-level linearity check fails when the incoming history is not an append-only
+extension of what the gateway stored: a dropped/edited/branched prior message (a genuine
+dict change, not merely a re-serialization), context compaction, a changed tools schema, or
+an LLM-client retry that re-issues the same prompt and produces a second generation from the
+same prefix. The same fallback path also fires when the closer probe cannot isolate the glue
+(a message-type-dependent template — `close_unresolved` counter). Behavior is controlled by
 `linear_on_nonlinear`:
 
 - `"reset"` (default) — drop per-sid state and re-anchor to the current render, treating the
@@ -147,7 +166,8 @@ mode is.
 ## Observability
 
 `LinearHealer` tracks, per turn: `healed_turns` and `healed_prefix_tokens` (turns healed and
-canonical prefix tokens spliced); `nonlinear` (append-only-check failures); `close_unresolved`
+canonical prefix tokens spliced); `nonlinear` (message-level linearity failures — a genuine
+history edit/branch or tools change, not cosmetic re-serialization); `close_unresolved`
 (turns where the closer probe couldn't isolate the glue and fell back). A high `nonlinear`
 rate means the "linear" assumption is wrong for that harness and tree mode is the better fit
 — what happened to those jumps is the (known) `linear_on_nonlinear` mode, so there is no
@@ -178,38 +198,17 @@ turn; the closer probe returns `<|im_end|>\n` for both text and tool-call turns 
 genuine suffix of a tool-call `r_prev`; served ids end with the stop token) were confirmed
 against the live Qwen3-Coder-30B tokenizer/template.
 
-**Real-trace reconstruction.** We reconstructed, at the token level, the per-turn prompt
-streams from real recorded multi-turn SWE-agent sessions (Qwen3-Coder-30B) and replayed them
-through the real `TrajectoryManager` two ways: the drifted prompts as they actually happened,
-and the canonical served prefix + drift-free new-observation tail that healing feeds. The raw
-replay reproduced the recorded fork counts exactly (a fidelity check). Over 200 sessions:
-
-| Metric | Baseline (tree/fork) | Linear (healed) | Delta |
-|---|---|---|---|
-| Records/session (mean) | 6.42 | 1.00 | −84.3% |
-| Total tokens (context + response) | 28.72M | 9.06M | −68.5% (3.17× fewer) |
-| Trained (`loss_mask=1`) tokens | 2.32M | 2.32M | unchanged |
-| Useful-token fraction | 8.1% | 25.7% | — |
-
-Training latency scales ~linearly with the sequence length forwarded, not the record count,
-so the **68.5% token reduction (3.17×)** is the latency-relevant figure — and it is smaller
-than the 84.3% record reduction because early forks carry short prefixes while the redundancy
-is dominated by late, large-context forks. The trained-token count is identical, so the entire
-delta is redundant re-emitted context.
-
-Exactly one of the 200 sessions did not collapse to a single record: it was an LLM-client
-retry artifact (two records sharing an identical prompt, responses agreeing for thousands of
-tokens before diverging one token; only one attempt was seen by the harness), which
-`on_nonlinear="reset"` re-anchored into two linear segments — the safe outcome, and one a
-capture-time retry dedup could also collapse.
 
 ## Assumptions and target use case
 
 - The agent harness intends a strictly **linear, append-only** history: it replays prior
-  assistant **message dicts** verbatim, so the only turn-to-turn divergence is token-level
-  drift (not a message-level rewrite). The target is a multi-turn, tool-calling SWE agent
-  (validated with OpenHands driving Qwen3-Coder-30B); the harness never branches or edits
-  prior turns.
+  turns without semantically editing them. It may re-serialize a prior assistant turn
+  cosmetically — tool-call `arguments` re-keyed, JSON re-spaced — because such a replay is
+  still `==` (dict equality) to what the gateway stored, so the message-level linearity check
+  keeps it linear; the only turn-to-turn divergence it need not tolerate is a message-level
+  rewrite that actually changes a prior dict. The target is a multi-turn, tool-calling SWE
+  agent (validated with OpenHands driving Qwen3-Coder-30B); the harness never branches or
+  edits prior turns.
 - Cosmetic re-tokenization drift is treated as OOD-insignificant, so training on the
   canonical/healed context is acceptable.
 - Chat templates are turn-delimited and prefix-consistent (Qwen, Llama-3). The
@@ -219,19 +218,10 @@ capture-time retry dedup could also collapse.
 
 ## Non-goals
 
-- Message-level rewrites where the assistant **dict** itself changes (not just its
-  tokenization): linear mode assumes the client replays prior messages verbatim, so only
-  token-level drift occurs.
+- Message-level rewrites where a prior message's **dict** changes *semantically* (not just
+  its key order or JSON spacing): treated as non-linear and re-anchored/failed per
+  `linear_on_nonlinear`. Cosmetic re-serialization that keeps the dict `==` is handled — the
+  linearity check matches at dict equality — but an actual content change is out of scope for
+  healing.
 - Sub-agent / parallel-branch capture: that is what tree mode is for; linear mode re-anchors
   or falls back rather than trying to represent it.
-
-## Follow-ups
-
-- Wire `history_mode` / `linear_on_nonlinear` through the verl backend
-  (`backends/verl/gateway_host.py`, `backends/verl/agent_loop.py`) alongside
-  `fork_threshold_tokens`, and expose them in the configs that build the gateway.
-- A sanity assertion that a healed session finishes as exactly one record with no resets
-  (the per-session counters are now on record metadata; this would flag a session that
-  silently degraded to forking).
-- A parity harness over recorded sessions (linear-mode records are a superset-signal of
-  tree-mode records — never fewer trained tokens, same or fewer samples).

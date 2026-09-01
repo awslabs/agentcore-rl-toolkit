@@ -219,6 +219,104 @@ def test_healed_three_turns_one_sample():
 
 
 # ---------------------------------------------------------------------------
+# Message-level linearity: a re-keyed tool-call replay is dict-equal but renders
+# to different tokens under an order-sensitive template. It must stay healed.
+# ---------------------------------------------------------------------------
+
+
+class OrderSensitiveRenderer(FakeRenderer):
+    """Renders tool-call arguments in INSERTION order (like a real chat template), so a
+    replayed assistant tool-call with re-keyed arguments produces different tokens even
+    though the message dict is ``==``. This reproduces the token-level drift the
+    message-level linearity check must tolerate (the wire form is sorted, the model's
+    emission order is not)."""
+
+    def _block(self, m: dict) -> list[int]:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            ids = [A_OPEN]
+            content = m.get("content")
+            if content:
+                ids += _enc(content)
+            for tc in m["tool_calls"]:
+                fn = tc.get("function") or {}
+                ids += _enc(fn.get("name") or "")
+                # sort_keys=False -> argument key order changes the token render
+                ids += _enc(json.dumps(fn.get("arguments") or {}, sort_keys=False))
+            ids.append(A_CLOSE)
+            return ids
+        return super()._block(m)
+
+
+def _a_tool(name, arguments, content=""):
+    return {
+        "role": "assistant",
+        "content": content,
+        "tool_calls": [{"type": "function", "function": {"name": name, "arguments": arguments}}],
+    }
+
+
+def test_reordered_tool_call_args_stay_healed():
+    """A replayed tool-call assistant whose arguments are re-keyed (dict-equal, but a
+    different token render under an order-sensitive template) must stay linear/healed --
+    the drift a token-prefix linearity check would wrongly treat as non-linear."""
+    r = OrderSensitiveRenderer()
+    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    healer = LinearHealer(r)
+
+    emitted = {"path": "/f.py", "text": "x"}  # the model's emission order
+    reordered = {"text": "x", "path": "/f.py"}  # the client's sorted-wire round-trip
+    assert _a_tool("edit", emitted) == _a_tool("edit", reordered)  # manager sees them equal
+    # ... but the order-sensitive renderer does not:
+    assert r.render([_a_tool("edit", emitted)]) != r.render([_a_tool("edit", reordered)])
+
+    _drive_turn(
+        mgr,
+        healer,
+        "s",
+        messages=[_u("q1")],
+        served_ids=[2001, 2002],
+        response_message=_a_tool("edit", emitted),
+    )
+    healed = _drive_turn(
+        mgr,
+        healer,
+        "s",
+        messages=[_u("q1"), _a_tool("edit", reordered), _u("obs")],
+        served_ids=[2003],
+        response_message=_a("done"),
+    )
+
+    # healed, not reset: the fed prompt reuses the canonical served prefix (the drifted
+    # replay order never appears), and the whole session stays one training sample.
+    assert healer.counters["nonlinear"] == 0
+    assert healer.counters["healed_turns"] == 1
+    served_prefix = [U_OPEN, *_enc("q1"), U_CLOSE, A_OPEN, 2001, 2002]
+    assert healed[: len(served_prefix)] == served_prefix
+    assert len(mgr.get_trajectory("s", base_sample=BaseTrace(index=0), reward=1.0)) == 1
+
+
+def test_tools_change_is_nonlinear():
+    """A changed tools schema is not a linear continuation even when the messages extend
+    cleanly (the token-prefix check missed this when the renderer folds tools into a
+    region the drift check doesn't reach; the message-level check compares tools directly)."""
+    r = FakeRenderer()
+    healer = LinearHealer(r, on_nonlinear="reset")
+    tools_a = [{"type": "function", "function": {"name": "a"}}]
+    tools_b = [{"type": "function", "function": {"name": "b"}}]
+    healer.commit(
+        "s",
+        fed_prompt_ids=r.render([_u("q1")], add_generation_prompt=True),
+        output_ids=[2001],
+        messages=[_u("q1")],
+        response_message=_a("r1"),
+        tools=tools_a,
+    )
+    healer.heal("s", [_u("q1"), _a("r1"), _u("q2")], tools_b)
+    assert healer.counters["nonlinear"] == 1
+    assert healer.counters["healed_turns"] == 0
+
+
+# ---------------------------------------------------------------------------
 # Assistant-closer probe, including the tool-call path (the doc's caveat).
 # ---------------------------------------------------------------------------
 
