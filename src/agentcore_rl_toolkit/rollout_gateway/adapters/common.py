@@ -27,6 +27,7 @@ from typing import Any
 
 from aiohttp import web
 
+from ..linear import LinearHealer
 from ..render import Renderer
 from ..sampling_backends.base import SamplingBackend
 from ..trace import BaseTrace, TraceRecord
@@ -133,6 +134,9 @@ class BaseAdapter:
         tokenizer=None,
         max_turns_per_sid: int | None = None,
         fork_threshold_tokens: int | None = None,
+        history_mode: str = "tree",
+        linear_on_nonlinear: str = "reset",
+        healer: LinearHealer | None = None,
         debug_callback: Callable[..., None] | None = None,
         manager: TrajectoryManager | None = None,
         app: web.Application | None = None,
@@ -156,6 +160,17 @@ class BaseAdapter:
             if fork_threshold_tokens is not None:
                 mgr_kwargs["fork_threshold_tokens"] = fork_threshold_tokens
             self.manager = TrajectoryManager(**mgr_kwargs)
+
+        # linear-history mode: heal re-tokenization drift at generation time so the
+        # manager stays permanently CLEAN (one sample per session). See linear.py.
+        # A shared healer may be injected (co-mounted adapters
+        # share canonical state, like the manager); else built here when requested.
+        if healer is not None:
+            self.healer: LinearHealer | None = healer
+        elif history_mode == "linear":
+            self.healer = LinearHealer(renderer, on_nonlinear=linear_on_nonlinear)
+        else:
+            self.healer = None
 
         self.debug_callback: Callable[..., None] | None = debug_callback
         # per-sid turn cap: return 429 to kill the run once exceeded
@@ -255,6 +270,14 @@ class BaseAdapter:
         """
         await self.shutdown_session(sid, wait_timeout=wait_timeout)
         session = self.store.pop(sid, None)
+        if self.healer is not None:
+            # attach this session's healing counters to every record's metadata (a
+            # session-level view; the healer's run-cumulative ``counters`` is separate),
+            # then drop per-sid state. pop_stats must precede drop, which clears it.
+            stats = self.healer.pop_stats(sid)
+            if stats:
+                extra_metadata = {**(extra_metadata or {}), "linear_healer": stats}
+            self.healer.drop(sid)
         base_sample = base_sample if base_sample is not None else BaseTrace()
         max_sample_tokens = int(getattr(session, "max_context_tokens", 0) or 0) if session is not None else 0
         samples = self.manager.get_trajectory(
@@ -278,6 +301,8 @@ class BaseAdapter:
         await self.shutdown_session(sid, wait_timeout=wait_timeout)
         self.store.pop(sid, None)
         self.manager.drop_session(sid)
+        if self.healer is not None:
+            self.healer.drop(sid)
 
     # -- shared request pipeline ---------------------------------------------
 
@@ -337,7 +362,12 @@ class BaseAdapter:
         t0 = time.monotonic()
         try:
             translated, tools_schema = self._translate(body)
-            prompt_ids = self.renderer.render(translated, tools=tools_schema, add_generation_prompt=True)
+            if self.healer is not None:
+                # linear mode: splice canonical served ids over the drifted re-render
+                # before generation (the healer does the render internally).
+                prompt_ids = self.healer.heal(sid, translated, tools_schema)
+            else:
+                prompt_ids = self.renderer.render(translated, tools=tools_schema, add_generation_prompt=True)
 
             sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
             # context-budget clamp (backend-neutral): if the prompt already exceeds the
@@ -396,6 +426,19 @@ class BaseAdapter:
                 reply.manager_message,
                 turn,
             )
+
+            # advance linear-mode canonical state in lockstep with record_turn (only on
+            # turns we actually record — the disconnect path above returned early). Uses
+            # turn.prompt_ids so the healer's state matches exactly what the manager saw.
+            if self.healer is not None:
+                self.healer.commit(
+                    sid,
+                    fed_prompt_ids=turn.prompt_ids,
+                    output_ids=turn.output_ids,
+                    messages=translated,
+                    response_message=reply.manager_message,
+                    tools=tools_schema,
+                )
 
             self.manager.record_turn(
                 sid,

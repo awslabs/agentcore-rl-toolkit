@@ -18,6 +18,7 @@ from aiohttp import web
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.common import BaseAdapter, _health
 from .adapters.openai import OpenAIAdapter
+from .linear import LinearHealer
 from .render import Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, TraceRecord
@@ -44,6 +45,12 @@ class RolloutGateway:
             ``BaseAdapter`` subclasses. Defaults to both.
         fork_threshold_tokens / max_turns_per_sid / debug_callback: forwarded to the
             shared ``TrajectoryManager`` / adapters.
+        history_mode: ``"tree"`` (default) or ``"linear"``. In linear mode the gateway
+            heals re-tokenization drift at generation time via one shared ``LinearHealer``
+            so the manager stays CLEAN (one sample per session); ``fork_threshold_tokens``
+            is then ignored. See ``linear.py``.
+        linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
+            behaviour when a turn breaks the append-only assumption (linear mode only).
     """
 
     def __init__(
@@ -54,6 +61,8 @@ class RolloutGateway:
         tokenizer=None,
         adapters: list[str | type[BaseAdapter]] | None = None,
         fork_threshold_tokens: int | None = None,
+        history_mode: str = "tree",
+        linear_on_nonlinear: str = "reset",
         max_turns_per_sid: int | None = None,
         debug_callback: Any = None,
     ) -> None:
@@ -63,8 +72,20 @@ class RolloutGateway:
 
         mgr_kwargs: dict[str, int] = {}
         if fork_threshold_tokens is not None:
+            if history_mode == "linear":
+                logger.warning(
+                    "history_mode='linear' ignores fork_threshold_tokens=%s (forking is " "disabled by construction)",
+                    fork_threshold_tokens,
+                )
             mgr_kwargs["fork_threshold_tokens"] = fork_threshold_tokens
         self.manager = TrajectoryManager(**mgr_kwargs)
+
+        # In linear mode, one healer is shared across all co-mounted adapters (like the
+        # manager) so a session's canonical served-id state is coherent regardless of
+        # which wire protocol its turns arrive on. See linear.py.
+        self.healer: LinearHealer | None = (
+            LinearHealer(renderer, on_nonlinear=linear_on_nonlinear) if history_mode == "linear" else None
+        )
 
         # one aiohttp app shared by all adapters; register health once here.
         self.app = web.Application(client_max_size=64 * 1024 * 1024)
@@ -82,6 +103,7 @@ class RolloutGateway:
                 max_turns_per_sid=max_turns_per_sid,
                 debug_callback=debug_callback,
                 manager=self.manager,  # SHARED across adapters -> one tree per sid
+                healer=self.healer,  # SHARED across adapters -> coherent canonical state
                 app=self.app,  # SHARED app -> all routes on one server
             )
             self.adapters.append(adapter)
@@ -130,6 +152,8 @@ class RolloutGateway:
             await adapter.shutdown_session(sid, wait_timeout=wait_timeout)
             adapter.store.pop(sid, None)
         self.manager.drop_session(sid)
+        if self.healer is not None:
+            self.healer.drop(sid)
 
     # -- serving --------------------------------------------------------------
 

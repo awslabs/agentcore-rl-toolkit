@@ -152,6 +152,7 @@ def get_or_start_gateway(
     adapters: list[str] | None = None,
     max_turns_per_sid: int | None = None,
     fork_threshold_tokens: int | None = None,
+    history_mode: str = "tree",
 ) -> GatewayHandle:
     """Lazily create (or return) this process's RolloutGateway singleton.
 
@@ -173,6 +174,7 @@ def get_or_start_gateway(
             adapters=adapter_names,
             max_turns_per_sid=max_turns_per_sid,
             fork_threshold_tokens=fork_threshold_tokens,
+            history_mode=history_mode,
         )
         loop, runner, bound_port, thread = _serve_in_thread(gateway.app, host, port)
         base_url = f"http://{_url_host(public_host or _node_ip())}:{bound_port}"

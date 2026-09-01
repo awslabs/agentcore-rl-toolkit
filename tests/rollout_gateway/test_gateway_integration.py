@@ -180,6 +180,40 @@ async def test_openai_tool_loop_end_to_end():
     assert rec.response == "CALL calculator expr=2+2 tool: 4 assistant: the answer is 4"
 
 
+@pytest.mark.asyncio
+async def test_linear_mode_attaches_healer_stats_to_metadata():
+    """In linear mode, the session's LinearHealer counters ride out on every record's
+    metadata under ``linear_healer`` (the metrics seam), alongside caller extra_metadata."""
+    gateway, backend = make_gateway(replies=["CALL calculator expr=2+2", "the answer is 4"], history_mode="linear")
+    tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
+    sid = "ep-lin:solver"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid)
+        body1 = {"model": "m", "messages": [{"role": "user", "content": "two plus two"}], "tools": tools}
+        resp1 = await client.post("/v1/chat/completions", json=body1, headers=bearer(sid))
+        choice1 = (await resp1.json())["choices"][0]
+        call = choice1["message"]["tool_calls"][0]
+        body2 = {
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "two plus two"},
+                {"role": "assistant", "content": None, "tool_calls": choice1["message"]["tool_calls"]},
+                {"role": "tool", "tool_call_id": call["id"], "content": "4"},
+            ],
+            "tools": tools,
+        }
+        await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))
+        records = await gateway.finish_session(sid, reward=1.0, extra_metadata={"task": "math"})
+
+    assert len(records) == 1  # linear mode stays CLEAN -> one row
+    md = records[0].metadata
+    assert md["task"] == "math"  # caller metadata preserved
+    # turn 2 was healed (prior state exists); the per-session counter is surfaced.
+    assert md["linear_healer"]["healed_turns"] == 1
+    assert md["linear_healer"].get("nonlinear", 0) == 0
+
+
 # ---------------------------------------------------------------------------
 # a mixed text + parallel tool-call turn reaches the client intact
 # ---------------------------------------------------------------------------
