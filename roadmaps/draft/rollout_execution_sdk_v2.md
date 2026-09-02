@@ -19,8 +19,9 @@ Every logical call has an invocation ID that is distinct from the AgentCore
 Runtime session ID. The Runtime session identifies the execution environment
 and isolation boundary; the invocation ID identifies one addressable execution
 within that environment. A caller may also attach an opaque conversation ID,
-but conversation history and follow-up semantics remain the application's
-responsibility.
+but does not need to manage one explicitly: when omitted, the effective
+conversation ID defaults to the Runtime session ID. Conversation history and
+follow-up semantics remain the application's responsibility.
 
 For background delivery, AgentCore managed session storage is the initial
 default for execution markers and terminal results. S3 remains a valid
@@ -121,17 +122,31 @@ Responses also provides a useful identity separation:
 AgentCore requires one additional infrastructure-level identity:
 
 ```text
-Runtime session
-  ├── conversation A (optional, application-managed)
+Runtime session S
+  ├── default conversation namespace
+  │     effective conversation ID = S
   │     ├── invocation 1
   │     └── invocation 2
-  └── conversation B (optional, application-managed)
-        └── invocation 3
+  └── explicit conversation namespaces (optional)
+        ├── conversation A
+        │     └── invocation 3
+        └── conversation B
+              └── invocation 4
 ```
 
-One Runtime session may host multiple application-managed conversations. The
-SDK treats the conversation ID as opaque metadata and does not manage
-conversation state.
+By default, the Runtime session ID is also the conversation identity. This
+matches the common AgentCore pattern in which one session carries one user's
+multi-turn interaction. Applications that need multiple logical conversations
+inside the same execution environment may provide explicit conversation IDs.
+The SDK treats those IDs as opaque metadata and does not create a Conversation
+resource or manage conversation state.
+
+This default follows the AgentCore guidance to generate a new Runtime session
+ID for a new conversation and reuse the same ID for related invocations in an
+existing conversation. See
+[Runtime sessions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-sessions.html)
+and
+[Invoke an agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-invoke-agent.html).
 
 The analogy is therefore `conversation_id` to Conversation and
 `invocation_id` to Response ID. `runtimeSessionId` has no direct public
@@ -141,8 +156,8 @@ storage scope, and lifecycle rather than logical conversation state.
 This proposal does not attempt to reproduce the complete Responses resource or
 Conversation model. The persisted invocation manifest is the closest
 equivalent to the Response resource, retrieval is initially mediated by
-session compute, and the SDK treats `conversation_id` only as optional opaque
-correlation metadata.
+session compute, and the SDK treats the effective `conversation_id` only as
+opaque correlation metadata.
 
 The design borrows the foreground/background connection pattern, not the
 Responses control plane.
@@ -179,7 +194,8 @@ The rest of this document specifies these changes in detail.
   model without encoding one invocation per session into the protocol.
 - Give each logical execution an invocation ID distinct from
   `runtimeSessionId`.
-- Allow an optional application-managed conversation ID without implementing
+- Default conversation identity to `runtimeSessionId` while allowing an
+  explicit application-managed conversation ID, without implementing
   conversation history or follow-up policy in the Runtime SDK.
 - Use managed session storage as the default background-state backend while
   allowing alternative durable backends such as S3.
@@ -226,9 +242,10 @@ This proposal distinguishes three identities:
 
 - **Runtime session ID**: the AgentCore routing, isolation, storage, resource,
   and lifecycle boundary.
-- **Conversation ID**: optional opaque application metadata identifying a
-  logical history or interaction thread. The SDK neither creates nor manages
-  that history.
+- **Conversation ID**: opaque application metadata identifying a logical
+  history or interaction thread. If the caller omits it, the effective
+  conversation ID is the Runtime session ID. The SDK neither creates nor
+  manages conversation history.
 - **Invocation ID**: one top-level execution of the registered handler. Every
   follow-up is a new invocation, even when it uses the same Runtime session and
   conversation.
@@ -242,22 +259,52 @@ execution and must not be classified as a duplicate.
 The illustrative client API is:
 
 ```python
-# The initial InvokeAgentRuntime connection waits for completion.
+# Default: session-123 is also the effective conversation ID.
 result = client.invoke(
     payload,
+    session_id="session-123",
     background=False,
-    conversation_id="conv-123",  # optional, opaque to the SDK
 )
 
-# The initial connection returns after the background task is accepted.
+# A follow-up in the same default conversation gets a new invocation ID.
 future = client.invoke(
-    payload,
+    follow_up_payload,
+    session_id="session-123",
     background=True,
-    conversation_id="conv-123",
 )
 print(future.invocation_id)
 result = future.result(timeout=600)
 ```
+
+The identity rule is:
+
+```python
+effective_conversation_id = conversation_id or runtime_session_id
+```
+
+An application can opt into multiple logical conversations in one Runtime
+session by providing explicit IDs:
+
+```python
+result_a = client.invoke(
+    payload_a,
+    session_id="session-123",
+    conversation_id="conversation-a",
+    background=False,
+)
+
+result_b = client.invoke(
+    payload_b,
+    session_id="session-123",
+    conversation_id="conversation-b",
+    background=False,
+)
+```
+
+These IDs only identify application conversation namespaces. The SDK does not
+store messages, load history, or define ordering between the two conversations.
+Whether invocations in those namespaces may execute concurrently is a separate
+Runtime and application policy.
 
 The async Python API remains a separate axis:
 
@@ -350,7 +397,7 @@ The concrete transport for each operation is an implementation detail. When an
 operation is carried through the app invocation payload, it should use a
 reserved namespace separate from the user's payload. In particular, it should
 not reuse `_rollout`, which carries RL and inference configuration such as
-`base_url`, `model_id`, API keys, and sampling parameters. An optional
+`base_url`, `model_id`, API keys, and sampling parameters. The effective
 conversation ID is passed to the user handler as opaque invocation context; the
 wrapper may record it for correlation but does not load or mutate conversation
 history.
@@ -429,7 +476,7 @@ The marker may include:
 - protocol version;
 - creation time;
 - invocation ID;
-- optional opaque conversation ID;
+- effective conversation ID and whether it was explicit or session-derived;
 - sanitized correlation metadata;
 - initial status.
 
@@ -521,7 +568,8 @@ For `background=false`, the client:
 
 1. Generates or accepts a `runtimeSessionId`.
 2. Generates or accepts an invocation ID before network submission.
-3. Optionally attaches an opaque conversation ID.
+3. Resolves the effective conversation ID from an optional explicit value or
+   the Runtime session ID.
 4. Sends one `InvokeAgentRuntime` request.
 5. Maintains the connection until completion.
 6. Parses and returns the final response.
@@ -538,7 +586,8 @@ For `background=true`, the client:
 
 1. Generates or accepts a `runtimeSessionId`.
 2. Generates or accepts an invocation ID before network submission.
-3. Optionally attaches an opaque conversation ID.
+3. Resolves the effective conversation ID from an optional explicit value or
+   the Runtime session ID.
 4. Sends an internal `start` request.
 5. Receives an `in_progress` acknowledgement.
 6. Returns a `RolloutFuture` exposing the invocation ID.
@@ -629,8 +678,8 @@ runtime_session_id
 invocation_id
 ```
 
-An optional conversation ID may be retained as correlation metadata, but it is
-not sufficient to retrieve or cancel a particular invocation.
+The effective conversation ID may be retained as correlation metadata, but it
+is not sufficient to retrieve or cancel a particular invocation.
 
 ### Rate limiting
 
@@ -812,7 +861,7 @@ implementation.
 - foreground/background connection behavior;
 - internal start/get protocol;
 - invocation identity and lifecycle;
-- optional opaque conversation correlation;
+- effective opaque conversation correlation;
 - state machine;
 - managed session-storage persistence;
 - result retrieval and cancellation;
@@ -856,8 +905,9 @@ application-defined branching.
 ### Phase 2: foreground/background client
 
 - Add `background` to sync and async invocation methods.
-- Accept an optional opaque conversation ID without adding conversation
-  storage or history APIs.
+- Default conversation identity to the Runtime session ID and accept an
+  optional explicit override without adding conversation storage or history
+  APIs.
 - Implement foreground direct return.
 - Implement same-session background retrieval.
 - Separate data-plane and session-creation rate limiting.
