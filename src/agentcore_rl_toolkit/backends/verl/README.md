@@ -4,10 +4,29 @@ Train agents deployed on Bedrock AgentCore Runtime (ACR) with [verl](https://git
 using the in-repo [rollout gateway](../../rollout_gateway/) for token-level trajectory
 capture.
 
-The integration keeps verl stock: it plugs into
-`python -m verl.trainer.main_ppo` as a custom v1 agent loop, captures tokens with
-the in-repo gateway, and leaves verl's replay buffer, filtering, checkpointing,
-validation, and rollout-correction paths unchanged.
+The integration uses verl's public v1 agent-loop interface. The agent loop itself
+also works with stock `trainer.v1.trainer_mode=sync` when every rollout is
+guaranteed to produce exactly one training row. The checked-in recipes support
+trajectory-tree branches, so they run
+`python -m agentcore_rl_toolkit.backends.verl.main_ppo` with
+`trainer.v1.trainer_mode=agentcore_sync`. The launcher creates stock
+`TaskRunnerV1`, uses Ray's developer actor-call API to queue trainer registration
+on that actor, then delegates to stock `run()`. This is a narrow compatibility
+bridge for verl 0.9.0's process-local registry; replay buffering, filtering,
+checkpointing, rollout correction, worker execution, and data-parallel balancing
+remain verl-owned.
+
+`agentcore_sync` is the variable-row trainer: it keeps the configured actor
+optimizer schedule stable when one rollout expands into a variable number of
+trajectory rows. If
+`M = data.train_batch_size / actor.ppo_mini_batch_size`, the trainer pads only to
+`actor_data_parallel_size * M` and sends `num_mini_batch=M` to the actor worker.
+Expanded row count can therefore change the number of rows in each mini-batch
+without silently creating additional optimizer steps.
+
+The current contract is intentionally narrow: v1 actor-only sync training,
+distillation disabled, `parameter_sync_step=1`, and
+`loss_agg_mode=seq-mean-token-sum`. Unsupported configurations fail at startup.
 
 ## How it works
 
@@ -54,8 +73,7 @@ endpoints.
 
 ## Install
 
-verl is pinned to uni-agent's blessed submodule commit `78bba31d` via
-`[tool.uv.sources]`. From a checkout of this repo:
+verl is pinned to version 0.9.0. From a checkout of this repo:
 
 ```bash
 uv sync --extra verl
@@ -142,6 +160,12 @@ Each recipe separates verl configuration in its shell script from
 `AgentCoreAgentLoop` kwargs in `agentcore_agent.yaml`. Shell-script arguments accept
 Hydra overrides, but loop kwargs are loaded worker-side and are not CLI-addressable;
 edit the YAML or use `${oc.env:...}` interpolation.
+
+The trainer logs `batching/real_rows`, `batching/total_rows`,
+`batching/padding_rows`, `batching/num_mini_batches`,
+`batching/required_multiple`, and `batching/configured_optimizer_steps`.
+The final metric is the configured `num_mini_batches * ppo_epochs`, not a runtime
+counter of completed optimizer calls.
 
 ## Token budgets
 

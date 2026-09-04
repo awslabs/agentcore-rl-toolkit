@@ -4,10 +4,17 @@ description: Train an AgentCore Runtime-deployed agent with verl, the v1 agent-l
 ---
 
 The direct verl backend integrates AgentCore rollouts as a custom
-`AgentCoreAgentLoop` while using verl's standard
-`python -m verl.trainer.main_ppo` entrypoint and v1 trainer. The in-repo rollout
-gateway captures token IDs, log probabilities, and loss masks from multi-turn agent
-calls and converts each trajectory-tree leaf into a verl training row.
+`AgentCoreAgentLoop` through verl's v1 agent-loop API. The agent loop works with
+stock `trainer.v1.trainer_mode=sync` when every rollout is guaranteed to produce
+exactly one training row. The checked-in recipes allow trajectory-tree branches,
+so they invoke `python -m agentcore_rl_toolkit.backends.verl.main_ppo` with
+`trainer.v1.trainer_mode=agentcore_sync`. The launcher creates stock
+`TaskRunnerV1` and uses Ray's developer actor-call API to queue trainer
+registration on that actor before stock `run()`. This narrow compatibility
+bridge is needed because verl 0.9.0's trainer registry is process-local. The
+in-repo rollout gateway captures token IDs, log probabilities, and loss masks
+from multi-turn agent calls and converts each trajectory-tree leaf into a verl
+training row.
 
 The checked-in recipes have been run end to end with:
 
@@ -117,8 +124,16 @@ for the Megatron + LoRA setup and data-preparation commands.
 
 ## Important configuration
 
-- `trainer.use_v1=true` is required because one AgentCore rollout may emit multiple
-  training rows.
+- `trainer.use_v1=true` is required because `AgentCoreAgentLoop.run()` returns a
+  list of rows, with one row per trajectory-tree leaf.
+- Stock `trainer.v1.trainer_mode=sync` is supported when that list is guaranteed
+  to contain exactly one row for every rollout.
+- `trainer.v1.trainer_mode=agentcore_sync` is required only when a rollout may
+  emit more than one row. It keeps actor optimizer-step count stable and avoids
+  padding to a fixed expanded global mini-batch size.
+- The current trainer supports actor-only sync training with distillation disabled,
+  `parameter_sync_step=1`, and
+  `actor_rollout_ref.actor.loss_agg_mode=seq-mean-token-sum`.
 - `actor_rollout_ref.rollout.max_model_len` is the inference model's context
   capacity and must be set explicitly.
 - `actor_rollout_ref.rollout.response_length` is both verl's response storage width

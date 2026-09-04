@@ -1,6 +1,6 @@
 #!/bin/bash
 # GRPO on MigrationBench (Java 8->17) with rollouts on Bedrock AgentCore Runtime,
-# using verl's stock main_ppo entrypoint (v1 trainer) and the agentcore_agent loop.
+# using AgentCore's narrow verl v1 sync trainer and the agentcore_agent loop.
 #
 # Qwen3-Coder-30B-A3B is a sparse MoE, so this uses Megatron expert parallelism
 # and LoRA rather than the math example's FSDP full fine-tune.
@@ -60,9 +60,9 @@ EXPERIMENT_NAME=${EXPERIMENT_NAME:-migrationbench_qwen3_coder_30b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 
 # moe_backend=triton is required on AWS P6-B200 (NVIDIA Blackwell) to avoid the default FlashInfer MoE kernel failure.
-python3 -m verl.trainer.main_ppo \
+python3 -m agentcore_rl_toolkit.backends.verl.main_ppo \
     --config-name ppo_megatron_trainer \
-    trainer.v1.trainer_mode=sync \
+    trainer.v1.trainer_mode=agentcore_sync \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=true \
     algorithm.use_kl_in_reward=False \

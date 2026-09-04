@@ -1,6 +1,6 @@
 #!/bin/bash
-# GRPO on GSM8K with rollouts on Bedrock AgentCore Runtime, using verl's stock
-# main_ppo entrypoint (v1 trainer) and the agentcore_agent custom agent loop.
+# GRPO on GSM8K with rollouts on Bedrock AgentCore Runtime, using AgentCore's
+# narrow verl v1 sync trainer and the agentcore_agent custom agent loop.
 #
 # The defaults below are the validated stable configuration for full fine-tuning
 # Qwen3-4B on 8 GPUs (reaches ~0.93 GSM8K val reward in one epoch). Three
@@ -49,8 +49,8 @@ EXPERIMENT_NAME=${EXPERIMENT_NAME:-gsm8k_qwen3_4b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
 
-python3 -m verl.trainer.main_ppo \
-    trainer.v1.trainer_mode=sync \
+python3 -m agentcore_rl_toolkit.backends.verl.main_ppo \
+    trainer.v1.trainer_mode=agentcore_sync \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=true \
     algorithm.use_kl_in_reward=False \
