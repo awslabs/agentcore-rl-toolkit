@@ -182,10 +182,13 @@ zero. Training remains correct, but verl's stock length metrics count those
 overflow tokens as part of the response region, so overflow should be a
 fallback rather than the normal configuration.
 
+Trace-less rollout failures raise from the agent loop and produce no synthetic
+training row. Other sessions for the same prompt remain trainable.
+
 ## Troubleshooting
 
-- **Every rollout degenerates, warning about "static session 'EMPTY'"**: the deployed
-  agent image predates the session-key contract and sends a fixed api key — its turns
+- **Every rollout fails, warning about "static session 'EMPTY'"**: the deployed agent
+  image predates the session-key contract and sends a fixed api key — its turns
   accumulate under one shared session while each rollout's real session drains empty.
   Rebuild/redeploy the agent image with the contract above.
 - **Agent-side 404s on every rollout**: an agent constructing its own URL paths
@@ -195,13 +198,3 @@ fallback rather than the normal configuration.
 - Sub-agents that reuse the same session id fork within one tree and are captured; a
   sub-agent given a *different* session id becomes a separate tree and is not joined
   to the episode (cross-session grouping is future work).
-
-## TODO
-
-- **Make trace-less failed rollouts gradient-free.** A timeout or dispatch failure
-  that produces no trace currently becomes a single pad-token response with
-  `response_mask=[1]`, logprob 0, and reward 0 because verl's rollout-correction
-  helpers reject an entirely empty response mask. In a mixed GRPO group, that
-  synthetic row can receive a negative group-relative advantage and therefore is
-  not strictly inert. A follow-up should exclude or zero-mask failed rows while
-  preserving a valid all-failed-batch path.
