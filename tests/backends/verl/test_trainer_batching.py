@@ -51,6 +51,8 @@ def test_trainer_uses_sync_semantics_and_minimal_batch_multiple(config_name):
 def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics():
     trainer = AgentCorePPOTrainerSync(
         _make_config(
+            "data.train_batch_size=2",
+            "actor_rollout_ref.actor.ppo_mini_batch_size=1",
             "actor_rollout_ref.actor.ppo_epochs=2",
             "actor_rollout_ref.rollout.n=4",
         )
@@ -59,6 +61,12 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
     trainer.actor_rollout_wg = _ActorWorkerGroup()
     batch = SimpleNamespace(
         extra_info={},
+        keys=[
+            "uid0_0_0",
+            "uid0_0_1",
+            "pad_0_0",
+            "uid1_2_0",
+        ],
         tags=[
             {"is_padding": False},
             {},
@@ -74,8 +82,8 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
         "calculate_entropy": False,
         "distillation_use_topk": False,
         "distillation_only": False,
-        "global_batch_size": 64,
-        "num_mini_batch": 4,
+        "global_batch_size": 4,
+        "num_mini_batch": 2,
         "epochs": 2,
         "seed": trainer.config.actor_rollout_ref.actor.data_loader_seed,
         "dataloader_kwargs": {"shuffle": trainer.config.actor_rollout_ref.actor.shuffle},
@@ -86,9 +94,10 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
     assert metrics["batching/real_rows"] == 3
     assert metrics["batching/total_rows"] == 4
     assert metrics["batching/padding_rows"] == 1
-    assert metrics["batching/num_mini_batches"] == 4
-    assert metrics["batching/required_multiple"] == 8
-    assert metrics["batching/configured_optimizer_steps"] == 8
+    assert metrics["batching/num_mini_batches"] == 2
+    assert metrics["batching/required_multiple"] == 4
+    assert metrics["batching/configured_optimizer_steps"] == 4
+    assert metrics["training/rollout_failure/missing_sessions"] == 6
 
 
 @pytest.mark.parametrize(

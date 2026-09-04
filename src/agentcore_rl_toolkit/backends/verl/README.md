@@ -207,6 +207,8 @@ remain trainable. With asynchronous replay, verl's existing failed-group policy
 evicts and refills the entire prompt group, including successful sibling
 trajectories. Preserving partial failed groups in asynchronous training requires
 session-level or partial-group failure handling in verl's replay buffer.
+The `training/rollout_failure/missing_sessions` metric reports the difference
+between configured and materialized rollout sessions in each actor update.
 
 ## Troubleshooting
 

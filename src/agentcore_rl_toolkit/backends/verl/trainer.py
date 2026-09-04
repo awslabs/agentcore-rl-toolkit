@@ -84,6 +84,12 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
         # AgentCore-only batching observability.
         total_rows = len(batch.tags)
         padding_rows = sum(tag.get("is_padding", False) for tag in batch.tags)
+        actual_sessions = {
+            tuple(key.rsplit("_", 2)[:2])
+            for key, tag in zip(batch.keys, batch.tags, strict=True)
+            if not tag.get("is_padding", False)
+        }
+        expected_sessions = self.config.data.train_batch_size * self.config.actor_rollout_ref.rollout.n
         metrics.update(
             {
                 "batching/real_rows": total_rows - padding_rows,
@@ -94,6 +100,7 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
                 "batching/configured_optimizer_steps": (
                     self._num_actor_mini_batches * self.config.actor_rollout_ref.actor.ppo_epochs
                 ),
+                "training/rollout_failure/missing_sessions": expected_sessions - len(actual_sessions),
             }
         )
         return batch
