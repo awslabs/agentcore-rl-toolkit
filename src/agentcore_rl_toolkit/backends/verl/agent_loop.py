@@ -263,7 +263,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
 
         if not records:
             self._warn_if_static_session_capture(sid)
-            return [self._degenerate_output(kwargs, sid, error or "agent produced no LLM turns", elapsed, result)]
+            reason = error or "no model turns were captured"
+            raise RuntimeError(f"ACR rollout produced no trainable trajectory (sid={sid}): {reason}")
 
         reward = self._resolve_reward(result, error, sid)
 
@@ -402,52 +403,6 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 # AgentLoopWorkerTQ reads this with brackets when broadcasting an
                 # inline reward across multiple outputs — must always exist.
                 "reward_extra_info": {},
-            },
-        )
-
-    def _degenerate_output(
-        self, kwargs: dict[str, Any], sid: str, error: str, elapsed: float, result: dict[str, Any] | None = None
-    ) -> AgentLoopOutput:
-        """A valid-but-inert output for failed rollouts. Never raise — a raised
-        exception marks the whole prompt group as failed in the v1 replay buffer.
-
-        The single pad-token response carries response_mask=[1] (NOT 0: verl's
-        rollout-correction helper requires at least one valid response token per
-        row) with rollout_log_probs=[0.0], and scores 0.0 in built_in mode."""
-        pad_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id or 0
-        prompt_ids = [pad_id]
-        raw_prompt = kwargs.get("raw_prompt")
-        if raw_prompt is not None:
-            try:
-                prompt_ids = self.tokenizer.apply_chat_template(
-                    list(raw_prompt), add_generation_prompt=True, tokenize=True
-                )
-                if hasattr(prompt_ids, "input_ids"):  # BatchEncoding
-                    prompt_ids = prompt_ids.input_ids
-                prompt_ids = list(prompt_ids)[-self.prompt_length :]
-            except Exception:
-                prompt_ids = [pad_id]
-
-        return AgentLoopOutput(
-            prompt_ids=prompt_ids,
-            response_ids=[pad_id],
-            response_mask=[1],
-            response_logprobs=[0.0],
-            # None is reserved for reward_mode="separate", which __init__ rejects today
-            reward_score=0.0 if self.reward_mode == "built_in" else None,
-            num_turns=1,
-            metrics=AgentLoopMetrics(generate_sequences=elapsed),
-            extra_fields={
-                "acr_failed": True,
-                "acr_error": error,
-                "acr_result": result or {},
-                "acr_session_id": sid,
-                "num_trace_records": 0,
-                "trace_index": 0,
-                "reward_extra_info": {},
-                # v1 staleness tags must be real ints (see run())
-                "min_global_steps": int(kwargs.get("global_steps", 0)),
-                "max_global_steps": int(kwargs.get("global_steps", 0)),
             },
         )
 
