@@ -263,7 +263,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
 
         if not records:
             self._warn_if_static_session_capture(sid)
-            reason = error or "agent produced no LLM turns"
+            reason = error or "no model turns were captured"
             raise RuntimeError(f"ACR rollout produced no trainable trajectory (sid={sid}): {reason}")
 
         reward = self._resolve_reward(result, error, sid)
