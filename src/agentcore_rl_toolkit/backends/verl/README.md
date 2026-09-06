@@ -178,7 +178,11 @@ overflow tokens as part of the response region, so overflow should be a
 fallback rather than the normal configuration.
 
 Trace-less rollout failures raise from the agent loop and produce no synthetic
-training row. Other sessions for the same prompt remain trainable.
+training row. With synchronous replay, successful sessions for the same prompt
+remain trainable. With asynchronous replay, verl's existing failed-group policy
+evicts and refills the entire prompt group, including successful sibling
+trajectories. Preserving partial failed groups in asynchronous training requires
+session-level or partial-group failure handling in verl's replay buffer.
 
 ## Troubleshooting
 
