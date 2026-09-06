@@ -130,8 +130,7 @@ async def test_malformed_reward_raises():
 
 
 async def test_malformed_reward_on_failed_rollout_still_scores_zero():
-    """Failures score 0.0 before the reward is even parsed, so a garbage reward
-    on an already-failed rollout stays an inert row (no raise)."""
+    """A failed rollout with a real partial trace trains that trace at reward 0."""
     loop = _make_loop()
     _wire_result(loop, {"status_code": 500, "stop_reason": "boom", "rewards": "invalid"})
     outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
@@ -184,7 +183,7 @@ async def test_multi_turn_merges_to_one_record():
     assert outputs[0].num_turns == 4  # 3 LLM turns + 1
 
 
-async def test_timeout_returns_degenerate_output():
+async def test_timeout_without_trace_raises():
     loop = _make_loop()
 
     async def fake_invoke_async(payload, session_id=None, input_id=None, **overrides):
@@ -193,23 +192,15 @@ async def test_timeout_returns_degenerate_output():
         return future
 
     loop._client.invoke_async = fake_invoke_async
-    outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
-
-    assert len(outputs) == 1
-    out = outputs[0]
-    assert out.extra_fields["acr_failed"] is True
-    # [1], not [0]: verl's rollout-correction helper requires >=1 valid response
-    # token per row; logprob 0.0 + reward 0 keeps the row inert.
-    assert out.response_mask == [1]
-    assert out.reward_score == 0.0
+    with pytest.raises(RuntimeError, match="timed out"):
+        await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
 
 
-async def test_invoke_error_returns_degenerate_output():
+async def test_invoke_error_without_trace_raises():
     loop = _make_loop()
     loop._client.invoke_async = AsyncMock(side_effect=RuntimeError("throttled"))
-    outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
-    assert outputs[0].extra_fields["acr_failed"] is True
-    assert "throttled" in outputs[0].extra_fields["acr_error"]
+    with pytest.raises(RuntimeError, match="throttled"):
+        await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
 
 
 async def test_agent_error_status_with_trace_scores_zero():
@@ -230,8 +221,8 @@ async def test_use_v1_required():
 
 async def test_static_session_warning(caplog):
     """Stale agent image: the agent calls in with api_key='EMPTY' instead of its
-    ACR session id, so the real sid drains empty -> degenerate output plus a
-    warning naming the static session."""
+    ACR session id, so the real sid drains empty and raises after warning about
+    the static session."""
     loop = _make_loop()
 
     async def fake_invoke_async(payload, session_id=None, input_id=None, **overrides):
@@ -252,9 +243,9 @@ async def test_static_session_warning(caplog):
 
     loop._client.invoke_async = fake_invoke_async
     with caplog.at_level(logging.WARNING):
-        outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
+        with pytest.raises(RuntimeError, match="no trainable trajectory"):
+            await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"}, uid="u1")
 
-    assert outputs[0].extra_fields["acr_failed"] is True
     assert any("static session 'EMPTY'" in r.message for r in caplog.records)
 
 
