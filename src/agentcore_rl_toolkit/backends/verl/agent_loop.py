@@ -118,6 +118,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
         max_turns_per_sid: int | None = None,
         fork_threshold_tokens: int | None = None,
         reward_mode: str = "built_in",
+        reward_extra_info_defaults: dict | None = None,
         **kwargs,  # swallows the YAML entry's `name`, verl's `tools`, and future kwargs
     ):
         super().__init__(trainer_config, server_manager, tokenizer, processor, dataset_cls, data_config, **kwargs)
@@ -152,6 +153,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
         # Kept as config, not inlined, so a validated trainer-side mode can land
         # without a signature change. Reward semantics: see the README.
         self.reward_mode = reward_mode
+        self._rei_defaults = {str(k): float(v) for k, v in (reward_extra_info_defaults or {}).items()}
         self.model_id = self.config.actor_rollout_ref.model.path
 
         self._gateway: GatewayHandle = get_or_start_gateway(
@@ -295,10 +297,27 @@ class AgentCoreAgentLoop(AgentLoopBase):
             primary = max(range(len(records)), key=lambda i: sum(records[i].loss_mask))
             records.append(records.pop(primary))
 
+        shared_extra["reward_extra_info"] = self._reward_extra_info(result, reward, len(records), failed=error is not None)
+
         outputs = [
             self._record_to_output(r, i, reward, num_turns, shared_extra, elapsed) for i, r in enumerate(records)
         ]
         return outputs
+
+    def _reward_extra_info(self, result: dict[str, Any] | None, reward: float, n_records: int, *, failed: bool) -> dict:
+        info: dict[str, float] = dict(self._rei_defaults)
+        metrics = (result or {}).get("metrics") or {}
+        if isinstance(metrics, dict):
+            for k, v in metrics.items():
+                if isinstance(v, bool | int | float) and not isinstance(v, str):
+                    try:
+                        info[str(k)] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+        info["reward"] = float(reward)
+        info["acr_failed"] = 1.0 if failed else 0.0
+        info["num_trace_records"] = float(n_records)
+        return info
 
     # -- helpers ---------------------------------------------------------------
 
@@ -402,7 +421,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
                 "trace_metadata": dict(record.metadata),
                 # AgentLoopWorkerTQ reads this with brackets when broadcasting an
                 # inline reward across multiple outputs — must always exist.
-                "reward_extra_info": {},
+                "reward_extra_info": dict(shared_extra.get("reward_extra_info") or {}),
             },
         )
 

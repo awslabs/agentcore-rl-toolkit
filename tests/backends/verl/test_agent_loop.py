@@ -93,7 +93,7 @@ async def test_run_end_to_end_inline_reward():
     assert len(out.prompt_ids) > 0
     assert out.reward_score == 0.75
     assert out.extra_fields["acr_result"]["rewards"] == 0.75
-    assert out.extra_fields["reward_extra_info"] == {}
+    assert out.extra_fields["reward_extra_info"] == {"reward": 0.75, "acr_failed": 0.0, "num_trace_records": 1.0}
 
     # invoke wiring: sid is a 36-char uuid used as both ACR session id and Bearer sid
     call = invoke.calls[0]
@@ -356,3 +356,20 @@ async def test_padded_region_cannot_exceed_max_model_len(field):
 async def test_invalid_max_tokens_per_turn_rejected(value):
     with pytest.raises(ValueError, match="max_tokens_per_turn"):
         _make_loop(max_tokens_per_turn=value)
+
+
+async def test_reward_extra_info_carries_scalar_metrics_over_defaults():
+    loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0, "reward": 0.0})
+    _wire_result(loop, {"status_code": 200, "rewards": 0.75, "metrics": {"f_beta": 0.6, "num_turns": 3, "note": "x"}})
+    outs = await loop.run({"temperature": 1.0}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"q": 1}, uid="u")
+    rei = outs[-1].extra_fields["reward_extra_info"]
+    assert rei["f_beta"] == 0.6 and rei["num_turns"] == 3.0 and rei["reward"] == 0.75
+    assert rei["acr_failed"] == 0.0 and rei["num_trace_records"] == 1.0
+    assert "note" not in rei  # non-numeric metrics are dropped (verl aggregates these as floats)
+
+
+async def test_degenerate_output_carries_reward_extra_info_defaults():
+    loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0})
+    out = loop._degenerate_output({"global_steps": 2}, "sid", "boom", 0.1, None)
+    assert out.extra_fields["reward_extra_info"] == {"f_beta": 0.0, "reward": 0.0, "acr_failed": 1.0, "num_trace_records": 0.0}
+
