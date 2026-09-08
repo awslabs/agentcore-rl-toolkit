@@ -66,7 +66,9 @@ class ParsedOutput:
 class Renderer(Protocol):
     """The gateway's tokenization seam.
 
-    ``render``             : canonical chat messages (+ tools) -> prompt ``token_ids``
+    ``render``             : canonical chat messages (+ tools) -> prompt ``token_ids``;
+                             ``chat_template_kwargs`` are per-request template variables
+                             (e.g. ``enable_thinking``) from the client's request body
     ``get_stop_sequences`` : stop strings / token ids for sampling
     ``parse``              : sampled response ``token_ids`` -> :class:`ParsedOutput`
     """
@@ -77,6 +79,7 @@ class Renderer(Protocol):
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
         ...
 
@@ -129,8 +132,10 @@ class HfTemplateRenderer:
         stop_sequences: list[str] | list[int] | None = None,
         reasoning_parser: ReasoningParserFn | None = None,
         tool_parser: ToolParserFn | None = None,
+        chat_template_kwargs: dict | None = None,
     ) -> None:
         self.tokenizer = tokenizer
+        self._chat_template_kwargs: dict = dict(chat_template_kwargs or {})
         self._stop_sequences: list = list(stop_sequences) if stop_sequences else []
         self.reasoning_parser: ReasoningParserFn = reasoning_parser or split_reasoning
         # No implicit tool parser: None means tools-bearing requests are rejected at
@@ -170,6 +175,7 @@ class HfTemplateRenderer:
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
         # return_dict=False: we want only the token ids. The dict form (the
         # transformers>=5 default) bundles an attention mask, but that is a padding
@@ -181,6 +187,7 @@ class HfTemplateRenderer:
             add_generation_prompt=add_generation_prompt,
             return_dict=False,
             **({"chat_template": self._chat_template} if self._chat_template else {}),
+            **{**self._chat_template_kwargs, **(chat_template_kwargs or {})},
         )
         return list(ids)
 
@@ -325,7 +332,10 @@ class TinkerRenderer:
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
+        if chat_template_kwargs:
+            logger.warning("TinkerRenderer ignores chat_template_kwargs %s", sorted(chat_template_kwargs))
         msgs = list(messages)
         if tools:
             # tinker-cookbook tool schemas are ToolSpec dicts {name, description, parameters};

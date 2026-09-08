@@ -174,3 +174,29 @@ def test_tool_parser_skipped_without_tools_schema():
     assert calls == []  # no tools -> tool stage never runs
     assert out.reasoning == "hmm"
     assert out.text == "body"
+
+
+class KwargsStubTokenizer(StubTokenizer):
+    """StubTokenizer that also records template kwargs (enable_thinking & co.)."""
+
+    def apply_chat_template(self, messages, **kwargs):
+        self.template_kwargs = {
+            k: v for k, v in kwargs.items() if k not in ("tools", "tokenize", "add_generation_prompt", "return_dict")
+        }
+        return super().apply_chat_template(
+            messages,
+            **{k: v for k, v in kwargs.items() if k in ("tools", "tokenize", "add_generation_prompt", "return_dict")},
+        )
+
+
+def test_render_forwards_chat_template_kwargs_renderer_default_and_per_call():
+    tok = KwargsStubTokenizer()
+    r = HfTemplateRenderer(tok, chat_template_kwargs={"enable_thinking": False})
+    r.render([{"role": "user", "content": "abc"}])
+    assert tok.template_kwargs == {"enable_thinking": False}
+    # a per-call value (the request body's chat_template_kwargs) wins over the renderer default
+    r.render([{"role": "user", "content": "abc"}], chat_template_kwargs={"enable_thinking": True, "x": 1})
+    assert tok.template_kwargs == {"enable_thinking": True, "x": 1}
+    # no kwargs anywhere -> nothing extra reaches the tokenizer (stock behaviour)
+    HfTemplateRenderer(tok).render([{"role": "user", "content": "abc"}])
+    assert tok.template_kwargs == {}

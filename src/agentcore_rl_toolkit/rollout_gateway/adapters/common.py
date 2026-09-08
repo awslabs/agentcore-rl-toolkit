@@ -348,6 +348,9 @@ class BaseAdapter:
         """
         body = await request.json()
         self._preprocess_body(body)
+        chat_template_kwargs = body.get("chat_template_kwargs")
+        if chat_template_kwargs is not None and not isinstance(chat_template_kwargs, dict):
+            return web.Response(status=400, text="chat_template_kwargs must be an object")
         sid = self._session_id(request, body)
         if sid in self.closed:  # session drained; refuse stragglers
             self.logger.debug("[%s] sid=%s request after session closed", self.log_prefix, sid)
@@ -367,7 +370,12 @@ class BaseAdapter:
                 # before generation (the healer does the render internally).
                 prompt_ids = self.healer.heal(sid, translated, tools_schema)
             else:
-                prompt_ids = self.renderer.render(translated, tools=tools_schema, add_generation_prompt=True)
+                prompt_ids = self.renderer.render(
+                    translated,
+                    tools=tools_schema,
+                    add_generation_prompt=True,
+                    **({"chat_template_kwargs": chat_template_kwargs} if chat_template_kwargs else {}),
+                )
 
             sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
             # context-budget clamp (backend-neutral): if the prompt already exceeds the

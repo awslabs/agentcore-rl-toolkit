@@ -153,6 +153,7 @@ def get_or_start_gateway(
     max_turns_per_sid: int | None = None,
     fork_threshold_tokens: int | None = None,
     history_mode: str = "tree",
+    chat_template_kwargs: dict | None = None,
 ) -> GatewayHandle:
     """Lazily create (or return) this process's RolloutGateway singleton.
 
@@ -169,7 +170,7 @@ def get_or_start_gateway(
         backend = VerlSamplingBackend(server_manager)
         gateway = RolloutGateway(
             backend=backend,
-            renderer=HfTemplateRenderer(tokenizer),
+            renderer=HfTemplateRenderer(tokenizer, chat_template_kwargs=chat_template_kwargs),
             tokenizer=tokenizer,
             adapters=adapter_names,
             max_turns_per_sid=max_turns_per_sid,

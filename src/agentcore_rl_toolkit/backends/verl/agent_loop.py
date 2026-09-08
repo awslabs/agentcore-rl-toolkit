@@ -163,6 +163,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
             adapters=gateway_adapters,
             max_turns_per_sid=max_turns_per_sid,
             fork_threshold_tokens=fork_threshold_tokens,
+            chat_template_kwargs=dict(self.apply_chat_template_kwargs or {}),
         )
         # Default exp_id must be identical across all AgentLoopWorker processes of
         # one run, so derive it from verl's run identity instead of inventing one.
