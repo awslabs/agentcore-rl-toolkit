@@ -145,6 +145,26 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
         logging.error("Exception during rollout", exc_info=e)
         exception = exc_to_full_string(e)
 
+    finally:
+        # A conversation that is never closed leaves two things behind. Its tool
+        # executors hold a terminal subprocess each, and -- the reason this is here --
+        # OpenHands ends its per-conversation root span only from close()
+        # (LocalConversation.close -> _end_observability_span), and a span that never
+        # ends is never exported. That is what left every step of the agent loop in
+        # CloudWatch parented to a span id that appears nowhere: measured on session
+        # verl_1812a120506c4f3eb1d1350c1fe2a438, `conversation.run` pointing at a
+        # parent that was never exported.
+        #
+        # Last, and its own failure swallowed: by this point the rollout has a result,
+        # and losing it to a cleanup error would be the worse outcome. Safe here
+        # because close() does not touch conversation.state -- which the response
+        # below still reads -- and the git diff and evaluation above are done.
+        if conversation is not None:
+            try:
+                conversation.close()
+            except Exception as e:
+                logging.warning("Exception closing conversation", exc_info=e)
+
     return RolloutDumpResponse(
         metrics=clean_metrics(
             {

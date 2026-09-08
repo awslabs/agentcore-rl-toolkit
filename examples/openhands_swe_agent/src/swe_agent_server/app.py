@@ -36,6 +36,13 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from bedrock_agentcore.runtime.app import RequestContextFormatter
+from bedrock_agentcore.runtime.context import BedrockAgentCoreContext
+from swe_agent_server.observability import (
+    configure_tracing,
+    set_session_id,
+    stop_instrumenting_child_processes,
+    traced_background_work,
+)
 from swe_agent_server.rollout import run_rollout, run_setup
 from swe_agent_server.utils import exc_to_full_string
 
@@ -88,6 +95,10 @@ def configure_logging() -> None:
 
 
 configure_logging()
+configure_tracing()
+# At import, i.e. before the first shell command a rollout runs: what it removes is
+# inherited by every process this one spawns.
+stop_instrumenting_child_processes()
 
 
 def submit(name: str, work: Callable[[], object]) -> None:
@@ -98,11 +109,15 @@ def submit(name: str, work: Callable[[], object]) -> None:
     calls read. The registration is what ``/ping`` answers from, and it is released
     in the done callback rather than here, so the session stays busy for as long as
     the work actually runs.
+
+    The work is wrapped before it is submitted, not inside the worker: that is what
+    puts its spans in this invocation's trace, and it can only be done from here --
+    see :func:`swe_agent_server.observability.traced_background_work`.
     """
     global future
 
     task_id = app.add_async_task(name)
-    future = executor.submit(work)
+    future = executor.submit(traced_background_work(name, work))
     future.add_done_callback(lambda finished: on_task_done(finished, task_id))
 
 
@@ -130,6 +145,12 @@ def invocations(payload: dict) -> dict:
     turned into work, and both directions of it are validated by the models rather
     than by hand.
     """
+    # The session id is request-scoped state (the app keeps it in a ContextVar) and a
+    # rollout runs on a pool thread that never sees it, so it is copied out here, on
+    # the request thread, for the span processor that stamps it -- see
+    # swe_agent_server.observability.
+    set_session_id(BedrockAgentCoreContext.get_session_id())
+
     request = InvocationRequest.model_validate(payload)
     response: InvocationOutput
 

@@ -3,6 +3,8 @@ import os
 import subprocess
 import tempfile
 
+from swe_agent_server.observability import configure_openhands_tracing
+
 from agentcore_rl_toolkit.rollout_session.wire import (
     RolloutDumpResponse,
     RolloutSetupRequest,
@@ -19,6 +21,11 @@ def run_rollout(payload: RolloutStartRequest) -> RolloutDumpResponse:
     """
     match payload.task_input["agent"]:
         case "openhands":
+            # Before the import, not after: importing the OpenHands agent initialises
+            # its tracing layer, and both of the things that can be done about that
+            # have to be settled first (swe_agent_server.observability).
+            configure_openhands_tracing()
+
             from swe_agent_server.open_hands_agent import rollout
         case "strands":
             from swe_agent_server.strands_agent import rollout
