@@ -89,7 +89,21 @@ rollout = [
     # pydantic: the .wire types and the aws_tools models subclass BaseModel. Present
     # transitively via bedrock-agentcore already, declared because these modules
     # import it directly.
-    "aioboto3",
+    #
+    # The aioboto3 floor is load-bearing, and not a "recent enough" guess. aioboto3
+    # pins `aiobotocore[boto3]` exactly, and that extra pins boto3 exactly, which
+    # collides with this package's own `boto3>=1.40.55` — so a resolver with nothing
+    # else to go on satisfies the collision by walking aioboto3 *backwards* until the
+    # pin goes away, which it does in the 7.x line (2020) whose requirement is only
+    # `aiobotocore[boto3]>=0.12`. Dropping the aiobotocore override below and
+    # re-resolving lands on aioboto3 7.1.0 + aiobotocore 0.3.3 (2018) to prove it.
+    # Those versions install and import fine and fail only when used: 7.x's
+    # `Session.resource()` is a passthrough to boto3's, which touches `client.meta` on
+    # what modern aiobotocore returns as an async context manager, so every
+    # `async with session.resource(...)` in aws_tools raises AttributeError. The unit
+    # tests mock boto3 and so cannot see it. The override keeps a fresh resolve on
+    # 15.x, but only this floor keeps it there.
+    "aioboto3>=15.5.0",
     "backoff",
     "aiohttp>=3.9",
     "pydantic",
@@ -161,8 +175,6 @@ swe-agent = [
     # function for this reason.
     "datasets",
     "polars>=1.41.2",
-    # preprocess.py: swebench.harness.test_spec, for each task's eval commands.
-    "swebench",
     # evaluate.py reaches these two through the example's own rollout_batch.py:
     # run_eval's progress bar over the rollout fan-out, and BedrockEndpoint minting a
     # Bedrock bearer token. Both are imported inside the functions that use them, so
@@ -207,26 +219,17 @@ Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 # Declaring verl and rllm as conflicting extras lets uv resolve each
 # in its own fork instead of forcing one universal lock.
 #
-# swe-agent is in both sets for a different reason than the trainers are: not that it
-# cannot be installed with them, but that resolving it *together* with them costs the
-# trainer. It pulls swebench -> modal, which caps protobuf below 7, and a universal
-# resolution applies that cap to the verl fork too -- so a trainer env would silently
-# get protobuf 6.x to satisfy example tooling it never imports. Forking keeps the cap
-# where it belongs. The pairing with rllm falls out of the set and is no loss: nothing
-# drives this example from rllm.
 conflicts = [
     [
         { extra = "verl" },
         { extra = "rllm" },
         { group = "verl-ci" },
-        { group = "swe-agent" },
     ],
     # Installed alongside verl, so it needs a separate conflict group.
     [
         { extra = "rllm" },
         { group = "verl-ci" },
         { group = "verl-megatron" },
-        { group = "swe-agent" },
     ],
 ]
 override-dependencies = [

@@ -1,0 +1,94 @@
+# Copy to config.toml and fill in your values. config.toml is gitignored: every
+# value here names a resource in one particular account.
+#
+# Every script in this directory reads this file: `deploy.py` to build the image and
+# stand up the pool and runtime, `evaluate.py` to find them again. The ARNs deploy
+# prints are for the trainer, which still takes them from the project `.env`.
+
+[agentcore]
+region = "us-west-2"
+
+# The runtime: which image a session runs and which role it assumes. deploy.py
+# joins `docker_repo` and `image_tag` into the container URI, and both builds and
+# pushes that image and points the runtime at it. `--image-tag` overrides the tag
+# for a one-off roll without editing this file. `docker_repo` must be an ECR
+# repository in this account, with no tag on it: it is also the only repository
+# besides the task image cache that the execution role may read, and AgentCore pulls
+# the agent image with that role.
+runtime_name = "swe_agent"
+docker_repo = "ACCOUNT.dkr.ecr.REGION.amazonaws.com/REPO"
+image_tag = "latest"
+
+# The role a session assumes, by name: deploy.py creates it if absent and rewrites
+# its policies from `iam_policy.py` on every roll, so the ARN is an output of the
+# deploy rather than something to paste in here. Anything granted to this role by
+# hand is reverted on the next deploy -- add it to `iam_policy.py` instead.
+execution_role_name = "AgentCoreRuntimeSweAgent"
+
+# The EC2 pool sessions land on. Its compute configuration is immutable, so
+# `name` is effectively a version: to change `instance_type` or `root_throughput`,
+# change the name as well, and deploy.py will create the new pool and repoint the
+# runtime at it. Deploying with an unchanged name never touches the pool.
+#
+# The pool's operator role and instance profile are not here: they hold an AWS
+# managed policy rather than anything this recipe chooses, so deploy.py creates them
+# under fixed names -- see `aws_tools/agentcore_control.py`. They are part of the
+# immutable compute configuration as well, so a pool created before they existed
+# keeps the roles it was created with until `name` changes.
+[agentcore.capacity_provider]
+name = "swe_agent_c5_large"
+# Optional. With it, the pool's instances carry that EC2 key pair and can be
+# ssh-ed into, which is the only way to see what a rollout did to its host; without
+# it, nobody has a key for them. Like the rest of this table it cannot be added
+# later, so a pool that may need investigating wants it from the start.
+# ssh_key_name = "KEY_NAME"
+subnets = ["subnet-XXXXXXXX"]
+security_groups = ["sg-XXXXXXXX"]
+# 600 MiB/s is the c5.large maximum; iops is set to 4x this
+instance_type = "c5.large"
+root_throughput = 600
+
+# The ECR pull-through cache the SWE task images are pulled through, instead of from
+# Docker Hub directly, and the Docker Hub credentials it authenticates with.
+#
+# `cache_prefix` is only the rule's name: the rule is made in this account and in
+# [agentcore]'s region, so that a session pulls a task image from the region it runs
+# in, and evaluate.py builds the full `ACCOUNT.dkr.ecr.REGION.amazonaws.com/PREFIX`
+# namespace from those parts. Caching in a second region means deploying this recipe
+# there; a cache is regional, and so is the runtime in front of it.
+#
+# Docker Hub will not be mirrored anonymously, so the rule names a Secrets Manager
+# secret holding a token. deploy.py writes `username`/`access_token` to `secret_name`
+# and points the rule at it; a rule with a stale credential fails only on task images
+# nobody has pulled before, so deploy.py validates it to make that a deploy-time
+# error instead. An access token is a Docker Hub PAT (Account settings -> Personal
+# access tokens); read-only ("Public Repo Read-only") is enough.
+#
+# Give `username` and `access_token` together, or leave both out to point the rule at
+# whatever the secret already holds -- which is how to redeploy without keeping a
+# token in this file. Leave `secret_name` out as well to leave an existing rule
+# entirely alone: deploy.py then only validates it, which is the mode for a cache
+# someone else owns.
+[docker_hub]
+cache_prefix = "docker-hub"
+# ECR only reads credentials from a secret whose name starts with this prefix.
+secret_name = "ecr-pullthroughcache/NAME"
+username = "DOCKERHUB_USERNAME"
+access_token = "dckr_pat_XXXXXXXXXXXXXXXX"
+
+# Where the records of a run are kept -- not just an eval's: a training run writes
+# the same two places, and so does anything here that reads a run back afterwards, so
+# these belong to the recipe rather than to one script. The runtime's own ARNs are
+# not here; `evaluate.py` resolves those from the names in [agentcore], so a run
+# always hits whatever deploy.py last put up. Nor is the task image namespace, which
+# is the [docker_hub] cache above, assembled from its parts.
+[storage]
+# One item per rollout, for watching a run and analysing it afterwards. deploy.py
+# creates it, with the `experiment_sessions` index the analysis queries need; the
+# trainer writes to the same table, so a name it shares with the trainer's `.env` is
+# one history of every rollout rather than two.
+dynamodb_table = "TABLE_NAME"
+# Where rollout dumps and the run report go. The only resource here deploy.py does
+# not create: a bucket name is global, and what it keeps for how long is an account's
+# decision rather than this recipe's.
+rollout_output_s3 = "s3://BUCKET/PREFIX"
