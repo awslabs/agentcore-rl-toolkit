@@ -25,11 +25,11 @@ interact with that same lifecycle:
 - `background=true` starts the invocation and returns a handle before it
   finishes.
 
-Background state and terminal results must survive the loss of process-local
-state. AgentCore managed session storage is the proposed default persistence
-backend. S3 remains a valid alternative when an application needs direct
-external retrieval, independent retention, larger artifacts, or cross-session
-access.
+Invocation state and bounded terminal results must survive the loss of
+process-local state in both modes. AgentCore managed session storage is the
+proposed default persistence backend. S3 remains a valid alternative when an
+application needs direct external retrieval, independent retention, larger
+artifacts, or cross-session access.
 
 The protocol is not an RL-specific abstraction. It can support both:
 
@@ -94,7 +94,7 @@ In this pattern, `background` controls result delivery and whether the initial
 connection waits. It does not select a different user handler or a different
 application result.
 
-Responses also separates logical history from execution identity:
+The Responses API also separates logical history from execution identity:
 
 - a Conversation is an optional history container; and
 - each Response is a distinct execution with its own ID and lifecycle.
@@ -105,8 +105,8 @@ This proposal borrows that separation:
   thread an invocation belongs to; and
 - `invocation_id` identifies one execution.
 
-RIP passes the conversation ID through but does not store or interpret the
-conversation's messages or history.
+The protocol passes the conversation ID through but does not store or interpret
+the conversation's messages or history.
 
 AgentCore additionally exposes `runtimeSessionId`, which has no direct public
 Responses equivalent. It controls sticky routing and represents an
@@ -276,8 +276,8 @@ group. RIP defines their common observable semantics.
 - Allow optional conversation correlation without managing conversation
   history.
 - Make retries idempotent with respect to invocation identity.
-- Persist all background state required after process or execution-environment
-  replacement.
+- Persist the invocation state and bounded terminal results required after
+  process or execution-environment replacement.
 - Use managed session storage as the default persistence backend while
   allowing S3 and future alternatives.
 - Keep storage backend and retrieval path replaceable.
@@ -295,9 +295,8 @@ group. RIP defines their common observable semantics.
 - Defining rollout trajectory capture, reward computation, or trainer sample
   construction.
 - Automatically rerunning interrupted workloads with side effects.
-- Persisting or replaying unbounded streaming output in background mode.
-- Treating process-local Python variables as a supported background result
-  backend.
+- Persisting or replaying unbounded streaming output.
+- Treating process-local Python variables as a supported result backend.
 - Protecting protocol files from arbitrary code running inside the same
   Runtime session.
 - Solving Sandbox image provisioning, health-shim port conflicts, interactive
@@ -490,23 +489,25 @@ responsibility.
 Foreground adapters should preserve the native streaming behavior of their
 underlying operation where practical.
 
-Background mode requires bounded, reconstructable output. The first
-implementation should reject unsupported unbounded streams rather than
-silently buffering them. A Sandbox command adapter may persist bounded stdout
+Every invocation still persists lifecycle and terminal status, but replaying
+stream contents requires bounded, reconstructable output. The first
+implementation should not promise recovery of unsupported unbounded streams
+or silently buffer them. A Sandbox command adapter may persist bounded stdout
 and stderr or store larger output as artifacts under an explicit policy.
 
 ## Persistence and retrieval
 
-### Durable background state
+### Durable invocation state
 
 Process-local tasks, process IDs, and caches are useful operational state, but
-they cannot be the authority for background execution. A Runtime environment
-may become idle, terminate, or be replaced before the client polls.
+they cannot be the authority for an invocation lifecycle. A Runtime environment
+may become idle, terminate, or be replaced before the client retrieves a
+result.
 
 The selected persistence backend must store:
 
-- a start record written before the background acknowledgement; and
-- one terminal record containing the result, structured failure, or
+- a start record durably claimed before the user workload begins; and
+- one terminal record containing a bounded result, structured failure, or
   cancellation metadata.
 
 An illustrative managed-storage layout is:
@@ -538,9 +539,17 @@ A terminal record can include:
 
 - terminal status;
 - completion time;
-- a JSON-serializable result or structured error;
+- a replayable response or workload-specific bounded result;
+- a structured error;
 - cancellation or interruption metadata; and
 - protocol version.
+
+For an app handler, a replayable response can contain the status code, content
+type, and bounded response body or an artifact reference. It stores the
+normalized response that the client observes, not the original Python object.
+A Rollout result can remain a JSON response, while a custom application
+response may use another content type. A command result can instead contain
+exit status, bounded stdout and stderr, and artifact references.
 
 The complete input payload should not be persisted by default. Rollout payloads
 may contain model credentials, and Sandbox commands may contain sensitive
@@ -603,7 +612,13 @@ invocation record. If the backend contains a terminal result, it is returned
 without rerunning the workload.
 
 If the backend contains a start record but no live task or process and no
-terminal result, the invocation becomes `interrupted`.
+terminal result, retrieval infers `interrupted`; the process that disappeared
+does not need to write that state before failing.
+
+The initial same-session retrieval path combines durable records with the
+process-local live registry. A future storage-only retrieval path will need a
+lease or Runtime liveness signal to distinguish a live invocation from a stale
+start record without provisioning compute.
 
 Terminal persistence must complete before an app adapter releases AgentCore
 async-task tracking or a command adapter releases its equivalent busy lease.
@@ -670,11 +685,13 @@ InvokeAgentRuntime
   -> registered application handler for start only
 ```
 
-Foreground execution waits for the registered handler. Background execution
-retains the handler task, persists its terminal state, and uses AgentCore
-async-task tracking to keep the session busy. Both modes continue to use the
-upstream sync/async handler dispatch. Appendix A describes the initial
-in-process registry, persistence ordering, and cancellation limits.
+Both modes retain the same handler task, persist its terminal state, and use
+AgentCore async-task tracking to keep the session busy until terminal
+publication completes. Foreground execution waits for that task on the initial
+connection; background execution returns `in_progress` after the task is
+registered. Both modes continue to use the upstream sync/async handler
+dispatch. Appendix A describes the initial in-process registry, persistence
+ordering, and cancellation limits.
 
 ### Command adapter
 
@@ -683,18 +700,20 @@ in-container execution manager:
 
 ```text
 InvokeAgentRuntimeCommand
-  -> foreground command stream
-  or
-  -> RIP-aware detached launcher
+  -> RIP-aware command execution manager
        -> child process
        -> durable status and output
+       -> foreground stream and wait
+          or background handle
 ```
 
-Foreground commands continue using the native command stream. Detached
-commands need a process owner that persists status and output and maps
-cancellation to process-group termination. The current health shim may support
-ART validation, but it is not the permanent protocol boundary. Appendix A
-describes the prototype shape and the live validation it requires.
+Foreground commands should preserve the native user-visible stream where
+practical, while the command manager claims the invocation ID, tracks the
+process, and persists bounded terminal output. Background commands return a
+handle instead of waiting on that stream. Both modes need a process owner that
+maps cancellation to process-group termination. The current health shim may
+support ART validation, but it is not the permanent protocol boundary.
+Appendix A describes the prototype shape and the live validation it requires.
 
 ## Consumer 1: Rollout SDK
 
@@ -711,7 +730,7 @@ Its scope changes as follows:
 | Runtime app wrapper and entrypoint dispatch | Rollout SDK | RIP app adapter |
 | Foreground/background execution | Background-only Rollout SDK behavior | RIP |
 | Invocation identity, status, result, retry, and cancellation | Implicit across `runtimeSessionId`, S3 key, and `RolloutFuture` | RIP |
-| Background persistence and retrieval | Rollout SDK S3 implementation | RIP storage and retrieval adapters |
+| Invocation persistence and retrieval | Rollout SDK S3 implementation | RIP storage and retrieval adapters |
 | Runtime quota handling | `RolloutClient` | Shared RIP client machinery |
 | Default session cleanup policy | `RolloutFuture` always stops after retrieval or timeout | Rollout-specific configurable policy over RIP |
 | Model endpoint, model ID, and sampling configuration | `_rollout` payload | Rollout SDK |
@@ -802,8 +821,10 @@ result = sandbox.exec("pytest -q", timeout=900)
 ```
 
 The client holds the native command stream and returns `ExecResult`. RIP still
-provides a distinct invocation identity for correlation and future recovery,
-but the common path need not persist every foreground result.
+claims a distinct invocation identity, tracks the command as live, and
+persists its bounded terminal status and output. If the stream disconnects,
+the client can recover through the same invocation handle rather than rerun
+the command.
 
 Detached execution can be exposed through a Sandbox-specific API:
 
@@ -846,7 +867,7 @@ workloads.
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| RIP | Invocation identity, foreground/background delivery, lifecycle state, durable background result, retry semantics, wait/cancel, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
+| RIP | Invocation identity, foreground/background delivery, durable lifecycle state and bounded terminal result, retry semantics, wait/cancel, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
 | Rollout SDK | Rollout payload and model configuration, batch submission, grouping, rollout-oriented defaults and result policy | Generic app task management, trajectory capture, conversation storage |
 | Sandbox SDK | Sandbox sessions, command/shell/file UX, structured process results, Sandbox-specific handles | Agent payloads, rewards, trajectory capture |
 | Rollout Gateway | Token-level trajectory capture and trace construction | Runtime invocation lifecycle and result delivery |
@@ -886,7 +907,7 @@ same internal RIP handle without exposing a new public `Retriever` abstraction.
 
 - Introduce the generic app adapter and `AgentCoreRuntimeApp`.
 - Add foreground/background modes to the client machinery.
-- Add managed session storage as the default background backend.
+- Add managed session storage as the default invocation-state backend.
 - Preserve S3 as an optional backend and direct retrieval path.
 - Separate wait timeout, invocation cancellation, and session cleanup.
 - Refactor `RolloutClient` and `RolloutFuture` into rollout-facing wrappers
@@ -896,8 +917,10 @@ same internal RIP handle without exposing a new public `Retriever` abstraction.
 
 ### Phase 3: command adapter and detached Sandbox execution
 
-- Define the detached command launcher and process-group lifecycle.
-- Persist command status, exit code, and bounded output.
+- Define one command execution manager and process-group lifecycle for
+  foreground and detached commands.
+- Preserve foreground streaming while persisting command status, exit code,
+  and bounded output for recovery.
 - Add Sandbox-specific detached handles, polling, reattachment, and
   cancellation.
 - Verify lifecycle behavior with the current health shim while keeping native
@@ -918,10 +941,10 @@ same internal RIP handle without exposing a new public `Retriever` abstraction.
 
 - Should the generic RIP default be `background=false` while Rollout preserves
   a `background=true` default for existing training behavior?
-- Should successful foreground non-streaming results also be persisted for
-  recovery after client disconnect?
 - Should initial managed-storage retrieval use an internal
   `InvokeAgentRuntime` operation or an `InvokeAgentRuntimeCommand` helper?
+- What lease or Runtime liveness signal should a future storage-only retrieval
+  path use to distinguish `in_progress` from `interrupted`?
 - What is the public cancellation API for an app task versus a command process?
 - What mechanism keeps a detached Sandbox command's session alive without
   making the current health shim the permanent design?
@@ -1004,8 +1027,11 @@ creation:
   result.json
 ```
 
-The store is authoritative across process replacement. The live registry is
-only an optimization and a way to control work in the current process.
+The store is authoritative for invocation identity and terminal outcome across
+process replacement. The live registry controls work in the current process
+and establishes whether a start record still has a live execution owner. A
+future storage-only retrieval path needs an additional lease or Runtime
+liveness signal.
 
 ### App-handler `start`
 
@@ -1016,18 +1042,19 @@ The app wrapper can implement `start` in this order:
 3. Atomically claim the invocation ID in the selected store.
 4. If the ID already exists, return its observable state without entering the
    user handler.
-5. Register AgentCore async-task tracking for background work.
+5. Register AgentCore async-task tracking for the invocation.
 6. Create and retain a live task that calls the upstream `_invoke_handler`, so
    existing sync and async handler support remains unchanged.
 7. For foreground delivery, await the task and return its terminal response.
 8. For background delivery, return `in_progress` after the task and tracking
    state are installed.
-9. Publish the terminal result before releasing async-task tracking.
+9. Publish the terminal result before releasing async-task tracking or
+   removing the live registry entry.
 
 Persisting terminal state for foreground and background invocations gives both
-modes the same recovery semantics. A first implementation can choose not to
-persist foreground results, but then it cannot promise result recovery after a
-foreground connection is lost.
+modes the same recovery semantics. The execution task must be owned
+independently from the foreground request wait so losing that connection does
+not discard invocation tracking or terminal publication.
 
 ### App-handler `get`
 
@@ -1040,6 +1067,11 @@ live registry contains ID    -> in_progress
 start record exists only     -> interrupted
 no record exists             -> not_found
 ```
+
+Claiming the start record and installing the live registry entry must be
+serialized against `get`, so a concurrent read cannot mistake the brief
+registration window for interruption. After process replacement, the registry
+is empty and a remaining start-only record can be reported as `interrupted`.
 
 The client initially performs this operation through another
 `InvokeAgentRuntime` call using the same Runtime session ID. This path must be
@@ -1064,12 +1096,11 @@ Cancellation never calls `StopRuntimeSession`.
 
 ### Sandbox command operations
 
-Foreground `Sandbox.exec()` can continue to consume the native
-`InvokeAgentRuntimeCommand` stream directly.
-
-Detached execution requires a long-lived in-container process owner. The
-initial ART implementation can extend the Sandbox helper so a short command
-request asks that owner to:
+Foreground and detached execution both require a controllable in-container
+process owner for durable lifecycle semantics. The foreground path can keep
+consuming a user-visible `InvokeAgentRuntimeCommand` stream while the owner
+tracks and persists the same execution. The initial ART implementation can
+extend the Sandbox helper so a command request asks that owner to:
 
 - atomically claim the invocation ID;
 - start the workload in a controllable process group;
@@ -1093,6 +1124,11 @@ For either adapter, a repeated `start` with the same invocation ID:
 - returns the existing terminal state when complete;
 - returns `interrupted` when only the persistent start record remains; and
 - never starts the workload implicitly a second time.
+
+For a foreground retry, `in_progress` causes the client to wait or poll the
+existing invocation, while a terminal state replays the persisted response.
+An `interrupted` invocation is not automatically rerun because application
+side effects may already have occurred.
 
 Different invocation IDs remain distinct executions even when their payloads
 are identical or they share one Runtime session.
