@@ -9,9 +9,9 @@ runtime provisioning into the SDK (SandboxClient.create()), at which point
 this script goes away.
 """
 
+import tomllib
 from pathlib import Path
 
-import tomllib
 from bedrock_agentcore_starter_toolkit.services.runtime import BedrockAgentCoreClient
 
 

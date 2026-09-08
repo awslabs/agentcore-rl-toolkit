@@ -2,7 +2,7 @@
 name = "rollout-gateway-e2e-vllm"
 version = "0.1.0"
 description = "Env for the rollout_gateway real-model E2E test against a live vLLM server"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     # the package under test, from the local checkout (editable, see tool.uv.sources)
     "agentcore-rl-toolkit[gateway]",

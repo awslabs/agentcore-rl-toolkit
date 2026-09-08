@@ -7,7 +7,7 @@ name = "agentcore-rl-toolkit"
 version = "0.1.3"
 description = "Toolkit for Seamlessly Enabling RL Training with Bedrock AgentCore."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [
     {name = "Amazon Web Services - Labs", email = "opensource@amazon.com"}
@@ -16,7 +16,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -42,6 +41,16 @@ dev = [
     "transformers>=5.0",
     # openai: real-SDK wire-contract test for the gateway (Bearer-slot session capture).
     "openai>=1.0",
+    # Runtime deps of agentcore_rl_toolkit.{aws_tools,rollout_session} rather than
+    # test-only tools: tests/{aws_tools,rollout_session} import those packages, so
+    # without them the suite fails to collect. Taken as the [rollout] extra rather
+    # than relisted here — `uv sync --extra dev` is the one install the unit-test and
+    # pre-commit workflows do, and a second copy of that list is a second thing to
+    # keep in step. (The gateway deps above are spelled out instead because the tests
+    # need floors of their own: transformers>=5.0 for tokenizer.parse_response.)
+    "agentcore-rl-toolkit[rollout]",
+    # transformers above also covers the swe-agent example's rollout_batch.py,
+    # whose gateway endpoint measures tokenizer lengths.
 ]
 gateway = [
     # The rollout capture gateway (agentcore_rl_toolkit.rollout_gateway). Trainer-side
@@ -57,15 +66,41 @@ gateway = [
     "jmespath>=1.0",
 ]
 # NOTE: the Tinker backend (TinkerSdkBackend + TinkerRenderer) needs `tinker` and
-# `tinker-cookbook`, which require Python >=3.11. They are intentionally NOT declared as
-# an extra here: this package supports Python >=3.10, and pinning a >=3.11-only
-# dependency would make the resolution unsatisfiable on 3.10. Install them manually
-# (`pip install tinker tinker-cookbook`) on Python >=3.11 to use the Tinker backend.
+# `tinker-cookbook`; install them manually (`pip install tinker tinker-cookbook`) to use
+# it. They are not declared as an extra, but the reason they *could not* be is gone: it
+# was that they require Python >=3.11 while this package supported >=3.10, which made the
+# pin unsatisfiable on the floor. The floor is now >=3.11, so a [tinker] extra is
+# available whenever the backend wants one. Both pull torch.
 #
 # NOTE: HfTemplateRenderer parses tool calls with a dependency-free regex covering the
 # common <tool_call><function=...> format, and reasoning via a </think> split. Engine
 # tool/reasoning parsers (sglang, vllm) are not a declared dependency; a caller that
 # needs one for an exotic format installs it and passes a parser name explicitly.
+rollout = [
+    # Driving containerized rollouts: agentcore_rl_toolkit.aws_tools and
+    # .rollout_session. Trainer- and host-side only, like [gateway] — the agent-side
+    # surface (AgentCoreRLApp, RolloutClient) needs none of it, and neither does
+    # .concurrency, which has no third-party dependency at all.
+    # aioboto3: the async session in aws_tools.boto3_tools that every other aws_tools
+    # module builds on, and with it every rollout_session module above .wire.
+    # backoff: retry decorators over the ACR and HTTP calls in
+    # rollout_session.{agentcore,docker}_session.
+    # aiohttp: rollout_session.docker_session's HTTP wire calls to a local container.
+    # pydantic: the .wire types and the aws_tools models subclass BaseModel. Present
+    # transitively via bedrock-agentcore already, declared because these modules
+    # import it directly.
+    "aioboto3",
+    "backoff",
+    "aiohttp>=3.9",
+    "pydantic",
+]
+# NOTE: the batch-eval harness that drives these sessions is not in this package at
+# all — it is examples/openhands_swe_agent/rollout_batch.py, since a batch eval of
+# a dataset is a recipe's concern rather than the session layer's. It imports on
+# [rollout] alone; its VllmGatewayEndpoint stands up a capture gateway and so needs
+# [gateway] on top, but those imports sit inside `start()` so the Bedrock-only path
+# pays for none of it. The dataset and reporting tooling it reaches equally lazily
+# (polars, tqdm, aws-bedrock-token-generator) is in the swe-agent dependency group.
 slime = [
     # Proxy that sits between the agent and SGLang during training, capturing
     # token IDs and logprobs into TraceRecords that slime consumes as Samples.
@@ -107,6 +142,34 @@ verl = [
     "qwen-vl-utils",
 ]
 [dependency-groups]
+swe-agent = [
+    # What the host-side scripts of examples/openhands_swe_agent need beyond the
+    # toolkit itself -- preprocess.py (dataset build), analyze.py (run reports),
+    # evaluate.py (batch eval). A group rather than an extra because this is example
+    # tooling run from a checkout, not a surface an installed wheel should offer. The
+    # agent's own container image is built from that example's pyproject
+    # (openhands/strands harness deps), so none of that is duplicated here.
+    #
+    # The runtime deps of the toolkit packages those scripts drive (aws_tools,
+    # concurrency, rollout_session) are *not* here: they are in the [dev] extra,
+    # which is what the unit-test workflow installs. Run the host scripts from a root
+    # env synced with `--extra dev --extra gateway --group swe-agent`.
+    #
+    # preprocess.py: pulls the SWE-bench split from HF, then writes/reads the task
+    # parquet and the run records that analyze.py reports on. The example's own
+    # rollout_batch.run_eval reads that parquet too, importing polars inside the
+    # function for this reason.
+    "datasets",
+    "polars>=1.41.2",
+    # preprocess.py: swebench.harness.test_spec, for each task's eval commands.
+    "swebench",
+    # evaluate.py reaches these two through the example's own rollout_batch.py:
+    # run_eval's progress bar over the rollout fan-out, and BedrockEndpoint minting a
+    # Bedrock bearer token. Both are imported inside the functions that use them, so
+    # they are needed to *run* an eval, not to import the module.
+    "tqdm",
+    "aws-bedrock-token-generator>=1.1.0",
+]
 verl-ci = [
     # CI uses CPU torch and omits inference-only dependencies because the
     # integration tests fake the LLM-server seam.
@@ -143,21 +206,38 @@ Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 [tool.uv]
 # Declaring verl and rllm as conflicting extras lets uv resolve each
 # in its own fork instead of forcing one universal lock.
+#
+# swe-agent is in both sets for a different reason than the trainers are: not that it
+# cannot be installed with them, but that resolving it *together* with them costs the
+# trainer. It pulls swebench -> modal, which caps protobuf below 7, and a universal
+# resolution applies that cap to the verl fork too -- so a trainer env would silently
+# get protobuf 6.x to satisfy example tooling it never imports. Forking keeps the cap
+# where it belongs. The pairing with rllm falls out of the set and is no loss: nothing
+# drives this example from rllm.
 conflicts = [
     [
         { extra = "verl" },
         { extra = "rllm" },
         { group = "verl-ci" },
+        { group = "swe-agent" },
     ],
     # Installed alongside verl, so it needs a separate conflict group.
     [
         { extra = "rllm" },
         { group = "verl-ci" },
         { group = "verl-megatron" },
+        { group = "swe-agent" },
     ],
 ]
 override-dependencies = [
     { package = { name = "verl", version = "0.9.0" }, dependencies = ["transformers==5.12.1"] },
+    # aiobotocore caps botocore (3.9.0 pins <1.43.57), which strands the
+    # bedrock-agentcore-control model on a revision predating the capacity-provider
+    # API that aws_tools.agentcore_control calls. Override the cap so the newer
+    # service model wins; without this, create_capacity_provider raises
+    # OperationNotFoundError and agentcore_control_test.py cannot even collect.
+    "aiobotocore>=3.9.0",
+    "botocore>=1.43.79",
 ]
 
 [tool.uv.dependency-groups]

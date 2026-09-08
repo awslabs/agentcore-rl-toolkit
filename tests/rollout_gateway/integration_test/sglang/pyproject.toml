@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Env for the rollout_gateway real-model E2E test against a live SGLang server"
 # <3.13: sglang -> outlines-core==0.1.26 ships wheels only up to cp312
 # (building it from source needs a Rust toolchain)
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     # the package under test, from the local checkout (editable, see tool.uv.sources)
     "agentcore-rl-toolkit[gateway]",

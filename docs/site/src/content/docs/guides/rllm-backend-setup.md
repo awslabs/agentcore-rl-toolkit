@@ -8,7 +8,7 @@ This doc describes how to train an AgentCore Runtime-deployed agent with the
 
 ## Prerequisites
 
-- Python 3.10+ and [`uv`](https://docs.astral.sh/uv/).
+- Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
 - A clone of this repo (`agentcore-rl-toolkit`).
 - AWS credentials with permission to invoke an AgentCore Runtime and
   read/write an S3 bucket.

@@ -1,6 +1,6 @@
+import tomllib
 from pathlib import Path
 
-import tomllib
 from bedrock_agentcore_starter_toolkit.services.runtime import BedrockAgentCoreClient
 from dotenv import dotenv_values
 
