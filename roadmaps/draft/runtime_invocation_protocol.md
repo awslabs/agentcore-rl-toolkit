@@ -75,6 +75,18 @@ Foreground and background delivery follow from that abstraction. They are not
 two execution lifecycles. Foreground means start and wait; background means
 start and return the invocation handle.
 
+Connection independence alone is not invocation durability. A process manager
+can keep work running after a stream disconnects and allow a client to
+reconnect while the same execution environment remains live. RIP additionally
+preserves invocation identity and terminal outcome after process-local state
+or the execution environment is lost:
+
+```text
+request-stream continuity
+  < reconnectable task, process, or shell
+  < durable invocation identity and terminal result
+```
+
 ## Reference pattern: OpenAI Responses
 
 The
@@ -151,8 +163,8 @@ shortened from this point onward to **RIP**:
 
 - **Runtime** limits the scope to execution on AgentCore Runtime rather than
   AgentCore Memory, Gateway, Identity, or other services.
-- **Invocation** includes both `InvokeAgentRuntime` and
-  `InvokeAgentRuntimeCommand`: one logical handler or process execution.
+- **Invocation** includes one logical application-handler or process
+  execution, independently of the AgentCore transport used to reach it.
 - **Protocol** means the shared identities, operations, state transitions,
   persistence rules, and request and response envelopes observed across
   clients and execution adapters. It does not require one AWS API or one
@@ -169,7 +181,7 @@ ART already has two execution-facing SDK surfaces:
 | Consumer | Execution target | Current behavior | Missing or coupled behavior |
 | --- | --- | --- | --- |
 | Rollout SDK | An application handler reached through `InvokeAgentRuntime` | Detaches every handler, writes results to S3, and returns a `RolloutFuture` | Foreground delivery, per-invocation identity, storage-independent retrieval, sticky-session follow-up, and separation from RL naming |
-| Sandbox SDK | A shell command reached through `InvokeAgentRuntimeCommand` | Streams one command synchronously and returns `ExecResult` | Detached execution, durable handles, polling, cancellation, reconnection, and recovery |
+| Sandbox SDK | A process in an isolated Runtime session | Reaches one command through `InvokeAgentRuntimeCommand`, consumes its stream synchronously, and returns `ExecResult` | Detached execution, durable handles, polling, cancellation, reconnection, and recovery |
 
 These surfaces use different AgentCore APIs, but need the same answers to:
 
@@ -182,8 +194,9 @@ These surfaces use different AgentCore APIs, but need the same answers to:
 - Which state must survive execution-environment replacement?
 
 RIP defines those semantics once. An app-handler adapter may carry RIP through
-`InvokeAgentRuntime`; a command adapter may carry it through
-`InvokeAgentRuntimeCommand`.
+`InvokeAgentRuntime`. A Sandbox process adapter may use the invocation path,
+the command path plus an in-container helper, or future native service support.
+The protocol does not require one transport.
 
 ### Rollout SDK
 
@@ -241,9 +254,16 @@ handle that can survive client disconnects and support status, result,
 cancellation, and reattachment.
 
 That is the same lifecycle problem as a background rollout, even though the
-execution target is a process rather than an application handler. The command
-API itself is also an invocation API: `InvokeAgentRuntimeCommand` begins a
-logical unit of work in a Runtime session.
+execution target is a process rather than an application handler.
+
+AgentCore also provides a native
+[interactive shell](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-shell-execution.html)
+with a named shell, persistent PTY, and reconnection behavior. That solves
+interactive terminal continuity, but a shell ID identifies the terminal rather
+than each command run inside it. It does not by itself define per-command
+idempotency, structured status, or durable terminal results. The Sandbox SDK
+can expose the native shell directly while using RIP for foreground and
+detached command execution.
 
 The implementations need not be identical. For example, app cancellation may
 cancel an asyncio task, while command cancellation may terminate a process
@@ -299,8 +319,9 @@ group. RIP defines their common observable semantics.
 - Treating process-local Python variables as a supported result backend.
 - Protecting protocol files from arbitrary code running inside the same
   Runtime session.
-- Solving Sandbox image provisioning, health-shim port conflicts, interactive
-  shell design, or file transfer.
+- Solving Sandbox image provisioning, health-shim port conflicts, file
+  transfer, or reimplementing the native AgentCore interactive-shell protocol
+  and terminal UX.
 
 ## Identity model
 
@@ -492,7 +513,7 @@ underlying operation where practical.
 Every invocation still persists lifecycle and terminal status, but replaying
 stream contents requires bounded, reconstructable output. The first
 implementation should not promise recovery of unsupported unbounded streams
-or silently buffer them. A Sandbox command adapter may persist bounded stdout
+or silently buffer them. A Sandbox process adapter may persist bounded stdout
 and stderr or store larger output as artifacts under an explicit policy.
 
 ## Persistence and retrieval
@@ -621,8 +642,9 @@ lease or Runtime liveness signal to distinguish a live invocation from a stale
 start record without provisioning compute.
 
 Terminal persistence must complete before an app adapter releases AgentCore
-async-task tracking or a command adapter releases its equivalent busy lease.
-Otherwise, the environment may become idle before the result is durable.
+async-task tracking or a Sandbox process adapter releases its equivalent busy
+lease. Otherwise, the environment may become idle before the result is
+durable.
 
 The behavior when terminal persistence repeatedly fails requires a bounded
 retry and failure policy. The adapter must not report successful delivery
@@ -662,8 +684,8 @@ RIP clients should model these as separate constraints:
   capacity.
 
 Whether a request can create a session is not determined solely by whether its
-API name contains `Command`. Both app and command adapters begin with an
-`Invoke...` operation and can target a new session. Exact resume and quota
+API name contains `Command`. App and Sandbox transports use AgentCore
+data-plane operations and may target a new session. Exact resume and quota
 behavior should be verified in live integration tests rather than inferred
 from the transport name.
 
@@ -693,27 +715,33 @@ registered. Both modes continue to use the upstream sync/async handler
 dispatch. Appendix A describes the initial in-process registry, persistence
 ordering, and cancellation limits.
 
-### Command adapter
+### Sandbox process adapter
 
-The command adapter carries RIP through `InvokeAgentRuntimeCommand` and an
-in-container execution manager:
+The Sandbox process adapter needs an in-container execution manager that owns
+the child process independently from the initial client connection. The
+following diagram is illustrative; it does not select the public API, the
+AgentCore transport, or the permanent location of that manager:
 
 ```text
-InvokeAgentRuntimeCommand
-  -> RIP-aware command execution manager
+AgentCore data-plane operation
+  -> RIP-aware Sandbox process manager
        -> child process
        -> durable status and output
        -> foreground stream and wait
           or background handle
 ```
 
-Foreground commands should preserve the native user-visible stream where
-practical, while the command manager claims the invocation ID, tracks the
-process, and persists bounded terminal output. Background commands return a
-handle instead of waiting on that stream. Both modes need a process owner that
-maps cancellation to process-group termination. The current health shim may
-support ART validation, but it is not the permanent protocol boundary.
-Appendix A describes the prototype shape and the live validation it requires.
+Foreground and background are client delivery choices over the same managed
+process. Foreground waits on the initial connection where practical;
+background returns a handle. In both cases the manager claims the invocation
+ID, tracks the process, persists bounded terminal output, and maps cancellation
+to process-group termination.
+
+An initial ART prototype could extend the existing Sandbox helper and reach it
+through the invocation path. It could instead use the command path plus a
+local helper, and native AgentCore support may eventually replace both. These
+are implementation candidates, not protocol requirements. Appendix A
+describes the illustrative prototype shape and required validation.
 
 ## Consumer 1: Rollout SDK
 
@@ -807,29 +835,38 @@ RIP applies specifically to command execution lifecycle. It does not absorb:
 
 - image adaptation or Runtime provisioning;
 - Sandbox session creation and attachment APIs;
-- interactive shell semantics;
+- native interactive-shell transport or terminal semantics;
 - file transfer;
 - task and verifier contracts; or
 - the platform work needed to remove the current health-shim port conflict.
 
+The native AgentCore interactive shell remains a separate Sandbox surface for
+persistent terminal sessions. RIP applies when one command needs its own
+identity, foreground or detached delivery, structured status, durable result,
+retry semantics, and cancellation target.
+
 ### Concrete Sandbox flows
 
-Foreground execution remains simple:
+The following API shapes are illustrative. They demonstrate user-visible
+semantics without fixing method names, transport selection, or whether the
+initial implementation extends `agentcore-sandboxd`.
+
+Foreground execution can remain simple:
 
 ```python
 result = sandbox.exec("pytest -q", timeout=900)
 ```
 
-The client holds the native command stream and returns `ExecResult`. RIP still
-claims a distinct invocation identity, tracks the command as live, and
-persists its bounded terminal status and output. If the stream disconnects,
-the client can recover through the same invocation handle rather than rerun
-the command.
+The process adapter starts one managed execution and the client waits for it on
+the initial connection. RIP still claims a distinct invocation identity,
+tracks the command as live, and persists its bounded terminal status and
+output. If the connection drops, the client can recover through the same
+invocation handle rather than rerun the command.
 
 Detached execution can be exposed through a Sandbox-specific API:
 
 ```python
-# Illustrative naming only.
+# Illustrative naming and return types only.
 handle = sandbox.spawn("pytest -q", timeout=900)
 
 status = handle.status()
@@ -839,7 +876,7 @@ result = handle.result(timeout=1200)
 Underneath:
 
 1. the Sandbox client creates an invocation ID;
-2. the command adapter starts a RIP-aware detached command in the target
+2. the Sandbox process adapter starts a RIP-aware detached command in the target
    Runtime session;
 3. the command continues after the initial client connection returns;
 4. status and terminal output are persisted in the session-scoped backend;
@@ -915,16 +952,18 @@ same internal RIP handle without exposing a new public `Retriever` abstraction.
 - Keep rollout payload fields and trainer-facing batching outside the generic
   layer.
 
-### Phase 3: command adapter and detached Sandbox execution
+### Phase 3: Sandbox process adapter and detached execution
 
-- Define one command execution manager and process-group lifecycle for
+- Define one Sandbox process manager and process-group lifecycle for
   foreground and detached commands.
 - Preserve foreground streaming while persisting command status, exit code,
   and bounded output for recovery.
 - Add Sandbox-specific detached handles, polling, reattachment, and
   cancellation.
-- Verify lifecycle behavior with the current health shim while keeping native
-  platform support as the intended destination.
+- Prototype invocation-path dispatch through the current Sandbox helper, while
+  treating the exact transport and helper shape as replaceable.
+- Keep native Interactive Shell as a separate Sandbox surface and native
+  durable process support as the intended destination.
 
 ### Phase 4: hardening and upstreaming
 
@@ -941,8 +980,11 @@ same internal RIP handle without exposing a new public `Retriever` abstraction.
 
 - Should the generic RIP default be `background=false` while Rollout preserves
   a `background=true` default for existing training behavior?
-- Should initial managed-storage retrieval use an internal
-  `InvokeAgentRuntime` operation or an `InvokeAgentRuntimeCommand` helper?
+- Which initial transport should reach the Sandbox process manager:
+  invocation-path dispatch, the command path plus a local helper, or another
+  service-supported mechanism?
+- Should initial managed-storage retrieval use an internal invocation
+  operation or a deterministic command helper?
 - What lease or Runtime liveness signal should a future storage-only retrieval
   path use to distinguish `in_progress` from `interrupted`?
 - What is the public cancellation API for an app task versus a command process?
@@ -1097,10 +1139,22 @@ Cancellation never calls `StopRuntimeSession`.
 ### Sandbox command operations
 
 Foreground and detached execution both require a controllable in-container
-process owner for durable lifecycle semantics. The foreground path can keep
-consuming a user-visible `InvokeAgentRuntimeCommand` stream while the owner
-tracks and persists the same execution. The initial ART implementation can
-extend the Sandbox helper so a command request asks that owner to:
+process owner for durable lifecycle semantics. One illustrative ART
+implementation extends the Sandbox helper so its invocation path dispatches
+`start`, `get`, and `cancel` to a process manager:
+
+```text
+InvokeAgentRuntime
+  -> Sandbox helper
+       -> start / get / cancel
+       -> invocation store
+       -> live process registry
+       -> child process group
+```
+
+This diagram is not a fixed wire contract. The same manager could be reached
+through another data-plane operation or replaced by native service support.
+Regardless of transport, the owner needs to:
 
 - atomically claim the invocation ID;
 - start the workload in a controllable process group;
@@ -1111,10 +1165,14 @@ extend the Sandbox helper so a command request asks that owner to:
 Simply launching `nohup <command> &` through `InvokeAgentRuntimeCommand` is not
 a sufficient design until live testing proves that descendants survive the
 command stream and that the Runtime session remains active. The current
-`agentcore-sandboxd` process can temporarily own detached children or expose a
-local control channel during ART validation. Native Sandbox support should
-ultimately replace this mechanism without requiring a workload-visible server
-or reserved port.
+`agentcore-sandboxd` process can temporarily own detached children, but that is
+an implementation experiment rather than a commitment to make the health shim
+the permanent protocol boundary.
+
+The native AgentCore Interactive Shell should remain a direct Sandbox feature
+for PTY-oriented workflows. Using one shell per command may be a useful
+experiment, but RIP must not depend on undocumented retention of a terminated
+shell or infer per-command status from an interactive byte stream.
 
 ### Duplicate and recovery behavior
 
@@ -1132,3 +1190,55 @@ side effects may already have occurred.
 
 Different invocation IDs remain distinct executions even when their payloads
 are identical or they share one Runtime session.
+
+## Appendix B: Related process and connection models
+
+This appendix records implementation precedents that inform the Sandbox
+adapter. They support the separation between delivery mode and execution
+lifecycle, but none is a protocol dependency.
+
+### Comparison
+
+| Model | Execution identity | Disconnect behavior | Later retrieval | Retry behavior |
+| --- | --- | --- | --- | --- |
+| `InvokeAgentRuntimeCommand` | Initial command request and stream | Provides structured one-shot output while the stream is available | No separate durable command handle is exposed to the current Sandbox SDK | Retrying is a new command |
+| AgentCore Interactive Shell | Runtime session ID plus shell ID | The named PTY can continue and reconnect | Replays bounded terminal output, but does not define a durable result for each command entered in the shell | A shell ID reconnects a terminal; it is not a per-command idempotency key |
+| E2B `envd` | Process ID or tag | The process is owned independently from the request stream | A client can reconnect to a live process; the inspected implementation retains terminal status briefly but does not replay missed output | Starting again creates another process |
+| RIP Sandbox process adapter | Invocation ID | The managed process continues independently from the initial wait | Durable status and bounded terminal result are retrieved by invocation ID | Reusing an invocation ID addresses the existing execution |
+
+The AgentCore
+[interactive-shell documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-command-shell.html)
+shows that persistent terminal identity and reconnect are native Runtime
+capabilities. The shell is therefore the right substrate for interactive
+terminal UX, while RIP supplies the missing per-command durable lifecycle.
+
+The
+[E2B SDK](https://github.com/e2b-dev/E2B)
+follows the same delivery-mode pattern proposed here:
+[`run`](https://github.com/e2b-dev/E2B/blob/main/packages/js-sdk/src/sandbox/commands/index.ts)
+always starts a process handle, then either returns that handle for background
+execution or waits on it for foreground execution. Its
+[`CommandHandle`](https://github.com/e2b-dev/E2B/blob/main/packages/js-sdk/src/sandbox/commands/commandHandle.ts)
+can disconnect without killing the process and reconnect by process ID.
+
+The corresponding `envd` implementation lives in the
+[E2B infrastructure repository](https://github.com/e2b-dev/infra). Its
+[`Start`](https://github.com/e2b-dev/infra/blob/main/packages/envd/internal/services/process/start.go)
+implementation deliberately owns the process independently from request
+cancellation. Its current
+[process service](https://github.com/e2b-dev/infra/blob/main/packages/envd/internal/services/process/service.go)
+keeps live process state in memory and briefly retains terminal status, while
+missed output is not replayed. This makes it a useful precedent for process
+continuity, but not a substitute for RIP's durable invocation record,
+idempotent claim, and terminal-result retrieval.
+
+The resulting distinction is:
+
+```text
+E2B envd and AgentCore Interactive Shell
+  -> execution can outlive a connection
+
+RIP
+  -> invocation identity and terminal result can outlive process-local state
+     and the execution environment
+```
