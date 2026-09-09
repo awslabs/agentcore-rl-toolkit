@@ -3,7 +3,7 @@
 A :class:`RolloutSession` runs one rollout behind ``setup`` / ``run`` / ``shutdown``,
 as an async context manager whose exit always shuts the session down.
 :func:`run_rollout_with_bounds` drives that lifecycle under the shared limits in
-:class:`ContainerBounds`.
+:class:`RolloutSessionBounds`.
 """
 
 import asyncio
@@ -44,8 +44,8 @@ class RolloutSession(Protocol):
 
 
 @dataclasses.dataclass
-class ContainerBounds:
-    """Everything that bounds a container rollout: concurrency, priority, rate, time.
+class RolloutSessionBounds:
+    """Everything that bounds a rollout session: concurrency, priority, rate, time.
 
     One instance is built per experiment and shared by every rollout -- that sharing is
     what makes the semaphores cap anything. The two assigners are separate so container
@@ -64,7 +64,7 @@ class ContainerBounds:
 
 async def run_rollout_with_bounds(
     session_state: PersistentDict,
-    bounds: ContainerBounds,
+    bounds: RolloutSessionBounds,
     priority_key: str,
     session: RolloutSession,
     task: dict,

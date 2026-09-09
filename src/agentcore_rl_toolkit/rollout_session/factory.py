@@ -1,6 +1,6 @@
 """The single config -> :class:`RolloutSession` mapping, kept verl-free."""
 
-from typing import Protocol, runtime_checkable
+from typing import Required, TypedDict
 
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict
 
@@ -9,15 +9,17 @@ from .docker_session import DockerSession
 from .lifecycle import RolloutSession
 
 
-@runtime_checkable
-class SessionConfig(Protocol):
-    """The fields :func:`make_session` reads off a config.
+class SessionBackendConfig(TypedDict, total=False):
+    """The keys :func:`make_session` reads.
 
-    Structural so this module need not import the trainer's config dataclass (which
-    would pull in verl). ``backend`` is the hydra key ``container_agent_loop.backend``.
+    A plain mapping so the trainer can hand over its ``rollout_session_backend``
+    config node whole, and so this module need not import the trainer's config
+    dataclass (which would pull in verl). ``backend`` is the hydra key
+    ``rollout_session_agent_loop.rollout_session_backend.backend``; every other key
+    belongs to one backend and only that backend's keys have to be set.
     """
 
-    backend: str
+    backend: Required[str]
     agentcore_runtime_arn: str | None
     capacity_provider_arn: str | None
     agent_image_uri: str | None
@@ -28,28 +30,34 @@ class SessionConfig(Protocol):
 
 def make_session(
     session_id: str,
-    cfg: SessionConfig,
+    cfg: SessionBackendConfig,
     meta: PersistentDict,
 ) -> RolloutSession:
-    """Construct the rollout session named by ``cfg.backend``."""
-    kind = cfg.backend
+    """Construct the rollout session named by ``cfg["backend"]``."""
+    kind = cfg["backend"]
     if kind == "agentcore":
-        assert cfg.agentcore_runtime_arn is not None and cfg.capacity_provider_arn is not None
+        runtime_arn = cfg.get("agentcore_runtime_arn")
+        capacity_provider_arn = cfg.get("capacity_provider_arn")
+        assert runtime_arn is not None and capacity_provider_arn is not None
         return AgentCoreSession(
             session_id,
             session_state=meta,
-            runtime_arn=cfg.agentcore_runtime_arn,
-            capacity_provider_arn=cfg.capacity_provider_arn,
+            runtime_arn=runtime_arn,
+            capacity_provider_arn=capacity_provider_arn,
         )
     if kind == "docker":
-        assert cfg.agent_image_uri is not None and cfg.docker_iam_role_arn is not None
-        assert cfg.docker_log_group is not None and cfg.docker_log_region is not None
+        agent_image_uri = cfg.get("agent_image_uri")
+        iam_role_arn = cfg.get("docker_iam_role_arn")
+        log_group = cfg.get("docker_log_group")
+        log_region = cfg.get("docker_log_region")
+        assert agent_image_uri is not None and iam_role_arn is not None
+        assert log_group is not None and log_region is not None
         return DockerSession(
             session_id,
             session_state=meta,
-            agent_image_uri=cfg.agent_image_uri,
-            iam_role_arn=cfg.docker_iam_role_arn,
-            log_group=cfg.docker_log_group,
-            log_region=cfg.docker_log_region,
+            agent_image_uri=agent_image_uri,
+            iam_role_arn=iam_role_arn,
+            log_group=log_group,
+            log_region=log_region,
         )
-    raise ValueError(f"Unknown container_agent_loop.backend={kind!r}, expected 'agentcore' or 'docker'")
+    raise ValueError(f"Unknown rollout_session_backend.backend={kind!r}, expected 'agentcore' or 'docker'")
