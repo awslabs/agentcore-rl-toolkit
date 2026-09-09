@@ -17,7 +17,7 @@ That couples optimization dynamics to agent trajectory shape. Two batches contai
 same number of source prompts can take different numbers of Adam steps solely because one
 batch produced more branch rows.
 
-The proposed fix makes optimizer-step count depend on the configured source-prompt batch,
+The implementation makes optimizer-step count depend on the configured source-prompt batch,
 while still training every emitted row:
 
 ```
@@ -29,19 +29,14 @@ actor optimizer steps
 ```
 
 The worker already exposes the right interface: `TrainingWorker.train_mini_batch` accepts
-`num_mini_batch` as an alternative to a fixed `mini_batch_size`. The implementation should
-use that interface, pad only enough for the configured number of actor optimizer partitions
-and actor data-parallel ranks, and otherwise preserve V1's current whole-batch DP balancing.
+`num_mini_batch` as an alternative to a fixed `mini_batch_size`. The custom trainer uses
+that interface, pads only enough for the configured number of actor optimizer partitions
+and actor data-parallel ranks, and otherwise preserves V1's whole-batch DP balancing.
 
 The integration uses verl's public trainer registry and subclasses `PPOTrainerSync`.
 The recipes set verl's official `VERL_USE_EXTERNAL_MODULES` variable before invoking
-default `main_ppo`, so both the driver and inherited Ray task-runner actor import the
-registration module before their process-local trainer lookup.
-
-**Status:** implemented and validated in this worktree. A one-step, eight-GPU
-Qwen3-4B/GSM8K run validated the full FSDP + ACR path. A 101-step
-Qwen3-Coder-30B-A3B MigrationBench run validated the Megatron + LoRA path and
-reached a best validation reward of 0.7876.
+`python -m verl.trainer.main_ppo`, so both the driver and inherited Ray task-runner
+actor import the registration module before their process-local trainer lookup.
 
 ## Goals
 
@@ -56,8 +51,8 @@ reached a best validation reward of 0.7876.
   replacing worker engines, or monkey-patching from the agent-loop manager.
 - Keep FSDP and Megatron behavior behind the same `TrainingWorker.train_mini_batch`
   contract.
-- Fail early on configurations outside the first implementation's intentionally narrow,
-  tested contract instead of partially supporting them.
+- Fail early on configurations outside the tested contract instead of partially
+  supporting them.
 
 ## Non-goals
 
@@ -67,19 +62,16 @@ reached a best validation reward of 0.7876.
 - Changing how branch rows are weighted. More branches still contribute more additive loss
   mass, as they do today.
 - Changing GRPO advantage grouping. verl computes and broadcasts multi-trajectory
-  advantages before the actor update; this proposal only changes update partitioning.
+  advantages before the actor update; this implementation only changes update partitioning.
 - Changing dynamic micro-batching. `use_dynamic_bsz` decides how one optimizer partition is
   split into forward/backward micro-batches; it does not decide how many optimizer steps
   occur.
-- Supporting async trainer modes in the first implementation. The AgentCore recipes use
-  `PPOTrainerSync`; the batching helper itself should remain mode-agnostic so the mixin can
-  be reused later.
-- Supporting a critic in the first implementation. The checked-in AgentCore recipes use
-  actor-only GRPO; critic scheduling should be handled by a generic upstream verl change.
-- Supporting on-policy distillation in the first implementation.
+- Supporting async trainer modes. The AgentCore example scripts use `PPOTrainerSync`.
+- Supporting a critic. The AgentCore example scripts use actor-only GRPO.
+- Supporting on-policy distillation.
 - Restoring legacy V0's per-mini-batch DP token balancing. V0 implements
   `_balance_batch(..., keep_minibatch=True)`; V1 retains the argument but ignores it and
-  balances only the whole batch across DP ranks. This proposal deliberately preserves the
+  balances only the whole batch across DP ranks. This implementation preserves the
   V1 behavior.
 
 ## Terminology
@@ -90,10 +82,6 @@ reached a best validation reward of 0.7876.
   several.
 - **optimizer partition** — the global row chunk consumed by one optimizer step, before it
   is split over DP ranks.
-
-In earlier discussion, “partition” referred to the global chunk before DP split. This
-document uses **optimizer partition** for that concept; it does not introduce a separate
-name for each rank's local slice.
 
 ## Current verl behavior
 
@@ -125,7 +113,7 @@ The relevant verl 0.9.0 path is:
 Legacy V0 has a `keep_minibatch=True` path that balances each configured mini-batch across
 DP separately. V1's `_balance_batch` signature still contains `keep_minibatch`, but its
 implementation does not branch on it: V1 always balances the whole padded batch into
-`dp_size` contiguous rank chunks. This proposal does not change that behavior.
+`dp_size` contiguous rank chunks. The custom trainer does not change that behavior.
 
 For the MigrationBench recipe:
 
@@ -190,21 +178,17 @@ optimizer steps.
 For `ppo_epochs > 1`, verl's worker repeats the `M` partitions once per epoch, so the
 result is `M * ppo_epochs` steps.
 
-### 2. Keep the first implementation actor-only
+### 2. Keep the supported contract actor-only
 
 The generic actor/critic case requires coordinating two potentially different DP sizes and
-two mini-batch schedules. That is a valid upstream verl problem, but it is not needed to
-validate the AgentCore training result.
+two mini-batch schedules. It is outside this trainer's supported contract.
 
-The custom trainer should call verl's `need_critic(config)` during construction and reject
+The custom trainer calls verl's `need_critic(config)` during construction and rejects
 the configuration if it returns true:
 
 ```python
 if need_critic(config):
-    raise NotImplementedError(
-        "agentcore_sync currently supports actor-only training; "
-        "use a default verl trainer for actor-critic training"
-    )
+    raise ValueError("agentcore_sync supports only actor-only training")
 ```
 
 This makes the scheduling model unambiguous:
@@ -232,33 +216,31 @@ The target row count is:
 T_padded = ceil(T / G) * G
 ```
 
-This is the minimum size that gives every actor `(DP rank, optimizer partition)` balance
-partition equal row cardinality.
+This is the minimum size that gives every `(DP rank, optimizer partition)` pair
+the same number of rows.
 
 Examples:
 
 | Case | Real rows | Old required multiple | New required multiple | Padded rows |
 |---|---:|---:|---:|---:|
-| Migration recipe, `D=2`, `A=1` | 513 | 512 | 2 | 514 |
-| `D=2`, actor `A=4` | 270 | depends on `rollout.n` | 8 | 272 |
+| Migration recipe, `D=2`, `M=1` | 513 | 512 | 2 | 514 |
+| `D=2`, actor `M=4` | 270 | depends on `rollout.n` | 8 | 272 |
 | `D=4`, actor `M=3` | 601 | depends on `rollout.n` | 12 | 612 |
 
 The existing verl `upsample_batch_to_divisible_size` helper remains suitable: its synthetic
 rows have a two-token `[EOS, EOS]` shape, zero response/loss masks, zero rewards/logprobs,
 fresh padding UIDs, and `is_padding=True`. Only the requested multiple changes.
 
-Efficient padding and stable optimizer-step count are logically separable, but they should
-land in the same implementation because both derive from the same schedule plan. Applying
-only the `num_mini_batch` change would still leave unnecessary padding; applying only the
-padding change would make the fixed-size worker iterator fail or continue producing a
+Efficient padding and stable optimizer-step count are logically separable, but both are
+implemented here because they derive from the same schedule. Applying only the
+`num_mini_batch` change would leave unnecessary padding; applying only the padding
+change would make the fixed-size worker iterator fail or continue producing a
 variable step count.
 
 ### 4. Preserve V1's existing whole-batch DP balancing
 
-No custom row-layout algorithm is needed.
-
 The subclass changes `_get_required_batch_multiple(dp_size)` to return `D * M`, then calls
-the inherited V1 `_balance_batch` unchanged. Stock V1 will:
+the inherited V1 `_balance_batch` unchanged. The inherited implementation:
 
 1. pad the expanded batch to a multiple of `D * M`;
 2. token-balance the whole padded batch into `D` equal-cardinality contiguous rank chunks;
@@ -271,8 +253,9 @@ Each rank therefore receives `N / D` rows. The worker receives
 local_mini_batch_size = (N / D) / M = N / (D * M)
 ```
 
-Padding to `D * M` is exactly what makes that quantity integral. Nothing needs to define or
-store the per-rank, per-mini-batch row count separately.
+Because the padded row count is divisible by `D * M`, V1 can first split the rows
+evenly across `D` ranks, and each worker can then split its local rows evenly into
+`M` mini-batches.
 
 For `M > 1`, individual local mini-batches may have uneven token workloads even though each
 rank's whole chunk is balanced. That matches current V1 behavior and affects performance,
@@ -284,7 +267,7 @@ different optimizer partitions, which is acceptable for the current additive obj
 
 ### 5. Select `num_mini_batch`, not `mini_batch_size`
 
-For actor updates, the custom trainer should pass:
+For actor updates, the custom trainer passes:
 
 ```python
 nominal_global_batch_size = (
@@ -319,30 +302,28 @@ Collapsing several expanded-row chunks into one optimizer step therefore behaves
 gradient accumulation of their additive losses before Adam, instead of silently averaging
 away branch rows. Padding rows have zero loss masks and add no gradient.
 
-**Scope note:** this PR changes optimizer-step scheduling, not objective weighting. It
+This implementation changes optimizer-step scheduling, not objective weighting. It
 preserves the nominal `global_batch_size` denominator and therefore preserves the current
 additive branch-row semantics: a rollout that emits more real branch rows contributes more
 aggregate loss mass. Normalizing by actual expanded rows or first reducing rows per
 rollout/session would define a different objective and belongs in a separate design and
 change.
 
-### 6. Fail fast outside the validated first-version contract
+### 6. Fail fast outside the validated contract
 
-`AgentCorePPOTrainerSync.__init__` should validate the whole supported surface before
-calling `super().__init__` far enough to create workers:
+`AgentCorePPOTrainerSync.__init__` validates the supported surface before
+initializing the base trainer:
 
 ```python
 def validate_agentcore_sync_config(config) -> None:
     if not config.trainer.use_v1:
         raise ValueError("agentcore_sync requires trainer.use_v1=true")
     if need_critic(config):
-        raise NotImplementedError("agentcore_sync does not support a critic yet")
+        raise ValueError("agentcore_sync supports only actor-only training")
     if is_distillation_enabled(config.get("distillation")):
-        raise NotImplementedError("agentcore_sync does not support distillation yet")
+        raise ValueError("agentcore_sync does not support distillation")
     if config.actor_rollout_ref.actor.loss_agg_mode != "seq-mean-token-sum":
-        raise NotImplementedError(
-            "agentcore_sync currently requires loss_agg_mode=seq-mean-token-sum"
-        )
+        raise ValueError("agentcore_sync requires loss_agg_mode=seq-mean-token-sum")
 
     train_batch_size = config.data.train_batch_size
     ppo_mini_batch_size = config.actor_rollout_ref.actor.ppo_mini_batch_size
@@ -352,11 +333,11 @@ def validate_agentcore_sync_config(config) -> None:
         )
 ```
 
-After the custom registry alias is normalized to default `"sync"` semantics, also assert
-`parameter_sync_step == 1`. The schedule is defined per sync `_step_once`; supporting
-multi-trigger async schedules should be an upstream generalization.
+After the custom registry alias is normalized to `"sync"` semantics, the trainer
+also requires `parameter_sync_step == 1`. The schedule is defined per synchronous
+`_step_once`; multi-trigger asynchronous schedules are outside this contract.
 
-These checks intentionally match the two checked-in, end-to-end-tested AgentCore recipes.
+These checks match the two end-to-end-tested AgentCore example scripts.
 They do not reject unrelated actor features such as FSDP versus Megatron, LoRA, reference
 policy/KL, rollout correction, dynamic micro-batching, or `ppo_epochs >= 1`.
 
@@ -365,8 +346,7 @@ policy/KL, rollout correction, dynamic micro-batching, or `ppo_epochs >= 1`.
 ### Public interface to use: trainer registry
 
 verl's registry accepts any `PPOTrainer` subclass, but the concrete lifecycle contract is
-mode-specific. This implementation should directly subclass and register the default sync
-trainer:
+mode-specific. `AgentCorePPOTrainerSync` subclasses and registers `PPOTrainerSync`:
 
 ```python
 from omegaconf import open_dict
@@ -388,11 +368,11 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
 The normalization to `"sync"` is necessary in verl 0.9.0 because the base trainer uses the
 literal mode string to select `ReplayBuffer` versus `ReplayBufferAsync`, exact-refill
 behavior, and mode-specific config. The custom registry name is only a lookup key; runtime
-semantics remain default sync.
+semantics remain synchronous.
 
 ### Trainer registration through verl external modules
 
-Default `TaskRunnerV1.run()` performs:
+`TaskRunnerV1.run()` performs:
 
 ```python
 trainer_cls = get_trainer_cls(config.trainer.v1.trainer_mode)
@@ -414,7 +394,7 @@ The full import/registration chain is:
    decorator updates the registry in that process.
 3. The locally spawned Ray task-runner actor inherits the environment and performs the
    same external-module import during its own verl initialization.
-4. Default `TaskRunnerV1.run()` performs the lookup and owns initialization, TransferQueue,
+4. `TaskRunnerV1.run()` performs the lookup and owns initialization, TransferQueue,
    fitting, logger shutdown, and queue shutdown.
 
 The registry remains process-local, but the official environment-based module discovery
@@ -430,90 +410,64 @@ The trainer registry expresses the ownership correctly and is easier to test.
 
 ### Trainer override surface
 
-The custom subclass should override only:
+The custom subclass overrides only:
 
 - `_get_required_batch_multiple(dp_size)` — return
   `dp_size * actor_num_mini_batches`;
-- `_update_actor(...)` — preserve default actor metadata/metrics while replacing
+- `_update_actor(...)` — preserve verl's actor metadata and metrics while replacing
   `mini_batch_size` with `num_mini_batch`.
 
 The inherited `_balance_batch` remains unchanged. It discovers actor DP through verl's
 existing `"actor"` mesh dispatch metadata, calls the overridden required-multiple method,
 pads to `D * M`, and performs V1's normal whole-batch DP balancing.
 
-Since distillation is explicitly unsupported, `_update_actor` only needs to preserve default
+Since distillation is explicitly unsupported, `_update_actor` preserves verl's
 entropy, epoch, seed, temperature, metric-reduction, and worker-call behavior while setting
 the two distillation booleans to false. verl 0.9.0 does not expose a hook for constructing
 update `extra_info`, so this small override is the unavoidable compatibility surface. The
-repository pins verl exactly, and integration tests should detect upstream
-signature/metadata drift when that pin is changed.
+repository pins `verl==0.9.0`, and integration tests detect signature or metadata
+drift when that pin changes.
 
 No worker, engine, dispatcher, TransferQueue, advantage, or loss implementation is
 replaced.
 
-## Files to change
+## Implementation surface
 
-### New files
+- `src/agentcore_rl_toolkit/backends/verl/trainer.py` contains
+  `AgentCorePPOTrainerSync`, configuration validation, the batching overrides,
+  metrics, and external-module registration.
+- `tests/backends/verl/test_training_worker_batching.py` exercises the installed
+  verl worker's real mini-batch iterator.
+- `tests/backends/verl/test_trainer_batching.py` covers trainer metadata,
+  fail-fast configuration, metrics, and fresh-process registration.
+- The FSDP and Megatron example scripts export `VERL_USE_EXTERNAL_MODULES` and
+  select `trainer.v1.trainer_mode=agentcore_sync`.
+- The backend README and public setup guide document the supported contract.
 
-| File | Purpose |
-|---|---|
-| `src/agentcore_rl_toolkit/backends/verl/trainer.py` | `AgentCorePPOTrainerSync`, config validation, inline schedule arithmetic, the two narrow overrides, and external-module registration. |
-| `tests/backends/verl/test_training_worker_batching.py` | Regression tests against the installed verl `TrainingWorker.train_mini_batch`, using a counting worker method only at the real optimizer boundary. |
-| `tests/backends/verl/test_trainer_batching.py` | Trainer metadata, fail-fast configuration, and fresh-process registration tests; no fake TransferQueue. |
+The implementation does not replace the rollout gateway, agent-loop behavior,
+TransferQueue, worker engines, advantage computation, or loss implementation.
 
-### Modified files
-
-| File | Change |
-|---|---|
-| `src/agentcore_rl_toolkit/backends/verl/__init__.py` | Update the integration description; lazily expose the trainer only if a public import is useful. Keep ordinary package import verl-light. |
-| `src/agentcore_rl_toolkit/backends/verl/agent_loop.py` | Document the AgentCore training contract. No rollout logic changes. |
-| `src/agentcore_rl_toolkit/backends/verl/README.md` | Document stable optimizer steps, minimal padding, `agentcore_sync`, and preserved V1 balancing semantics. |
-| `src/agentcore_rl_toolkit/backends/verl/examples/math_agent/fsdp_fft_sync_grpo.sh` | Export the external trainer module and select its registry name while using default verl `main_ppo`. |
-| `src/agentcore_rl_toolkit/backends/verl/examples/migration_agent/megatron_lora_sync_grpo.sh` | Export the external trainer module and select its registry name while using default verl `main_ppo`. This is the primary regression case. |
-| `docs/site/src/content/docs/guides/verl-backend-setup.md` | Document the AgentCore invocation and registration behavior. |
-
-No change is planned for the rollout gateway, `AgentCoreAgentLoop`, trajectory grouping, or
-verl site-packages.
-
-## Validation plan
+## Validation
 
 ### Testing principle
 
-Test observable behavior through as much real verl code as possible. Do not build a fake
-worker group + fake TransferQueue pipeline and call it an integration test: if the test only
-asserts that mocks received the same fields the implementation wrote, it is tautological.
+Tests exercise observable behavior through as much real verl code as possible.
+A fake worker-group and TransferQueue pipeline would only verify that mocks
+received the same metadata the trainer wrote.
 
 The implementation does not modify TransferQueue, DP dispatch, or the body of
-`_balance_batch`, so there is no reason to emulate those systems in unit tests. Mocking is
-limited to expensive external boundaries:
+`_balance_batch`, so the tests mock only expensive external boundaries:
 
 - a counting worker method at the boundary where a real GPU optimizer would run;
-- a recording actor worker-group call for the narrow trainer metadata seam;
+- a recording actor worker-group call for the trainer metadata seam;
 - no fake TransferQueue.
-
-### Trainer arithmetic tests
-
-- `train_batch_size=32`, actor mini=32, `D=2`:
-  - actor count is 1;
-  - required multiple is 2;
-  - 513 rows target 514, not 1,024.
-- `train_batch_size=64`, actor mini=16, `D=2`:
-  - actor count is 4;
-  - required multiple is 8;
-  - after inherited V1 DP dispatch, each rank's row count is divisible by four.
-- Actor `D=4, M=3`:
-  - required multiple is 12;
-  - after inherited V1 DP dispatch, each rank's row count is divisible by three.
-- Invalid non-integral source-prompt mini-batch ratios fail before training.
 
 ### Primary regression test: real verl worker iteration
 
-Call the installed verl `TrainingWorker.train_mini_batch` implementation with real
-`TensorDict` data and its real DataLoader iterator. Use a minimal worker harness whose
-`train_batch()` records calls at the optimizer boundary; all split calculation and
-iteration remain the installed verl implementation.
-
-Required cases:
+The regression test calls the installed verl `TrainingWorker.train_mini_batch`
+implementation with real `TensorDict` data and its real DataLoader iterator. A
+minimal worker harness records calls at the optimizer boundary; all split
+calculation and iteration remain in the installed verl implementation.
 
 | Worker metadata | Local rows | Expected `train_batch()` calls per epoch |
 |---|---:|---:|
@@ -522,45 +476,29 @@ Required cases:
 | `num_mini_batch=3` | 300 | 3 |
 | `num_mini_batch=3` | 900 | 3 |
 
-Add a control demonstrating the old behavior: with fixed `mini_batch_size`, increasing
-local rows increases `train_batch()` calls. This test exercises the actual verl split
-calculation, DataLoader iteration, and worker update loop; the stub stops exactly where a
-real engine would perform the expensive forward/backward/optimizer operation.
+A control using fixed `mini_batch_size` demonstrates the previous behavior:
+increasing local rows increases `train_batch()` calls. The stub stops where a
+real engine would perform the forward, backward, and optimizer operations.
 
-### Thin trainer contract tests
+### Trainer contract tests
 
-These tests protect wiring but are not presented as proof of the optimizer-step fix:
+The trainer tests verify:
 
 - `_get_required_batch_multiple(dp_size)` returns
   `dp_size * configured_num_mini_batches`;
-- a recording `actor_rollout_wg.update_actor` call observes `num_mini_batch=A` and no
-  `mini_batch_size`;
+- a recording `actor_rollout_wg.update_actor` call observes `num_mini_batch=M`
+  and no `mini_batch_size`;
 - `global_batch_size` remains `ppo_mini_batch_size * rollout.n`;
-- actor entropy, epochs, seed, shuffle, temperature, and metric-prefix behavior remain
-  default-compatible; distillation flags are false;
-- critic, distillation, and unsupported loss aggregation each fail before worker
-  initialization;
+- entropy, epochs, seed, shuffle, temperature, metric-prefix behavior, and the
+  distillation flags match the supported verl path;
+- critic, distillation, unsupported loss aggregation, and non-integral
+  source-prompt mini-batch ratios fail before training;
 - a fresh process using `VERL_USE_EXTERNAL_MODULES` resolves `agentcore_sync`.
 
-### End-to-end smoke tests
+### End-to-end validation
 
-For the MigrationBench configuration (`D=2`, actor count 1):
-
-- force or replay batches with 512, 513, 1,024, and 1,536 expanded rows;
-- assert exactly one actor optimizer step per PPO epoch in every case;
-- assert padding counts are 0, 1, 0, and 0 respectively;
-- compare FSDP and Megatron worker behavior through logged counters;
-- confirm all real row keys appear in the update and padding keys contribute zero loss.
-
-For a synthetic `num_mini_batches=4` configuration:
-
-- assert four actor steps per PPO epoch for several expanded row counts;
-- assert each rank's local row count is divisible by four;
-- do not require per-mini-batch DP token balance, matching default V1.
-
-The batching smoke run on September 4, 2026 used Qwen3-4B, FSDP, eight GPUs, two
-real GSM8K rows, and one configured mini-batch. It exited successfully after one
-ACR rollout/update step with:
+An eight-GPU Qwen3-4B FSDP smoke test completed one ACR rollout and actor update
+with two real rows padded to the required multiple of eight:
 
 - `batching/real_rows=2`;
 - `batching/total_rows=8`;
@@ -568,27 +506,19 @@ ACR rollout/update step with:
 - `batching/required_multiple=8`;
 - `batching/configured_optimizer_steps=1`.
 
-The worker teardown emitted the same post-training `DataLoader worker ... killed` weakref
-traceback seen in the earlier custom-launcher smoke, after `Training Progress: 100%` and
-the step metrics. The launcher process still exited zero and all GPUs were released; this
-is existing verl teardown noise rather than a registration or batching failure.
+A second smoke test used `python -m verl.trainer.main_ppo` with
+`VERL_USE_EXTERNAL_MODULES`; `TaskRunnerV1` resolved `agentcore_sync` and
+completed an actor update.
 
-After replacing the temporary launcher with `VERL_USE_EXTERNAL_MODULES`, a September 5,
-2026 smoke ran default `python -m verl.trainer.main_ppo` through one complete ACR rollout
-and actor update. The live `TaskRunnerV1` inherited the external-module variable, resolved
-`agentcore_sync`, and exited zero with:
+Full end-to-end validation then completed:
 
-- `batching/real_rows=8`;
-- `batching/total_rows=8`;
-- `batching/padding_rows=0`;
-- `batching/required_multiple=8`;
-- `batching/configured_optimizer_steps=1`;
-- `training/rollout_failure/missing_sessions=0`.
+- a 116-step Qwen3-4B GSM8K run through the FSDP path;
+- a 101-step Qwen3-Coder-30B-A3B MigrationBench run through the Megatron + LoRA
+  path.
 
 ## Observability
 
-Add the following numeric metrics directly to the existing `metrics` dict inside the custom
-`_update_actor(batch, metrics)` override:
+The `_update_actor(batch, metrics)` override adds:
 
 - `batching/real_rows`
 - `batching/total_rows`
@@ -596,44 +526,24 @@ Add the following numeric metrics directly to the existing `metrics` dict inside
 - `batching/num_mini_batches`
 - `batching/required_multiple`
 - `batching/configured_optimizer_steps`
-- the existing V1 whole-batch `global_seqlen/*` metrics
+- `training/rollout_failure/missing_sessions`
 
-`_update_actor` is already part of the required compatibility override and receives both
-the padded `batch` and the per-step `metrics` dict. It can count real versus synthetic rows
-from `batch.tags`, read the current update plan saved by
-`_get_required_batch_multiple(dp_size)`, and let V1's existing logger path publish the
-values. Do not use `on_step_begin` / `on_step_end` or `_pending_sync_metrics`: those
-lifecycle hooks do not receive the batch or metrics dict, and `_pending_sync_metrics` is
-intended for weight-sync statistics.
+The inherited trainer continues to publish the whole-batch `global_seqlen/*`
+metrics.
 
 `batching/configured_optimizer_steps` is the configured value
-`num_mini_batches * ppo_epochs`, not a runtime count of optimizer calls. V1's worker does
-not currently return `total_num_iterations`, so the metric must not be presented as proof
-that the expected number of updates actually ran. Actual update count is verified by the
-real-worker regression test and the Art/Migration smoke run; adding a production runtime
-counter would require a separate worker-level change.
+`num_mini_batches * ppo_epochs`, not a runtime count of optimizer calls. V1's
+worker does not return `total_num_iterations`, so this metric is not proof that
+the expected number of updates ran. The real-worker regression test verifies
+the update count.
 
-## Compatibility and rollout
+## Compatibility
 
-- The new behavior is enabled by selecting `trainer.v1.trainer_mode=agentcore_sync` through
-  `VERL_USE_EXTERNAL_MODULES`. Default verl modes remain untouched.
-- The confirmed Art scope is actor-only sync training with distillation disabled and
-  `loss_agg_mode=seq-mean-token-sum`; unsupported configurations fail fast.
-- Existing AgentCore recipes should switch immediately because variable trajectory rows are
-  an inherent backend behavior, not an optional experiment.
-- The implementation remains pinned to verl 0.9.0. A future pin bump must run the trainer
+- The behavior is enabled by selecting
+  `trainer.v1.trainer_mode=agentcore_sync` through
+  `VERL_USE_EXTERNAL_MODULES`; verl's built-in trainer modes are unchanged.
+- The supported contract is actor-only synchronous training with distillation
+  disabled, `parameter_sync_step=1`, and
+  `loss_agg_mode=seq-mean-token-sum`.
+- The implementation targets `verl==0.9.0`. A version bump must run the trainer
   contract tests, especially the copied `_update_actor` metadata path.
-
-## Upstream plan
-
-1. Implement and land the narrow `agentcore_sync` fix in Art/toolkit first.
-2. Run a controlled MigrationBench before/after comparison with the same model, data,
-   hyperparameters, rollout workload, and training budget. Report at least expanded-row
-   counts, padding rows, optimizer steps, reward/quality curves, stability, and throughput.
-3. Present the code path and empirical impact to verl so the optimizer-step coupling is
-   visible as a practical multi-trajectory training issue rather than only a theoretical
-   API concern.
-4. Work with verl on a generic V1 fix covering the broader trainer surface that this local
-   implementation intentionally rejects.
-5. Once the upstream fix is available in the pinned verl version, adopt it and remove the
-   local custom trainer and copied `_update_actor` compatibility surface.

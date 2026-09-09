@@ -1,6 +1,6 @@
 #!/bin/bash
-# GRPO on GSM8K with rollouts on Bedrock AgentCore Runtime, using AgentCore's
-# narrow verl v1 sync trainer and the agentcore_agent custom agent loop.
+# GRPO on GSM8K with rollouts on Bedrock AgentCore Runtime, using the
+# agentcore_sync verl v1 trainer and the agentcore_agent custom agent loop.
 #
 # The defaults below are the validated stable configuration for full fine-tuning
 # Qwen3-4B on 8 GPUs (reaches ~0.93 GSM8K val reward in one epoch). Three

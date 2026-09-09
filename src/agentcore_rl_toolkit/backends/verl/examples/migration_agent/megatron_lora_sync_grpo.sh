@@ -1,6 +1,6 @@
 #!/bin/bash
 # GRPO on MigrationBench (Java 8->17) with rollouts on Bedrock AgentCore Runtime,
-# using AgentCore's narrow verl v1 sync trainer and the agentcore_agent loop.
+# using the agentcore_sync verl v1 trainer and the agentcore_agent loop.
 #
 # Qwen3-Coder-30B-A3B is a sparse MoE, so this uses Megatron expert parallelism
 # and LoRA rather than the math example's FSDP full fine-tune.

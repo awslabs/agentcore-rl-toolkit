@@ -1,4 +1,4 @@
-"""AgentCore's narrow verl v1 sync trainer customization."""
+"""verl v1 sync trainer for variable-row AgentCore rollouts."""
 
 from omegaconf import DictConfig, open_dict
 from tensordict import TensorDict
@@ -22,9 +22,9 @@ def _validate_config(config: DictConfig) -> None:
     if not config.trainer.use_v1:
         raise ValueError("agentcore_sync requires trainer.use_v1=true")
     if need_critic(config):
-        raise ValueError("agentcore_sync currently supports actor-only training")
+        raise ValueError("agentcore_sync supports only actor-only training")
     if is_distillation_enabled(config.get("distillation")):
-        raise ValueError("agentcore_sync currently does not support distillation")
+        raise ValueError("agentcore_sync does not support distillation")
     if config.actor_rollout_ref.actor.loss_agg_mode != "seq-mean-token-sum":
         raise ValueError("agentcore_sync requires loss_agg_mode=seq-mean-token-sum")
 
@@ -81,9 +81,11 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
         output["perf/mfu/actor"] = output.pop("actor/mfu")
         metrics.update(reduce_metrics(output))
 
-        # AgentCore-only batching observability.
+        # AgentCore-specific update metrics.
         total_rows = len(batch.tags)
         padding_rows = sum(tag.get("is_padding", False) for tag in batch.tags)
+        # ReplayBuffer keys are {uid}_{session_id}_{trajectory_index}; multiple
+        # trajectory rows from one rollout session count once.
         actual_sessions = {
             tuple(key.rsplit("_", 2)[:2])
             for key, tag in zip(batch.keys, batch.tags, strict=True)
