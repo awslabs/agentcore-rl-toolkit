@@ -14,7 +14,6 @@ defaults:
   - rollout_session_agent_loop
   - async_separate_b2
   - cluster_trainer_rollout_n2
-  - rollout_metrics
   - _self_
 
 actor_rollout_ref:
@@ -22,20 +21,13 @@ actor_rollout_ref:
     agent:
       num_workers: 64
 
-rollout_session_agent_loop:
-  rollout_session_bounds:
-    rollout_concurrency: 256
-    container_concurrency: 512
-    agent_run_timeout: 1200
-    container_setup_timeout: 1200
-
 trainer:
   project_name: verl_grpo_swe_gym
   experiment_name: openhands_swe_agent
 
   # training run
-  save_freq: 0
-  test_freq: 10000
+  save_freq: 10
+  test_freq: 10
   max_actor_ckpt_to_keep: 1
-  val_before_train: false
+  val_before_train: true
   total_epochs: 15

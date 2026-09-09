@@ -243,8 +243,9 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         # maybe some responses are empty?
         records = [r for r in records if r.token_ids]
 
-        # verl v1 trainer does not yet handle multi-record scenario well
-        best_record = sorted(records, key=lambda r: sum(r.token_ids))[-1]
+        # verl v1 trainer does not yet handle multi-record scenario well, so keep the
+        # record with the most trainable tokens
+        best_record = max(records, key=lambda r: sum(r.loss_mask))
 
         # in gateway linear-history mode every record carries the same LinearHealer counters
         healer_stats = best_record.metadata.get("linear_healer")
