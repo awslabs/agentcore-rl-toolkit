@@ -183,8 +183,9 @@ drains the tree into `list[TraceRecord]`.
   `--sglang-tool-call-parser` / `--sglang-reasoning-parser` args (names must match the
   served model); sglang is always importable there because the trainer serves SGLang.
 - For the Tinker backend (`TinkerSdkBackend` + `TinkerRenderer`), install `tinker` and
-  `tinker-cookbook` manually — they require Python ≥3.11, so they are not declared as an
-  extra (this package supports ≥3.10). Both pull torch.
+  `tinker-cookbook` manually — they are not declared as an extra. Both pull torch. (The
+  original reason no longer applies: they require Python ≥3.11, which was unsatisfiable
+  when this package's floor was ≥3.10. The floor is now ≥3.11.)
 
 The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBackend`
 protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so

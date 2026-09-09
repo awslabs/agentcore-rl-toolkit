@@ -8,10 +8,10 @@ import argparse
 import json
 import logging
 import time
+import tomllib
 from pathlib import Path
 
 import boto3
-import tomllib
 
 from agentcore_rl_toolkit import RolloutClient
 

@@ -1,10 +1,10 @@
 """Shared utilities for evaluation scripts."""
 
 import json
+import tomllib
 from pathlib import Path
 
 import boto3
-import tomllib
 
 
 def load_config(config_path: str = "config.toml") -> dict:
