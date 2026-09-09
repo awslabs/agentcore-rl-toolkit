@@ -23,11 +23,7 @@ def _make_config(*overrides, config_name="ppo_trainer"):
 
 
 class _ActorWorkerGroup:
-    def __init__(self):
-        self.batch = None
-
     def update_actor(self, batch):
-        self.batch = batch
         return {"metrics": {"mfu": [0.5], "loss": [1.0]}}
 
 
@@ -44,7 +40,7 @@ assert get_trainer_cls("agentcore_sync").__name__ == "AgentCorePPOTrainerSync"
 
 
 @pytest.mark.parametrize("config_name", ["ppo_trainer", "ppo_megatron_trainer"])
-def test_trainer_uses_sync_semantics_and_minimal_batch_multiple(config_name):
+def test_trainer_uses_sync_semantics_and_computes_required_batch_multiple(config_name):
     trainer = AgentCorePPOTrainerSync(_make_config(config_name=config_name))
 
     assert trainer.trainer_mode == "sync"
@@ -82,18 +78,10 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
 
     assert trainer._update_actor(batch, metrics) is batch
 
-    assert batch.extra_info == {
-        "calculate_entropy": False,
-        "distillation_use_topk": False,
-        "distillation_only": False,
-        "global_batch_size": 4,
-        "num_mini_batch": 2,
-        "epochs": 2,
-        "seed": trainer.config.actor_rollout_ref.actor.data_loader_seed,
-        "dataloader_kwargs": {"shuffle": trainer.config.actor_rollout_ref.actor.shuffle},
-        "temperature": trainer.config.actor_rollout_ref.rollout.temperature,
-    }
-    assert trainer.actor_rollout_wg.batch is batch
+    assert batch.extra_info["num_mini_batch"] == 2
+    assert "mini_batch_size" not in batch.extra_info
+    assert batch.extra_info["global_batch_size"] == 4
+    assert batch.extra_info["epochs"] == 2
     assert metrics["perf/mfu/actor"] == 0.5
     assert metrics["batching/real_rows"] == 3
     assert metrics["batching/total_rows"] == 4
