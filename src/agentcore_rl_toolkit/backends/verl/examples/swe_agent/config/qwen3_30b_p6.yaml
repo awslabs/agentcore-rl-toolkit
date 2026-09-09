@@ -28,7 +28,7 @@ actor_rollout_ref:
 
     engine_kwargs:
       vllm:
-        reasoning_parser: qwen3 
+        reasoning_parser: qwen3
         tool_call_parser: qwen3_coder
         # vllm does not support this model with flashinfer backend on b200
         moe_backend: triton

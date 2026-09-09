@@ -13,4 +13,3 @@ actor_rollout_ref:
 
 trainer:
   nnodes: 2
-  

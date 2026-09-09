@@ -32,8 +32,8 @@ from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.agentcore_session import AgentCoreSession
 from agentcore_rl_toolkit.rollout_session.exception_utils import exception_to_string
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
-    RolloutSessionBounds,
     RolloutSession,
+    RolloutSessionBounds,
     run_rollout_with_bounds,
 )
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse

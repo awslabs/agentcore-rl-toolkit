@@ -25,10 +25,10 @@ actor_rollout_ref:
 
   rollout:
     tensor_model_parallel_size: 4
-  
+
     engine_kwargs:
       vllm:
-        reasoning_parser: qwen3 
+        reasoning_parser: qwen3
         tool_call_parser: qwen3_coder
         max_model_len: ${data.max_response_length}
         # 4M tokens = 94 requests @ 44K

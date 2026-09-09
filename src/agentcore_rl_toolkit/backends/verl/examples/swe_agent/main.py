@@ -10,6 +10,7 @@ from agentcore_rl_toolkit.backends.experimental.verl.task_runner import (
     TaskRunnerWithRolloutSessionResources,
 )
 
+
 def main(config):
     auto_set_device(config)
     config.transfer_queue.enable = True
@@ -22,8 +23,7 @@ def main(config):
         config.ec2_instance_type = get_current_instance_type()
         config.trainer.experiment_start_at = dt.datetime.now().isoformat()
         config.data.train_batch_size = (
-            config.trainer.v1.separate_async.parameter_sync_step
-            * config.actor_rollout_ref.actor.ppo_mini_batch_size
+            config.trainer.v1.separate_async.parameter_sync_step * config.actor_rollout_ref.actor.ppo_mini_batch_size
         )
 
     run_ppo(config, task_runner_class=TaskRunnerWithRolloutSessionResources)
