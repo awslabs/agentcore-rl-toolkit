@@ -1,33 +1,8 @@
 """The agent server that runs inside the task container.
 
-The four calls of the ``rollout_session.wire`` protocol -- setup, start, status,
-dump -- all arrive as a POST of an :class:`InvocationRequest` to ``/invocations``,
-which is one of the two endpoints AgentCore requires of a container.
-:class:`BedrockAgentCoreApp` *is* that container contract, so this module registers
-a handler for the payload and never spells out a route or a health response of its
-own: it speaks the wire protocol and lets the app speak HTTP.
-
-Setup and a rollout are long, blocking and synchronous -- ``swe_unpack.sh``, then an
-agent loop that can run for many minutes -- so neither can happen inside the
-invocation that asks for it; the caller reads the immediate response and then polls
-with further invocations. They run in a thread pool, and the invocation returns as
-soon as the work is submitted.
-
-What keeps that safe from AgentCore's session reaper is the app's async task
-registry: ``/ping`` reports ``HealthyBusy`` while any task registered with
-``add_async_task`` is outstanding and ``Healthy`` once they all complete, and its
-``time_of_last_update`` is when the status last *changed* rather than when the ping
-arrived -- which is what lets an idle session be collected without a session in the
-middle of a rollout ever being cut short. Registering the task before the work is
-submitted is part of that: the caller can ping the instant this invocation returns,
-and a registration made on the worker thread could land after that ping.
-
-The registry is driven by hand rather than through ``@app.async_task`` because the
-work is blocking: that decorator accepts async functions only, and the coroutine it
-wraps would run on the app's single worker event loop, where a blocking rollout
-would stall every other handler. For the same reason the entrypoint below is sync,
-which is what makes the app run it in a thread pool and leave the main event loop
-free to answer ``/ping``.
+The ``rollout_session.wire`` calls (setup, start, status, dump) all arrive as a POST
+to ``/invocations``. Setup and rollouts are long and blocking, so they run in a
+thread pool and the caller polls with further invocations.
 """
 
 import logging
@@ -65,22 +40,10 @@ future: Future | None = None
 
 
 def configure_logging() -> None:
-    """Put everything the container logs into one format: the app's JSON lines.
+    """Put every log line into the app's format: JSON stamped with request/session ids.
 
-    The app formats its own log with :class:`RequestContextFormatter` -- one JSON
-    object per line, stamped with the request and session ids, which is what a log
-    query for a session keys off. That is the format worth having for every line, so
-    the root handler is given the same formatter rather than a second one that would
-    have to be kept in step with it, and the two sources that format themselves are
-    folded in:
-
-    - the app's own logger has a handler already and propagates on top of it, which
-      with an identically formatted root handler is each line twice rather than a
-      second view of it, so the propagation goes;
-    - uvicorn configures three loggers of its own, with a handler each and
-      propagation off, before it imports this module -- the server's startup lines
-      and one access line per request, ``/ping`` included. Dropping those handlers
-      hands the lines to the root one.
+    The app's own logger and uvicorn's three loggers each have a handler already, so
+    they are folded into the root handler to avoid duplicate or unstamped lines.
     """
     handler = logging.StreamHandler()
     handler.setFormatter(RequestContextFormatter())
@@ -96,23 +59,17 @@ def configure_logging() -> None:
 
 configure_logging()
 configure_tracing()
-# At import, i.e. before the first shell command a rollout runs: what it removes is
-# inherited by every process this one spawns.
+# At import, so every process a rollout spawns inherits the cleaned environment.
 stop_instrumenting_child_processes()
 
 
 def submit(name: str, work: Callable[[], object]) -> None:
     """Start one unit of background work, tracked in the app's async task registry.
 
-    Exactly one is ever outstanding -- the protocol is sequential (setup, then one
-    rollout) -- so ``future`` is a single slot, and it is what the status and dump
-    calls read. The registration is what ``/ping`` answers from, and it is released
-    in the done callback rather than here, so the session stays busy for as long as
-    the work actually runs.
-
-    The work is wrapped before it is submitted, not inside the worker: that is what
-    puts its spans in this invocation's trace, and it can only be done from here --
-    see :func:`swe_agent_server.observability.traced_background_work`.
+    The protocol is sequential (setup, then one rollout), so ``future`` is a single
+    slot. The registration is what ``/ping`` answers from and is released only in the
+    done callback, so the session stays busy while the work runs. Wrapping happens
+    here rather than on the worker so the spans land in this invocation's trace.
     """
     global future
 
@@ -124,9 +81,8 @@ def submit(name: str, work: Callable[[], object]) -> None:
 def on_task_done(finished: Future, task_id: int) -> None:
     """Release the busy status once work ends, and log a failure on its way out.
 
-    The status call reports the same exception to the caller; this is what puts it
-    in the container's log, where it is the only record if the caller has already
-    given up on the session.
+    The status call reports the same exception, but the log is the only record left if
+    the caller has already given up on the session.
     """
     try:
         exception = finished.exception(timeout=0)
@@ -138,17 +94,9 @@ def on_task_done(finished: Future, task_id: int) -> None:
 
 @app.entrypoint
 def invocations(payload: dict) -> dict:
-    """Serve one call of the wire protocol.
-
-    The app hands over the request body as parsed JSON and nothing more, so the
-    wire types are applied here: this function is the one place the protocol is
-    turned into work, and both directions of it are validated by the models rather
-    than by hand.
-    """
-    # The session id is request-scoped state (the app keeps it in a ContextVar) and a
-    # rollout runs on a pool thread that never sees it, so it is copied out here, on
-    # the request thread, for the span processor that stamps it -- see
-    # swe_agent_server.observability.
+    """Serve one call of the wire protocol."""
+    # Request-scoped state (a ContextVar), so copy it out here: the rollout runs on a
+    # pool thread that never sees it.
     set_session_id(BedrockAgentCoreContext.get_session_id())
 
     request = InvocationRequest.model_validate(payload)

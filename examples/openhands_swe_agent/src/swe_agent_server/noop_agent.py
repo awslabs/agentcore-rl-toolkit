@@ -1,3 +1,5 @@
+"""Empty-patch baseline backend: grades the untouched repo, expecting reward 0.0."""
+
 import logging
 import subprocess
 
@@ -11,22 +13,17 @@ from agentcore_rl_toolkit.rollout_session.wire import (
 
 
 def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
-    """Change nothing, then grade the untouched repo.
+    """Change nothing, then grade the untouched repo. Never raises -- see ``exception``.
 
-    The empty-patch counterpart to ``oracle_agent``: no LLM, no edits, just the
-    same evaluation the agent backends run. Reward should be 0.0 -- the task's
-    FAIL_TO_PASS tests must fail on the base commit -- so this catches tasks that
-    grade as resolved without any work (already-fixed repo, broken eval script,
-    grader misparse) and measures the eval leg's latency on its own.
-    Never raises -- failures are returned in ``exception``.
+    A reward other than 0.0 means the task grades as resolved without any work
+    (already-fixed repo, broken eval script, grader misparse).
     """
     exception = None
     git_diff = None
     eval_report = None
 
     try:
-        # Recorded for symmetry with the other backends (and to catch a dirty
-        # testbed): with no agent and no patch this should come back empty.
+        # Should come back empty; a non-empty diff means a dirty testbed.
         git_diff = subprocess.check_output(
             [
                 "git",

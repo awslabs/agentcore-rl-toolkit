@@ -9,11 +9,9 @@ function clone() {
     popd
 }
 
-# both of these packages have the same name, so we can't install
-# them both at the same time. at runtime, use sys.path to pick one or the other
+# Same package name in both, so only one can be installed; runtime picks via sys.path.
 clone swebench https://github.com/SWE-bench/SWE-bench.git 737efd9ba02b7016feaf25660b5b14d46c0eb592
 clone swegym https://github.com/SWE-Gym/SWE-Bench-Fork.git 242429c188fcfd06aad13fce9a54d450470bf0ac
 
-# install dependencies for both
 uv pip install -e ./swebench
 uv pip uninstall swebench

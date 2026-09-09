@@ -2,56 +2,20 @@
 
 """Build this recipe's agent image and put it on AgentCore -- the whole roll, one command.
 
-Six steps that used to be separate scripts or hand edits: build the image, test it,
-push it, reconcile the IAM roles, bring up the ECR pull through cache the task images
-arrive by and the DynamoDB table the rollouts are recorded in, then create or update
-the capacity provider, then create or update the runtime. Everything here is looked
-up by name and does whichever of create/update is called for, so the first deploy
-and every later image roll are the same invocation:
+Builds and tests the image, pushes it, reconciles the IAM roles, brings up the ECR pull
+through cache and the DynamoDB session table, then creates or updates the capacity
+provider and the runtime. Everything is looked up by name, so the first deploy and every
+later image roll are the same invocation:
 
     ./deploy.py
     ./deploy.py --image-tag r12      # build and roll to a one-off tag
     ./deploy.py --skip-build         # repoint an existing image only
     ./deploy.py --skip-tests         # push what it built without testing it
 
-The build comes first so that a failed build cannot leave the runtime pointed at a
-tag that does not exist -- and the harness's own unit tests run in the image between
-the build and the push (:mod:`verify_image`), so neither can a failing harness.
-
-The AWS resources differ in what "already exists" allows. A role and a runtime can
-both be rewritten in place, so an existing one is updated -- and for the runtime,
-the version it superseded is deleted. A capacity provider's compute configuration
-is immutable, so an existing one is reported and left alone -- change
-``capacity_provider.name`` in the config to get a differently shaped pool, and the
-runtime is repointed at it. Its operator role and instance profile are part of that
-immutable configuration too, so a *change* to either only reaches a pool created
-under a new name.
-
-The pull through cache is in the same region as everything else here, and that is the
-point of it being here: a cache is regional, so the rule and the Docker Hub secret
-behind it are made in ``agentcore.region``, where the sessions that pull task images
-run. A second region means a second deploy of this recipe against it -- the cache
-follows the runtime rather than being pointed anywhere independently.
-
-The session table is the one resource here that is neither built nor pointed at
-anything: it accumulates. Every rollout of every run this recipe has ever done is an
-item in it, so a deploy only ever creates it or adds the index the analysis needs --
-see :mod:`~agentcore_rl_toolkit.aws_tools.dynamodb_control` for what a mismatch it
-refuses to fix looks like. The S3 bucket the rollout dumps go to is *not* created
-here, and deliberately: a bucket is a name in a global namespace with a lifecycle
-policy and a retention decision behind it, not a per-recipe resource.
-
-The execution role is *reconciled*, not merely created: ``iam_policy.py``
-is its whole permission set afterwards, so a grant added by hand in the console is
-reverted by the next deploy. That is the point -- it is what makes the checked-in
-document a truthful answer to what a rollout container may do. The pool's own two
-roles are brought up as well, but they are not the recipe's to describe and carry
-AWS's managed policies instead (``aws_tools/agentcore_control.py``).
-
-Config is the recipe's own ``config.toml`` (see :mod:`config`) and nothing else -- in
-particular not the developer's ``.env``: which image this agent runs on which pool is
-a property of the recipe, so it travels with the recipe. The ARNs printed at the end
-are for the trainer, which still reads them from ``.env``.
+An existing capacity provider is reported and left alone (its compute configuration is
+immutable -- rename it in the config to reshape the pool). The execution role is
+reconciled to ``iam_policy.py``, reverting grants made by hand. The session table only
+accumulates, and the S3 dump bucket is deliberately not created here.
 """
 
 import argparse
@@ -60,9 +24,6 @@ import logging
 import shlex
 from pathlib import Path
 
-# This recipe's own modules, imported as top-level names: these scripts are
-# entrypoints run from this directory (``./deploy.py``), and ``conftest.py`` puts the
-# same directory on ``sys.path`` so the tests resolve them identically.
 import iam_policy
 from config import (
     CONFIG_PATH,
@@ -117,11 +78,7 @@ def parse_args():
 
 
 async def run(*argv: str) -> None:
-    """Run a command with its output on ours, raising if it fails.
-
-    The echo and the raise are the ``set -eux`` this replaced: docker's own output
-    is the interesting part, so it is inherited rather than captured.
-    """
+    """Run a command with its output on ours, raising if it fails."""
     logger.info("+ %s", shlex.join(argv))
     proc = await asyncio.create_subprocess_exec(*argv)
     if await proc.wait() != 0:
@@ -131,14 +88,8 @@ async def run(*argv: str) -> None:
 async def build_image(image_uri: str) -> None:
     """Build this recipe's ``Dockerfile`` as the local tag ``image_uri``.
 
-    The build context is this directory, plus the toolkit repo's root as the named
-    context ``rlpkg`` -- the Dockerfile copies the wire protocol package out of it
-    without widening the context to the whole repo, which would invalidate its layers
-    on any unrelated change.
-
-    Building and pushing are separate because the unit tests run between them
-    (:mod:`verify_image`): what is tested is the image the push then publishes, and a
-    harness that fails its tests never reaches the registry, let alone a runtime.
+    The toolkit repo root goes in as the named context ``rlpkg`` so the Dockerfile can copy
+    the wire protocol package out of it without widening the context to the whole repo.
     """
     await run(
         "docker",
@@ -152,29 +103,17 @@ async def build_image(image_uri: str) -> None:
 
 
 async def push_image(image_uri: str) -> None:
-    """Push the image the build and the tests just produced.
-
-    Registry auth is docker's own -- an ambient ECR credential helper, or a prior
-    ``docker login`` -- not this script's.
-    """
+    """Push the image the build and the tests just produced; registry auth is docker's own."""
     await run("docker", "push", image_uri)
 
 
 async def ensure_execution_role(config: dict, region_name: str, account_id: str) -> str:
     """Reconcile the session execution role to ``iam_policy`` and return its ARN.
 
-    The two repositories its ECR grants are scoped to are the two the config already
-    names: ``agentcore.docker_repo`` for the agent image and ``docker_hub.cache_prefix``
-    for the task images. Neither is restated here -- a grant that could disagree with
-    the image a runtime is actually pointed at, or with the cache the rollouts
-    actually pull from, is the one thing this reconcile must not be able to do.
-
-    The agent repository has to be in the deploying account, because that is whose
-    registry the ARNs name -- and it is also the registry the task image cache is
-    assembled from (``config.task_image_namespace``), so a mismatch here would be a
-    namespace nothing pulls from either. A repository in another account never worked
-    here, the grant having always been scoped to one account, so this says so instead
-    of writing a policy that cannot authorise the pull it is for.
+    Its ECR grants are scoped to the two repositories the config already names, so they
+    cannot disagree with the image a runtime is pointed at or the cache it pulls from. The
+    agent repository must be in the deploying account, since that is whose registry the
+    grant ARNs name.
     """
     agentcore = config["agentcore"]
     agent = agent_repository(config)
@@ -201,18 +140,9 @@ async def ensure_execution_role(config: dict, region_name: str, account_id: str)
 async def ensure_pull_through_cache(config: dict, region_name: str) -> None:
     """Bring up the Docker Hub pull through cache the *task* images are pulled from.
 
-    The rule and the Secrets Manager secret it authenticates with, both in
-    ``region_name``: a cache is regional, and this is the region whose sessions pull
-    through it.
-
-    ``docker_hub.secret_name`` is what makes the rule ours to manage. With it, the
-    rule is created if absent and repointed at that secret otherwise, and the
-    credentials in the config are the secret's value -- see
-    :func:`~agentcore_rl_toolkit.aws_tools.ecr_control.ensure_registry_secret` for what
-    naming the secret without credentials does. Without it the rule is left exactly as
-    it is and only validated, which is the mode for a cache someone else owns: the
-    recipe still needs a working rule on that prefix, so this reports what it skipped
-    and fails on a prefix that has no rule at all rather than passing silently.
+    The rule and its Secrets Manager secret, both in ``region_name`` (a cache is regional).
+    ``docker_hub.secret_name`` is what makes the rule ours to manage: without it the rule is
+    only validated, the mode for a cache someone else owns.
     """
     docker_hub = config["docker_hub"]
     prefix = cache_prefix(config)
@@ -255,8 +185,7 @@ async def main():
     image_uri = agentcore["docker_repo"] + ":" + (args.image_tag or agentcore["image_tag"])
 
     if args.skip_build:
-        # Nothing was built here, so there is nothing local to test either: the image
-        # named is one the registry already has, tested by whichever deploy built it.
+        # Nothing built locally means nothing local to test either.
         logger.info("skipping build and tests, deploying %s as it is in the registry", image_uri)
     else:
         await build_image(image_uri)
@@ -266,18 +195,12 @@ async def main():
             await verify_image(image_uri)
         await push_image(image_uri)
 
-    # The roles and the pool first: the runtime is created naming an execution role
-    # and a pool, so each has to exist -- and the pool be READY -- before we can ask
-    # for a runtime at all. The pool's own two roles come before the pool for the
-    # same reason.
+    # Roles and pool first: a runtime is created naming an execution role and a READY pool.
     account_id = await current_account_id(region_name)
     execution_role_arn = await ensure_execution_role(config, region_name, account_id)
-    # The task images' side of the same permission: the role may populate the cache,
-    # and this is the cache it populates.
     await ensure_pull_through_cache(config, region_name)
-    # Where the rollouts are recorded, in the region they are recorded from: the eval
-    # and the trainer both write session items with the ambient credentials, not with
-    # the execution role, which is why nothing in iam_policy mentions this table.
+    # Written with ambient credentials by the eval and the trainer, not with the execution
+    # role, which is why nothing in iam_policy mentions this table.
     await ensure_session_table(config["storage"]["dynamodb_table"], region_name)
     operator_role_arn, instance_profile_arn = await ensure_capacity_provider_roles(region_name)
     capacity_provider_arn = await ensure_capacity_provider(
@@ -295,10 +218,8 @@ async def main():
         capacity_provider_arn=capacity_provider_arn,
     )
 
-    # Printed as .env assignments because that is where they are going: the
-    # trainer reads them as hydra interpolations seeded from the project .env.
-    # evaluate.py does not need them -- it resolves the runtime and the pool from
-    # the names in config.toml, and never assumes the role itself.
+    # Printed as .env assignments because that is where they go: the trainer reads them as
+    # hydra interpolations. evaluate.py does not need them.
     print(f"agent_iam_role_arn={execution_role_arn}")
     print(f"agentcore_capacity_provider_arn={capacity_provider_arn}")
     print(f"agentcore_runtime_arn={runtime_arn}")

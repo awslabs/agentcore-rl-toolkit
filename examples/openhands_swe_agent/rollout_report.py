@@ -1,24 +1,9 @@
-"""What a run's rollout records mean: loading them back, and reducing them to stats.
+"""The read side of a run's rollout records: loading them out of the session table
+(:func:`load_runs`) and reducing them to the numbers a run is judged by
+(:func:`summarize`). A report file is a snapshot of this, not the place the numbers live.
 
-The session table is the record of a run -- one item per rollout, written through as
-the rollout progresses. This module is the read side of that: it loads a run's items
-back out (:func:`load_runs`) and reduces them to the numbers a run is judged by
-(:func:`summarize`).
-
-Both halves are here because they are the same claim made twice. An eval writes a
-report file when it finishes, and that file used to be the only way to see any of
-this -- which made every question about a run answerable exactly once, at the moment
-it ended, and not at all if the driver died on the last rollout, or if the question
-came up later, or if the run was a training run rather than an eval. The records were
-in DynamoDB the whole time. So the report is now a *snapshot* of what this module
-computes, from the same rows, rather than the place the numbers live.
-
-The reduction knows almost no field names on purpose. A rollout record is the
-session's whole meta -- reward, the session's metrics, every lifecycle timing span,
-the token counts -- flat, so :func:`numeric_stats` summarizes whatever is numeric and
-a metric added anywhere upstream shows up here without being declared. Only
-``reward``/``resolved`` and ``task_id`` are named, because pass@k is a cross-sample
-question that generic reduction cannot express.
+The reduction names almost no fields on purpose -- only ``reward``/``resolved`` and
+``task_id``, because pass@k is a cross-sample question generic reduction cannot express.
 """
 
 import logging
@@ -35,9 +20,8 @@ logger = logging.getLogger(__name__)
 class Run(NamedTuple):
     """One run of one experiment: its start timestamp and its rollout records.
 
-    An experiment name is not unique -- re-running the same grid entry appends
-    another run to the same partition -- so a run is the (name, start) pair, which
-    is exactly what the index's sort key prefix is.
+    An experiment name is not unique -- re-running one appends another run to the same
+    partition -- so a run is the (name, start) pair, i.e. the index's sort key prefix.
     """
 
     experiment_name: str
@@ -54,13 +38,10 @@ async def load_runs(
 ) -> list[Run]:
     """Every run of ``experiment_name`` in the session table, oldest first.
 
-    ``experiment_start_at`` is a prefix on the run's timestamp, so it can pin one run
-    exactly or narrow to a day. The rows come back with DynamoDB's ``Decimal``s
-    converted (:func:`~agentcore_rl_toolkit.aws_tools.dynamodb_tools.from_dynamodb`),
-    because a record whose numbers are Decimals reduces to nothing at all.
-
-    Raises when the name matches no records: the alternative is a report of zero
-    rollouts, which reads like a run that did nothing rather than like a typo.
+    ``experiment_start_at`` is a prefix on the run's timestamp, so it can pin one run or
+    narrow to a day. Rows come back with DynamoDB's ``Decimal``s converted, since a
+    record whose numbers are Decimals reduces to nothing. Raises when the name matches
+    nothing, rather than reporting zero rollouts for what is usually a typo.
     """
     sessions = await get_sessions_for_experiment_run(
         experiment_name,
@@ -93,11 +74,8 @@ async def load_run(
 ) -> Run:
     """The latest run of ``experiment_name``, of however many the table holds.
 
-    Latest rather than "the one run" because a name can be reused, and rather than an
-    error because the last run of an experiment is nearly always the one meant -- the
-    earlier ones are the attempts that were re-run. It says so when it had a choice,
-    with the timestamps to pin an older one by, since silently analysing a different
-    run than the caller had in mind is the failure worth being loud about.
+    Warns (with the timestamps to pin an older one by) when there was a choice: silently
+    analysing a different run than the caller meant is the failure worth being loud about.
     """
     runs = await load_runs(
         experiment_name,
@@ -138,18 +116,10 @@ def percentiles(values: list, ps=(50, 90, 99)) -> dict:
 def numeric_stats(rows: list[dict]) -> dict:
     """Summarize every numeric field present in any rollout row.
 
-    The reduction rule is the trainer's -- see
-    ``AgentLoopMetricsMixin._agent_loop_extra_field_metrics``, which reduces the
-    ``agent_loop/*`` metrics the same way: aggregate ``int``/``float`` values (bool
-    included, so a flag reduces to its rate) and skip everything else, because a
-    rollout row is the session meta and carries non-numeric fields too (datetimes,
-    arns, ids) that would otherwise crash the arithmetic. No field name appears
-    here, so a new session metric, timing span or token stat lands in the report
-    without touching this function.
-
-    Each field is summarized only over the rollouts that reported it: absent or
-    ``None`` is excluded rather than counted as 0, and ``count`` says how many
-    rollouts contributed.
+    Aggregates ``int``/``float`` (bool included, so a flag reduces to its rate) and skips
+    everything else, since a row is the session meta and carries datetimes, arns and ids
+    too -- the trainer's rule, so no field name needs declaring here. A field is
+    summarized only over the rollouts that reported it; ``count`` says how many.
     """
     per_field: dict[str, list[float]] = {}
     for row in rows:
@@ -162,15 +132,10 @@ def numeric_stats(rows: list[dict]) -> dict:
 def summarize(rows: list[dict], k: int | None = None) -> dict:
     """Reduce per-rollout records to pass@k plus a summary of every numeric field.
 
-    ``k`` is the samples-per-task the pass@k is over. Observed from the rows when not
-    given -- the largest group of samples any task has -- so that a run loaded from
-    the session table reports the same pass@k as the eval that produced it did from
-    its own config, without the config having to be recorded anywhere.
-
-    Stats are taken over non-aborted rollouts only, so a container that never ran
-    doesn't drag the latency and token distributions. Aborted rollouts still count in
-    the pass@k denominator: they are tasks the run failed to answer, not tasks it was
-    not asked.
+    ``k`` defaults to the largest group of samples any task has, so a run loaded from the
+    table reports the same pass@k the eval did from its config. Stats cover non-aborted
+    rollouts only (a container that never ran shouldn't drag the distributions), but
+    aborted ones still count in the pass@k denominator.
     """
     by_task: dict = {}
     for row in rows:

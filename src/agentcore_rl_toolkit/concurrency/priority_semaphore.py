@@ -1,3 +1,5 @@
+"""Priority-ordered concurrency limiting."""
+
 import asyncio
 import heapq
 import itertools
@@ -9,18 +11,7 @@ __all__ = ["PrioritySemaphore", "LocalPrioritySemaphore"]
 
 @runtime_checkable
 class PrioritySemaphore(Protocol):
-    """Async interface for a priority-ordered concurrency limiter.
-
-    Callers ``await sem.acquire(priority)`` before entering a bounded region and
-    ``await sem.release()`` on the way out, or use the :meth:`slot` async context
-    manager to pair the two. Lower ``priority`` integers are served first.
-
-    The in-process implementation is :class:`LocalPrioritySemaphore`; a shared,
-    cluster-wide permit pool is that class run as a Ray actor behind an adapter. Both
-    satisfy this interface, so nothing downstream depends on Ray -- which is what lets
-    one configuration describe both the training cluster and a single-process driver,
-    and why the Ray side lives elsewhere in this package rather than here.
-    """
+    """Async interface for a priority-ordered concurrency limiter; lower integers go first."""
 
     async def acquire(self, priority: int = 0) -> None:
         """Block until a permit is available for the caller."""
@@ -36,11 +27,7 @@ class PrioritySemaphore(Protocol):
 
 
 class LocalPrioritySemaphore:
-    """
-    asyncio semaphore where lower integer values have higher priority.
-
-    Among equal-priority waiters, acquisition is FIFO.
-    """
+    """asyncio semaphore where lower integers have higher priority; FIFO within a priority."""
 
     def __init__(self, value: int = 1) -> None:
         if value < 0:
@@ -68,11 +55,10 @@ class LocalPrioritySemaphore:
             await future
         except asyncio.CancelledError:
             if future.done() and not future.cancelled():
-                # A permit was assigned to this waiter just before the task
-                # was cancelled. Return it to the semaphore.
+                # A permit was assigned just before cancellation; give it back.
                 await self.release()
             else:
-                # Leave it in the heap; release() removes cancelled entries.
+                # Leave it in the heap; release() skips cancelled entries.
                 future.cancel()
             raise
 

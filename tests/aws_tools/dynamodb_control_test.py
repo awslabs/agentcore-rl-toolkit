@@ -1,17 +1,6 @@
 #!/usr/bin/env python
-"""Unit tests for the rollout session table's control plane.
-
-The table is the one resource in a deploy that *accumulates*: every rollout this
-recipe has ever run is an item in it, so what these tests are about is which deploys
-touch it. A fresh account gets the whole table and its index in one call, a deploy
-against the table that is already right writes nothing, and a table that predates the
-index gains it -- while a table keyed differently, or an index keyed differently, is
-an error rather than a create call that DynamoDB would reject or, worse, a silent
-mismatch the analysis queries fail on much later.
-
-The create payload is validated against botocore's own model of ``CreateTable``,
-which is a stronger statement than any assertion about our own dict; the clients are
-fakes and the model is read from the local service definition, so: no AWS.
+"""Unit tests for ``ensure_session_table``: which deploys create, update, no-op, or
+error, with payloads validated against botocore's DynamoDB model. Fake clients, no AWS.
 """
 
 import asyncio
@@ -36,7 +25,7 @@ UPDATE_INPUT = DYNAMODB.operation_model("UpdateTable").input_shape
 
 
 def table(key_schema=None, indexes=None, billing_mode="PAY_PER_REQUEST", status="ACTIVE") -> dict:
-    """A ``describe_table`` payload, as much of one as the code under test reads."""
+    """A ``describe_table`` payload, only the fields the code under test reads."""
     described = {
         "TableName": TABLE,
         "TableArn": TABLE_ARN,
@@ -59,13 +48,8 @@ def index(key_schema=None, status="ACTIVE") -> dict:
 
 
 class FakeDynamoDb:
-    """One table deep, and CREATING until the second describe.
-
-    The status transition is here rather than patched out because
-    :func:`_wait_table_active` is the part that decides a deploy's "done": it has to
-    keep polling while either the table or an index is still coming up, and a fake
-    that is ACTIVE on the first describe would never exercise that.
-    """
+    """One table deep, and CREATING until the second describe so ``_wait_table_active``
+    actually has to poll."""
 
     def __init__(self, described: dict | None = None):
         self.described = described
@@ -82,7 +66,6 @@ class FakeDynamoDb:
         described = dict(self.described)
         if self.describes == 1:
             return {"Table": described}
-        # Whatever was coming up is up by the second poll.
         described["TableStatus"] = "ACTIVE"
         if "GlobalSecondaryIndexes" in described:
             described["GlobalSecondaryIndexes"] = [
@@ -144,7 +127,8 @@ class SessionTableTest(unittest.TestCase):
         )
 
     def test_every_key_attribute_is_declared_as_a_string(self):
-        """A key attribute missing from AttributeDefinitions is a rejected CreateTable."""
+        """DynamoDB rejects CreateTable if a key attribute is missing from
+        AttributeDefinitions."""
         fake = FakeDynamoDb()
         ensure(fake)
         params = fake.created[0]
@@ -154,7 +138,7 @@ class SessionTableTest(unittest.TestCase):
         self.assertEqual({d["AttributeType"] for d in params["AttributeDefinitions"]}, {"S"})
 
     def test_creation_waits_for_the_index_to_come_up_too(self):
-        """A query against an index still CREATING fails, so the deploy waits for it."""
+        """A query against an index still CREATING fails."""
         fake = FakeDynamoDb()
         ensure(fake)
         self.assertGreater(fake.describes, 1)
@@ -165,14 +149,13 @@ class SessionTableTest(unittest.TestCase):
         self.assertEqual((fake.created, fake.updated), ([], []))
 
     def test_an_index_still_backfilling_is_waited_for(self):
-        """What an interrupted earlier deploy leaves behind: right schema, not yet usable."""
+        """Right schema, not yet usable -- what an interrupted earlier deploy leaves."""
         fake = FakeDynamoDb(table(indexes=[index(status="CREATING")]))
         self.assertEqual(ensure(fake), TABLE_ARN)
         self.assertEqual((fake.created, fake.updated), ([], []))
         self.assertGreater(fake.describes, 1)
 
     def test_a_table_without_the_index_gains_it(self):
-        """The one update DynamoDB allows here, and the one a deploy should make."""
         fake = FakeDynamoDb(table())
         self.assertEqual(ensure(fake), TABLE_ARN)
         self.assertEqual(fake.created, [])
@@ -189,14 +172,14 @@ class SessionTableTest(unittest.TestCase):
         )
 
     def test_a_differently_keyed_table_is_an_error(self):
-        """Not a create call: the key schema is fixed for the table's lifetime."""
+        """A table's key schema is fixed for its lifetime, so this is not a create."""
         fake = FakeDynamoDb(table(key_schema=[{"AttributeName": "rollout_id", "KeyType": "HASH"}]))
         with self.assertRaises(RuntimeError):
             ensure(fake)
         self.assertEqual((fake.created, fake.updated), ([], []))
 
     def test_a_differently_keyed_index_is_an_error(self):
-        """An index cannot be re-keyed either, and the analysis queries need these keys."""
+        """An index cannot be re-keyed either."""
         wrong = index(key_schema=[{"AttributeName": "experiment_name", "KeyType": "HASH"}])
         fake = FakeDynamoDb(table(indexes=[wrong]))
         with self.assertRaises(RuntimeError):
@@ -204,7 +187,7 @@ class SessionTableTest(unittest.TestCase):
         self.assertEqual((fake.created, fake.updated), ([], []))
 
     def test_a_provisioned_table_is_reported_but_not_switched(self):
-        """Somebody's capacity decision, and switching it silently is not a deploy's call."""
+        """A deploy does not silently override someone's capacity decision."""
         fake = FakeDynamoDb(table(indexes=[index()], billing_mode="PROVISIONED"))
         with self.assertLogs(MODULE, level="WARNING") as logs:
             self.assertEqual(ensure(fake), TABLE_ARN)

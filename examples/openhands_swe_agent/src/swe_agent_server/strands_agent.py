@@ -1,3 +1,5 @@
+"""Strands backend: runs the agent loop over the task repo, then grades the diff."""
+
 import asyncio
 import json
 import logging
@@ -44,30 +46,19 @@ class _CapturingLiteLLMModel(LiteLLMModel):
     """LiteLLM provider that records llm call latency."""
 
     def __init__(self, client_args: dict[str, Any] | None = None, **model_config: Any) -> None:
-        """Initialize the capturing provider.
-
-        Args:
-            client_args: Arguments for the LiteLLM client (e.g. ``base_url``, ``api_key``).
-            **model_config: LiteLLM model config (``model_id``, ``params``, ``stream``).
-        """
         super().__init__(client_args=client_args, **model_config)
-        # Wall-clock seconds spent inside the LLM completion call, summed across
-        # every assistant turn. This is the Strands analogue of OpenHands's
-        # per-response `response_latencies`; the container agent loop reads it as
+        # Summed across every assistant turn; the container loop reads it as
         # `llm_latency_sum` without knowing which backend produced it.
         self.llm_latency_sum: float = 0.0
 
     async def _handle_non_streaming_response(
         self, litellm_request: dict[str, Any]
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Capture token ids and logprobs, then re-emit the turn's Strands stream events.
+        """Time the completion call, then re-emit the turn's Strands stream events.
 
         The parent ``stream()`` routes here because the model is configured
-        non-streaming; it also translates a context-window overflow raised by the
-        completion call into :class:`ContextWindowOverflowException`.
-
-        Yields:
-            Formatted Strands stream events for this turn.
+        non-streaming, and translates a context-window overflow into
+        :class:`ContextWindowOverflowException`.
         """
         started = _monotonic()
         response = await self._acompletion(litellm_request)
@@ -83,21 +74,17 @@ class _CapturingLiteLLMModel(LiteLLMModel):
 
 
 class _ToolTimingHooks(HookProvider):
-    """Hook provider that accumulates wall-clock time spent executing tools.
+    """Hook provider that counts tool calls and the wall-clock time they take.
 
-    Records a start timestamp on :class:`BeforeToolCallEvent` and adds the elapsed
-    time on the matching :class:`AfterToolCallEvent`, keyed by tool-use id, so the
-    total excludes model-generation time. Also counts completed tool calls.
+    Timings are keyed by tool-use id, so the total excludes model-generation time.
     """
 
     def __init__(self) -> None:
-        """Initialize empty timing state."""
         self.total_time_s: float = 0.0
         self.num_tool_calls: int = 0
         self._starts: dict[str, float] = {}
 
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
-        """Subscribe to the before/after tool-call events."""
         registry.add_callback(BeforeToolCallEvent, self._on_before)
         registry.add_callback(AfterToolCallEvent, self._on_after)
 
@@ -119,13 +106,7 @@ def _monotonic() -> float:
 
 
 def _format_tool_result(result: dict[str, Any]) -> str:
-    """Render a Strands ``ToolResult`` into a printable string.
-
-    A ``ToolResult`` carries a ``content`` list whose entries may hold ``text``,
-    ``json``, or (rarely for these tools) ``image``/``document`` payloads. We join
-    the human-readable parts; non-text payloads are summarized by their key rather
-    than dumped verbatim.
-    """
+    """Render a Strands ``ToolResult`` into a printable string."""
     parts: list[str] = []
     for block in result.get("content", []):
         if "text" in block:
@@ -141,18 +122,14 @@ def _format_tool_result(result: dict[str, Any]) -> str:
 class _ToolPrintingHooks(HookProvider):
     """Hook provider that prints each tool call's full parameters and result to stdout.
 
-    The streaming callback handler only sees the ``contentBlockStart`` event, which
-    carries the tool name and id but not its input (the arguments stream in as
-    later deltas) nor its result. These hooks fire after the input is fully
-    assembled and after the tool returns, so they have the complete picture.
+    The streaming callback handler only sees ``contentBlockStart``, which carries neither
+    the assembled input nor the result; these hooks fire late enough to have both.
     """
 
     def __init__(self) -> None:
-        """Initialize the tool-call counter."""
         self.tool_count = 0
 
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
-        """Subscribe to the before/after tool-call events."""
         registry.add_callback(BeforeToolCallEvent, self._on_before)
         registry.add_callback(AfterToolCallEvent, self._on_after)
 
@@ -168,13 +145,9 @@ class _ToolPrintingHooks(HookProvider):
         print(f"  result [{result.get('status', '?')}]: {_format_tool_result(result)}")
 
 
-# The SWE task container ships the graded project's Python in a conda env named
-# ``testbed`` under ``/opt/miniconda3`` (see ``swe_agent/image/swe_unpack.sh``).
-# swe_unpack.sh activates it via ``~/.bashrc``, but the vended bash tool runs each
-# command as ``sh -c`` -- a non-interactive, non-login shell that never sources
-# ``~/.bashrc`` -- so we activate the env explicitly per command instead. The
-# guard keeps this a no-op outside the container (e.g. in unit tests), where the
-# conda profile script is absent.
+# swe_unpack.sh activates the graded project's conda env via ``~/.bashrc``, but the
+# vended bash tool runs each command as ``sh -c``, which never sources it -- so activate
+# per command instead. The guard makes this a no-op outside the container.
 _CONDA_PROFILE = "/opt/miniconda3/etc/profile.d/conda.sh"
 _CONDA_ENV = "testbed"
 _CONDA_ACTIVATE_PREFIX = f'if [ -f "{_CONDA_PROFILE}" ]; then . "{_CONDA_PROFILE}" && conda activate {_CONDA_ENV}; fi; '
@@ -183,23 +156,16 @@ _CONDA_ACTIVATE_PREFIX = f'if [ -f "{_CONDA_PROFILE}" ]; then . "{_CONDA_PROFILE
 class _RepoLocalEnvironment(NotASandboxLocalEnvironment):
     """Host execution environment whose bash commands default to the repo directory.
 
-    The server runs inside the SWE task container, so commands and file operations
-    execute on the host (no isolation) -- matching how OpenHands runs its tools
-    locally. The vended ``file_editor`` requires absolute paths, but ``bash`` runs
-    with no explicit ``cwd`` and would otherwise land in the server's working
-    directory; defaulting it to the repo path mirrors the OpenHands backend's
-    ``Workspace(working_dir=repo_path)`` so bare shell commands behave the same.
-
-    Each command is prefixed to activate the container's ``testbed`` conda env so
-    the graded project's Python is on ``PATH``; see :data:`_CONDA_ACTIVATE_PREFIX`.
+    The server already runs inside the SWE task container, so there is no isolation here.
+    ``bash`` would otherwise run in the server's working directory; defaulting it to the
+    repo mirrors the OpenHands backend's ``Workspace(working_dir=repo_path)``. Each
+    command is also prefixed with :data:`_CONDA_ACTIVATE_PREFIX`.
     """
 
     def __init__(self, working_dir: str) -> None:
-        """Initialize with the repository working directory."""
         self.working_dir = working_dir
 
     async def execute_streaming(self, command: str, *, cwd: str | None = None, **kwargs: Any) -> Any:
-        """Execute a command in the repo directory with the testbed conda env active."""
         async for chunk in super().execute_streaming(
             _CONDA_ACTIVATE_PREFIX + command,
             cwd=cwd if cwd is not None else self.working_dir,
@@ -211,9 +177,7 @@ class _RepoLocalEnvironment(NotASandboxLocalEnvironment):
 def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
     """Run a SWE rollout with the Strands agent and return a full RL trajectory dump.
 
-    Drives the agent to edit the repository, captures per-turn tokens/logprobs,
-    computes the git diff and grades the result -- the same contract every agent
-    rollout here answers. Never raises: failures come back in ``exception``.
+    Never raises: failures come back in ``exception``.
     """
     agent = None
     exception = None
@@ -244,10 +208,9 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
         try:
             asyncio.run(agent.invoke_async(instruction))
         except (ContextWindowOverflowException, MaxTokensReachedException):
-            # Don't propagate: we want the model to learn about the context limit.
-            # The gateway caps per-turn generation and, when the prompt exceeds the
-            # context budget, returns finish_reason="length" -- both surface through
-            # Strands as MaxTokensReachedException, not ContextWindowOverflowException.
+            # Not propagated: we want the model to learn about the context limit. The
+            # gateway signals an over-budget prompt with finish_reason="length", which
+            # Strands raises as MaxTokensReachedException, not the overflow exception.
             context_window_exceeded = True
 
         num_tool_calls = timing.num_tool_calls
@@ -278,9 +241,8 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
                 "tool_calls_time_s": tool_calls_time_s,
                 "llm_latency_sum": llm_latency_sum,
                 "eval_latency_s": (eval_report.get("eval_latency_s") if eval_report is not None else None),
-                # A generic scalar the trainer can reduce (0.0/1.0). The container loop
-                # only reads top-level RolloutDumpResponse fields, not task_output, so a
-                # signal it should track has to ride on metrics rather than task_output.
+                # The container loop reads only top-level fields, never task_output, so
+                # anything it should track has to ride on metrics.
                 "context_window_exceeded": context_window_exceeded,
             }
         ),
@@ -297,11 +259,9 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
 def _build_model(llm: dict) -> _CapturingLiteLLMModel:
     """Build the capturing LiteLLM model from the request's ``llm`` config.
 
-    The ``llm`` dict follows the same shape callers already send for the OpenHands
-    backend: ``model`` (the LiteLLM model id), optional ``litellm_extra_body`` (vLLM
-    extras such as ``return_token_ids`` and ``logprobs``), and any remaining keys
-    (``base_url``, ``api_key``, ...) which are passed through as LiteLLM client args.
-    The model is forced non-streaming so every turn's response carries token ids.
+    Same shape callers send for the OpenHands backend: ``model``, optional
+    ``litellm_extra_body`` (vLLM extras), and remaining keys as LiteLLM client args.
+    Forced non-streaming so every turn's response carries token ids.
     """
     llm = dict(llm)
     model_id = llm.pop("model")

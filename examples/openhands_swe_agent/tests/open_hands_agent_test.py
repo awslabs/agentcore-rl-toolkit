@@ -1,8 +1,4 @@
-"""Unit tests for the OpenHands agent backend helpers.
-
-These cover the pure metric-extraction logic that the container agent loop relies
-on but no longer knows about -- folding backend-specific parsing into the backend.
-"""
+"""Unit tests for the OpenHands agent backend's metric-extraction helpers."""
 
 import unittest
 
@@ -18,8 +14,6 @@ def _state(**default_bucket):
 
 class ComputeLlmLatencySumTest(unittest.TestCase):
     def test_sums_default_bucket_response_latencies(self):
-        # OpenHands records one latency per model response under the "default"
-        # usage bucket; the total is the backend's llm_latency_sum.
         state = {
             "stats": {
                 "usage_to_metrics": {
@@ -36,8 +30,7 @@ class ComputeLlmLatencySumTest(unittest.TestCase):
         self.assertEqual(compute_llm_latency_sum(state), 3.5)
 
     def test_ignores_non_default_buckets(self):
-        # Auxiliary LLMs (e.g. a condenser) get their own bucket and must not
-        # inflate the task-solving LLM's latency.
+        # Auxiliary LLMs (e.g. a condenser) get their own bucket.
         state = {
             "stats": {
                 "usage_to_metrics": {
@@ -50,7 +43,7 @@ class ComputeLlmLatencySumTest(unittest.TestCase):
         self.assertEqual(compute_llm_latency_sum(state), 1.0)
 
     def test_missing_stats_yield_zero(self):
-        # A metric should never fail a rollout, so partial/absent stats -> 0.0.
+        # A metric should never fail a rollout.
         self.assertEqual(compute_llm_latency_sum({}), 0.0)
         self.assertEqual(compute_llm_latency_sum({"stats": {"usage_to_metrics": {}}}), 0.0)
 
@@ -73,8 +66,8 @@ class ComputeTokenMetricsTest(unittest.TestCase):
 
         metrics = compute_token_metrics(state)
 
-        # Every count is prefixed, so nothing collides with the loop's own names,
-        # and the label fields are dropped so metrics stays numeric.
+        # Prefixed so nothing collides with the loop's names; label fields dropped so
+        # metrics stays numeric.
         self.assertEqual(metrics["openhands_prompt_tokens"], 900.0)
         self.assertEqual(metrics["openhands_completion_tokens"], 50.0)
         self.assertEqual(metrics["openhands_cache_read_tokens"], 500.0)
@@ -84,22 +77,20 @@ class ComputeTokenMetricsTest(unittest.TestCase):
 
     def test_per_turn_token_carries_end_of_rollout_context_length(self):
         # per_turn_token is overwritten rather than summed, so it is the final call's
-        # prompt + completion -- the context length at the end of the rollout. Nothing
-        # else needs deriving, so guard that it is forwarded as-is.
+        # prompt + completion; forwarded as-is.
         state = _state(accumulated_token_usage={"prompt_tokens": 400, "per_turn_token": 320})
 
         self.assertEqual(compute_token_metrics(state)["openhands_per_turn_token"], 320.0)
         self.assertNotIn("openhands_context_length", compute_token_metrics(state))
 
     def test_forwards_unknown_numeric_fields(self):
-        # New SDK TokenUsage fields should flow through without a code change here.
+        # New SDK TokenUsage fields flow through without a code change here.
         state = _state(accumulated_token_usage={"some_future_tokens": 7})
 
         self.assertEqual(compute_token_metrics(state)["openhands_some_future_tokens"], 7.0)
 
     def test_missing_stats_report_nothing(self):
-        # A metric should never fail a rollout, and an unmeasured count must not be
-        # reported as 0.0 -- that would drag the trainer's average down.
+        # An unmeasured count must not be reported as 0.0 -- that drags the average down.
         self.assertEqual(compute_token_metrics({}), {})
         self.assertEqual(compute_token_metrics({"stats": {"usage_to_metrics": {}}}), {})
         self.assertEqual(compute_token_metrics(_state(accumulated_token_usage=None)), {})

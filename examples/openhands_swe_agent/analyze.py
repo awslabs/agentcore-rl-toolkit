@@ -2,13 +2,9 @@
 
 """Report the stats of a run -- any run -- from the rollout records in DynamoDB.
 
-The same numbers an eval prints when it finishes, computed the same way
-(:mod:`rollout_report`), but from the session table rather than from a report file.
-That is the point of this script existing
-separately: every rollout persists its own record as it goes, so a run's results are
-readable while it is still in flight, after its driver has exited, for a run whose
-driver died before writing anything, and for a *training* run, which writes the same
-records and never wrote a report at all.
+The same numbers an eval prints when it finishes, but read from the session table rather
+than a report file, so they work for a run still in flight, a run whose driver died, and
+a training run, which never writes a report at all.
 
     ./swe_agent/analyze.py eval_none_n1_gym_r5
     ./swe_agent/analyze.py eval_none_n1_gym_r5 eval_none_n1_bench   # one report each
@@ -16,15 +12,10 @@ records and never wrote a report at all.
     ./swe_agent/analyze.py eval_none_n1_gym_r5 --start-at 2026-09-03T19
     ./swe_agent/analyze.py eval_none_n1_gym_r5 --output /tmp/r5.json
 
-An experiment name is what a run recorded its sessions under -- ``experiment_name``
-in the eval grid, ``trainer.experiment_name`` for a training run -- and it is not
-unique: re-running one appends another run to the same partition. So the latest run
-wins by default, ``--runs`` lists what is there, and ``--start-at`` pins an older one
-by a prefix of its start timestamp.
-
-The table and its region come from this recipe's ``config.toml`` (``[storage]``), so
-this needs AWS credentials that can read that table, and nothing else -- no parquet,
-no S3, no runtime.
+An experiment name is not unique -- re-running one appends another run to the same
+partition -- so the latest run wins by default, ``--runs`` lists what is there, and
+``--start-at`` pins an older one by a prefix of its start timestamp. Needs only AWS
+credentials that can read the table named in ``config.toml`` (``[storage]``).
 """
 
 import argparse
@@ -39,9 +30,8 @@ from rollout_report import Run, load_run, load_runs, summarize
 
 logger = logging.getLogger(__name__)
 
-# The stats columns worth a terminal's width, in the order they read in. Every field
-# `numeric_stats` produces has all of them; `sum` is dropped from the table because it
-# is meaningful for a handful of fields (token counts) and misleading for the rest.
+# `numeric_stats` also produces `sum`, dropped here: meaningful for token counts,
+# misleading for everything else.
 STAT_COLUMNS = ["count", "mean", "p50", "p90", "p99", "min", "max"]
 
 
@@ -128,8 +118,8 @@ async def analyze(experiment_name: str, args, table_name: str, region_name: str)
         region_name=region_name,
         experiment_start_at=args.start_at,
     )
-    # No `k`: the rows are all there is here, so pass@k is over the samples the run
-    # actually recorded rather than over an `n` from a config this script never sees.
+    # No `k`: this script never sees the run's config, so pass@k is over the samples
+    # actually recorded.
     report = summarize(run.rows)
     print_summary(run, report)
 

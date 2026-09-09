@@ -1,13 +1,8 @@
-"""Tests for the container's tracing wiring.
+"""Tests for the container's tracing wiring (:mod:`swe_agent_server.observability`).
 
-Two halves. The first is ordinary unit coverage of the pieces
-:mod:`swe_agent_server.observability` is built from, run in this process. The second
-is one end-to-end check of the routed mode, run in a *subprocess*: it initialises the
-real Laminar layer against a stand-in for ADOT's provider, and both of those are
-process-global, one-shot things -- the OTel global provider can only be set once and
-Laminar's ``TracerWrapper`` is a singleton whose resource is fixed at construction. A
-child process is what keeps that check honest (nothing else in the run has touched
-either global) and keeps it from deciding what every other test in the file sees.
+Unit coverage of the pieces runs in this process; the end-to-end routed/off modes run in
+subprocesses because the OTel global provider and Laminar's ``TracerWrapper`` are
+one-shot process globals.
 """
 
 import subprocess
@@ -52,8 +47,7 @@ class SessionIdSpanProcessorTest(unittest.TestCase):
         self.assertEqual(span.attributes[SESSION_ID_ATTRIBUTE], "session-1")
 
     def test_no_session_id_no_attribute(self):
-        # Before the first invocation there is nothing to stamp, and an empty
-        # attribute would be worse than an absent one: it matches no query.
+        # An empty attribute would be worse than an absent one: it matches no query.
         exporter = InMemorySpanExporter()
         provider = TracerProvider()
         provider.add_span_processor(SessionIdSpanProcessor())
@@ -78,8 +72,7 @@ class SetSessionIdTest(unittest.TestCase):
         self.assertEqual(observability._session_id, "session-1")
 
     def test_none_does_not_clear_a_known_id(self):
-        # A call with no session id (a locally driven invocation) must not undo the
-        # stamping for the rest of the container's life.
+        # A locally driven invocation passes no session id; stamping must survive it.
         set_session_id("session-1")
         set_session_id(None)
         self.assertEqual(observability._session_id, "session-1")
@@ -114,8 +107,7 @@ class StopInstrumentingChildProcessesTest(unittest.TestCase):
             self.assertEqual(observability.os.environ["PYTHONPATH"], "/agent")
 
     def test_nothing_else_left_means_unset_not_empty(self):
-        # An empty PYTHONPATH puts the working directory on sys.path, which is a
-        # different behaviour change to leak into the agent's commands.
+        # An empty PYTHONPATH puts the working directory on sys.path.
         with mock.patch.dict(observability.os.environ, self.environ(self.AUTO), clear=True):
             stop_instrumenting_child_processes()
 
@@ -135,17 +127,14 @@ class StopInstrumentingChildProcessesTest(unittest.TestCase):
 
 
 class ChildProcessInheritanceTest(unittest.TestCase):
-    """What the agent's own tool calls see, in a real child interpreter.
+    """What the agent's tool calls see, in a real child interpreter.
 
-    The failure this guards against is not raised anywhere: it is a line printed on the
-    child's stderr, which in a rollout goes into the observation the model is trained on.
-    So the assertion has to be made against a real subprocess, and the stand-in for the
-    task environment's interpreter is one that cannot import ``opentelemetry``.
+    The failure is not an exception but a line on the child's stderr, which in a rollout
+    lands in the observation the model is trained on.
     """
 
     def child_stderr(self, pythonpath: str) -> str:
-        # A deliberately minimal environment: what is asserted about is the inherited
-        # variable, so nothing else the test runner happens to export should be in play.
+        # Minimal env: only the inherited variable should be in play.
         result = subprocess.run(
             [sys.executable, "-c", "print(1 + 1)"],
             capture_output=True,
@@ -156,9 +145,8 @@ class ChildProcessInheritanceTest(unittest.TestCase):
 
     def test_a_bad_auto_instrumentation_entry_pollutes_a_child_until_it_is_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # The shape of the distro's entry: a directory whose sitecustomize imports
-            # something the child cannot import. Here the import is guaranteed to fail,
-            # which is what a task interpreter without opentelemetry reproduces.
+            # The shape of the distro's entry: a sitecustomize importing something the
+            # child cannot import, as a task interpreter without opentelemetry would.
             auto = Path(tmp) / "opentelemetry" / "instrumentation" / "auto_instrumentation"
             auto.mkdir(parents=True)
             (auto / "sitecustomize.py").write_text("import opentelemetry_not_installed_here\n")
@@ -201,9 +189,8 @@ class DetachSpanProcessorTest(unittest.TestCase):
 class TracedBackgroundWorkTest(unittest.TestCase):
     """The span that ties setup and a rollout to the invocation that asked for them.
 
-    ``_tracer`` is patched rather than set globally: the module resolves it through the
-    global provider, which this process must leave unset for the subprocess tests below
-    to mean anything.
+    ``_tracer`` is patched rather than set globally so the global provider stays unset for
+    the subprocess tests below.
     """
 
     def setUp(self):
@@ -218,8 +205,8 @@ class TracedBackgroundWorkTest(unittest.TestCase):
         return {span.name: span for span in self.exporter.get_finished_spans()}
 
     def test_the_work_runs_under_a_child_of_the_calling_span(self):
-        # The shape the invocation handler produces: the span is created while the
-        # request's server span is current, and only then handed to a worker thread.
+        # The invocation handler's shape: the span is created while the request's server
+        # span is current, and only then handed to a worker thread.
         with self.provider.get_tracer("test").start_as_current_span("POST /invocations") as invocation:
             work = observability.traced_background_work("rollout_start", lambda: "dumped")
 
@@ -231,7 +218,6 @@ class TracedBackgroundWorkTest(unittest.TestCase):
         self.assertEqual(rollout.context.trace_id, invocation.context.trace_id)
 
     def test_spans_started_by_the_work_descend_from_it(self):
-        # What the agent loop does, and what a rootless trace means it fails to do.
         tracer = self.provider.get_tracer("test")
 
         def work() -> None:
@@ -249,8 +235,7 @@ class TracedBackgroundWorkTest(unittest.TestCase):
         self.assertEqual(finished["agent_loop"].context.trace_id, finished["rollout_start"].context.trace_id)
 
     def test_the_worker_thread_is_left_as_it_was_found(self):
-        # The pool thread is reused for the next rollout, so the attached context has
-        # to come back off it.
+        # The pool thread is reused for the next rollout, so the context must come back off.
         def work() -> object:
             return trace.get_current_span().get_span_context().span_id
 
@@ -290,8 +275,7 @@ class DisarmObservabilityGateTest(unittest.TestCase):
             _disarm_observability_gate()
 
             self.assertNotIn("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", observability.os.environ)
-            # Only the gate's variables go: ADOT's headers (and everything else it
-            # reads) are none of this function's business.
+            # Only the gate's variables go; ADOT's headers are not this function's business.
             self.assertIn("OTEL_EXPORTER_OTLP_TRACES_HEADERS", observability.os.environ)
 
     def test_an_unarmed_gate_is_not_an_error(self):
@@ -301,11 +285,9 @@ class DisarmObservabilityGateTest(unittest.TestCase):
 
 
 class LaminarResourcePinnedToTest(unittest.TestCase):
-    """The seam that decides the resource of the provider Laminar builds.
+    """The seam deciding the resource of the provider Laminar builds.
 
-    Exercised against the real ``TracerWrapper`` (the class attribute is what
-    ``Laminar.initialize`` writes) without initialising it, so the class is left as it
-    was found.
+    Exercised against the real ``TracerWrapper`` class attribute without initialising it.
     """
 
     def setUp(self):
@@ -346,9 +328,6 @@ class ConfigureOpenhandsTracingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
     def test_routed_openhands_spans_reach_the_adot_pipeline(self):
-        # Four properties the routed mode exists for: Laminar's spans are exported by
-        # ADOT's processors, with ADOT's resource, carrying session.id, and Laminar's
-        # own exporter is off the path.
         self._run_child("route_laminar_child")
 
     def test_off_leaves_laminar_dormant(self):
@@ -356,14 +335,10 @@ class ConfigureOpenhandsTracingTest(unittest.TestCase):
 
 
 def _stand_in_for_the_container() -> InMemorySpanExporter:
-    """Set up what the deployed container's interpreter looks like.
-
-    That is: a real SDK tracer provider on the global, which is what
-    ``opentelemetry-instrument`` leaves behind (here exporting to memory rather than to
-    X-Ray), and the endpoint variable the AWS distro sets in-process -- which is the
-    thing that arms OpenHands' observability gate. The endpoint is never reached:
-    Laminar's exporter is detached before any span is created, and the OTLP exporters
-    connect lazily.
+    """What the deployed container's interpreter looks like: an SDK provider on the
+    global (exporting to memory instead of X-Ray), plus the endpoint variable the AWS
+    distro sets, which is what arms OpenHands' observability gate. The endpoint is never
+    reached -- Laminar's exporter is detached before any span and OTLP connects lazily.
     """
     import os
 
@@ -391,11 +366,9 @@ def route_laminar_child() -> None:
     def rollout() -> None:
         """What ``run_rollout`` does, on the thread it does it on.
 
-        The tracing is configured here, on the rollout worker, because that is where
-        the OpenHands import happens -- and then the shape OpenHands produces: a
-        long-lived root span, re-attached so that spans started by anything else (here
-        the global tracer, in the container ADOT's httpx instrumentation) are its
-        children. All of it has to descend from the invocation that submitted the work.
+        Tracing is configured here because that is where the OpenHands import happens;
+        then the shape OpenHands produces: a long-lived root span, re-attached so spans
+        started by anything else are its children.
         """
         observability.configure_openhands_tracing(mode=observability.MODE_ADOT)
 
@@ -443,7 +416,7 @@ def disarm_gate_child() -> None:
     observability.set_session_id("session-1")
     observability.configure_openhands_tracing(mode=observability.MODE_OFF)
 
-    # The import that would otherwise initialise Laminar (see the routed child).
+    # The import that would otherwise initialise Laminar.
     from openhands.sdk.observability.laminar import should_enable_observability
 
     assert not should_enable_observability(), "the gate is still armed"
@@ -452,7 +425,7 @@ def disarm_gate_child() -> None:
 
     assert not TracerWrapper.verify_initialized(), "Laminar initialised anyway"
 
-    # And the container's own pipeline is untouched: spans still export, still stamped.
+    # The container's own pipeline is untouched: spans still export, still stamped.
     with trace.get_tracer("child").start_as_current_span("POST"):
         pass
 
@@ -462,7 +435,6 @@ def disarm_gate_child() -> None:
     print("OK")
 
 
-# The two subprocess halves above, by the name the parent test passes.
 _CHILDREN = {
     "route_laminar_child": route_laminar_child,
     "disarm_gate_child": disarm_gate_child,

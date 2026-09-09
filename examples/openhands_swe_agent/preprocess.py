@@ -2,54 +2,10 @@
 
 """Build the verl task parquet for a SWE dataset -- optionally only the tasks worth training on.
 
-Without filters this is the plain conversion it always was: every instance of the
-HuggingFace dataset becomes one parquet row carrying the prompt, the grader's eval
-script and the task image URI. That is step 1 of the dataset preparation in
-``README.md``.
-
-The filters are step 4, and each one is a question about the task that only a batch
-evaluation run can answer, so each is named by the run that answers it (one eval run
-per agent in the eval grid):
-
-* ``--noop-experiment`` -- the run whose agent changes nothing. A task the empty
-  patch already resolves is mislabelled, not easy: no policy can learn anything from
-  a reward it gets for free, and every group of samples for it is degenerate.
-* ``--oracle-experiment`` -- the run whose agent applies the gold patch. If the
-  reward is not 1 there, the task's tests do not pass even with the reference fix,
-  so the task is unreachable and its reward is pure noise.
-* ``--model-experiment`` -- a run of the policy being trained. Tasks it always fails
-  or always solves give a zero-advantage group under GRPO; the ones in between are
-  the gradient. Hence the ``[25%, 75%]`` window, which ``--min-pass-rate`` and
-  ``--max-pass-rate`` move.
-
-Each filter is a rule over the run's per-instance pass rate -- the mean reward over
-its graded rollouts -- and every one of them additionally requires that *no* rollout
-of the task aborted. An abort is the container dying or timing out, and a task that
-does it once in an eval will do it again in training, where the cost is not one
-rollout but the whole group's advantage; so an abort disqualifies the task rather than
-merely leaving a hole in its pass rate. That is stricter than dropping the aborted
-sample and averaging the rest, deliberately.
-
-A task the run has no pass rate for and no abort on -- it was not in that run's slice
-of the dataset at all -- is a different case, and the one thing the three filters
-disagree about: ``already_solved`` keeps it, the other two drop it. Triviality is a
-claim against the task, while solvability and difficulty are claims that need
-evidence. The printed table reports all of these counts.
-
-Pass rates come from the rollout records in the session table (``[storage]`` in
-``config.toml``), which is where every run -- eval or training -- writes one item per
-rollout as it goes. So an experiment name here is the ``experiment_name`` a run
-recorded under, not a file: filtering by a run needs credentials that can read that
-table, and it works on a run whose driver never got as far as writing a report, or on
-one still in flight (its pass rates are then over the rollouts recorded so far). A
-name that was run more than once resolves to its latest run unless a
-``name@<start-at prefix>`` pins an older one, and the run each filter actually used is
-recorded in the lineage file beside the parquet.
-
-The parquet goes to ``swe_agent/local/<DATASET_NAME>.parquet`` unless ``--output`` says
-otherwise -- the same path an eval reads its slices from (``config.dataset_parquet``),
-so rebuilding a dataset does not mean editing the eval grid. A filtered cut is a
-different dataset and wants a name of its own:
+Without filters, every dataset instance becomes one row (prompt, eval script, task image).
+Each ``--*-experiment`` filter is a rule over the per-instance pass rate of a prior batch
+eval, read from the session table: drop tasks the empty patch already resolves, drop tasks
+the gold patch cannot fix, keep only tasks with a non-zero GRPO advantage.
 
     ./swe_agent/preprocess.py
     ./swe_agent/preprocess.py --output swe_agent/local/swegym_challenged.parquet \\
@@ -57,16 +13,9 @@ different dataset and wants a name of its own:
         --oracle-experiment eval_none_n1_gym_r5 \\
         --model-experiment eval_qwen.qwen3-coder-30b-a3b-instruct_n4_gym_r5@2026-09-03
 
-Writing the parquet also writes ``<output>.lineage.json`` beside it: the dataset it
-came from, every filter that shaped it with the run and the counts behind it, and what
-was left. A parquet is otherwise an anonymous pile of tasks -- a training run started
-weeks later cannot say which eval decided what was in it -- and the filters are cheap
-to state and impossible to reconstruct.
-
-``--dry-run`` reports the same filtration and how many tasks it leaves without
-building the parquet or the lineage -- the filters answer to a choice of runs and a
-window, so it is worth seeing what a set of them costs before spending the eval-script
-generation.
+An experiment name resolves to its latest run unless ``name@<start-at prefix>`` pins one.
+Writing the parquet also writes ``<output>.lineage.json`` beside it; ``--dry-run`` reports
+the same filtration without building either.
 """
 
 import argparse
@@ -86,10 +35,8 @@ from rollout_report import Run, load_run
 
 logger = logging.getLogger(__name__)
 
-# Which dataset to convert. The two differ in more than a name: SWE-Gym's images are
-# published under a different namespace, and its eval scripts are generated by its own
-# fork of the harness (see --swebench-path), so switching is uncommenting a line here
-# and pointing --swebench-path at the matching checkout.
+# Which dataset to convert. Switching also means pointing --swebench-path at the matching
+# harness checkout: SWE-Gym's eval scripts come from its own fork.
 DATASETS = {
     "swegym": ("SWE-Gym/SWE-Gym", "train", "xingyaoww"),
     "swebench": ("SWE-bench/SWE-bench_Verified", "test", "swebench"),
@@ -119,8 +66,6 @@ def parse_args():
         help="checkout to import the swebench harness from, for its eval scripts "
         "(SWE-Gym needs its own fork, not upstream SWE-bench)",
     )
-    # Each takes the experiment name a run recorded its rollouts under, optionally
-    # `name@<start-at prefix>` to filter by a run other than that name's latest.
     parser.add_argument(
         "--noop-experiment",
         metavar="NAME[@START_AT]",
@@ -158,28 +103,23 @@ def parse_args():
 class TaskFilter:
     """One filter: a rule over one eval run's per-instance pass rate.
 
-    ``keep`` is evaluated against the dataset's instances left-joined onto that run's
-    pass rates, so it sees a null ``pass_rate`` for every instance the run did not
-    grade and has to say what that means -- which is the one thing the three filters
-    disagree about.
+    ``keep`` is evaluated against the dataset's instances left-joined onto that run's pass
+    rates, so it sees a null ``pass_rate`` for every instance the run did not grade.
     """
 
     stage: str
     experiment: str
     keep: pl.Expr
     rule: str
-    # What ``keep`` does with an instance the run neither graded nor aborted, stated for
-    # the warning that reports how many of those there were.
+    # What ``keep`` does with an instance the run neither graded nor aborted, for the warning.
     unmeasured: str
 
 
 def reliable(rule: pl.Expr) -> pl.Expr:
     """``rule``, and only for a task every one of whose rollouts completed.
 
-    The abort requirement is the same in all three filters and is stated once here: a
-    task that aborted under any agent is one the training loop will lose groups to, so
-    no pass rate makes it worth keeping. Null means the run has nothing on the task at
-    all, which is not an abort -- what that means is left to ``rule``.
+    A null abort count means the run has nothing on the task at all, which is not an abort --
+    what that means is left to ``rule``.
     """
     return (c("aborted").fill_null(0) == 0) & rule
 
@@ -187,10 +127,8 @@ def reliable(rule: pl.Expr) -> pl.Expr:
 def build_filters(args) -> list[TaskFilter]:
     """The filters the arguments asked for, in the order they are applied.
 
-    Order does not change the result -- the three rules are independent and every one
-    of them costs the same single read of a finished run. It is the order the reasons
-    compose in, which is the order the printed table reads best in: mislabelled tasks,
-    then unreachable ones, then the difficulty window over what is left.
+    Order does not change the result -- the rules are independent -- only how the printed
+    table reads.
     """
     filters = []
     if args.noop_experiment:
@@ -198,8 +136,7 @@ def build_filters(args) -> list[TaskFilter]:
             TaskFilter(
                 stage="already_solved",
                 experiment=args.noop_experiment,
-                # Null (never graded) is kept: no observed noop pass is no evidence that
-                # the task is trivial, and this filter's claim is against the task.
+                # Null (never graded) is kept: no observed noop pass is no evidence of triviality.
                 keep=reliable(c("pass_rate").fill_null(0.0) <= 0),
                 rule="noop pass rate == 0",
                 unmeasured="kept",
@@ -210,8 +147,7 @@ def build_filters(args) -> list[TaskFilter]:
             TaskFilter(
                 stage="unsolvable",
                 experiment=args.oracle_experiment,
-                # Every graded oracle rollout has to pass, and at least one has to exist:
-                # a task nothing verified as solvable is not one to train on.
+                # Every graded oracle rollout has to pass, and at least one has to exist.
                 keep=reliable(c("pass_rate").fill_null(-1.0) >= 1),
                 rule="oracle pass rate == 1",
                 unmeasured="dropped",
@@ -231,34 +167,23 @@ def build_filters(args) -> list[TaskFilter]:
 
 
 def as_float(value) -> float | None:
-    """A reward as a float, whatever the record made of it.
-
-    A rollout's reward is a DynamoDB number, so it arrives as a ``Decimal`` and is
-    converted by ``rollout_report.load_run``; a rollout that was never graded has
-    none at all, which is null here.
-    """
+    """A reward as a float (DynamoDB hands it over as a ``Decimal``), or None if ungraded."""
     return None if value is None else float(value)
 
 
 def parse_experiment(spec: str) -> tuple[str, str | None]:
     """``name``, or ``name@<start-at prefix>`` to pin one run of a repeated experiment.
 
-    An experiment name is not unique in the session table -- running the same grid
-    entry again appends another run under it -- and the latest run is nearly always
-    the one meant, so the prefix is optional. It exists because "nearly always" is not
-    always: a re-run that went wrong must not silently become what a dataset was
-    filtered by.
+    An experiment name is not unique in the session table; without a prefix the latest run
+    wins.
     """
     name, _, start_at = spec.partition("@")
     return name, start_at or None
 
 
 async def load_rollouts(spec: str, records: Storage) -> Run:
-    """The run of ``spec`` to filter by, as its rollout records.
-
-    Straight from the session table, so this reads what the run recorded rather than
-    what its driver later summarized -- one less thing to have gone missing, and it
-    works for a run report that was never written.
+    """The run of ``spec`` to filter by, as its rollout records, straight from the session
+    table rather than from a report its driver may never have written.
     """
     experiment, start_at = parse_experiment(spec)
     run = await load_run(
@@ -279,8 +204,7 @@ async def load_rollouts(spec: str, records: Storage) -> Run:
 def pass_rates(rollouts: list[dict]) -> pl.DataFrame:
     """Per-instance pass rate of one run: ``instance_id``, ``rollouts``, ``aborted``, ``pass_rate``.
 
-    The pass rate is the mean reward, which polars takes over the non-null values --
-    exactly the graded rollouts, since an aborted one is recorded with a null reward.
+    The pass rate is polars' mean reward, which skips nulls -- so exactly the graded rollouts.
     """
     rows = [
         {
@@ -312,8 +236,7 @@ def pass_rates(rollouts: list[dict]) -> pl.DataFrame:
     )
 
 
-# The table's integer columns are null on the rows that bracket the filters, so the
-# schema is stated rather than inferred from the first row.
+# Stated rather than inferred: the integer columns are null on the bracketing rows.
 TABLE_SCHEMA = {
     "stage": pl.String,
     "experiment": pl.String,
@@ -333,17 +256,10 @@ async def apply_filters(
 ) -> tuple[list[str], pl.DataFrame, list[dict]]:
     """The instances that survive every filter, how they thinned out, and by what.
 
-    ``rejected`` and ``dropped`` are both reported because they answer different
-    questions: ``rejected`` is what the filter refuses out of the whole dataset,
-    independent of the others, and ``dropped`` is what it removed from what the
-    earlier filters had already left. The two differ by the overlap between filters --
-    a task the oracle cannot solve and the model never passes is rejected by both and
-    dropped by one.
-
-    The third return value is the same accounting plus what produced it -- the rule,
-    and the run the rule was evaluated against -- which is what goes in the lineage
-    file next to the parquet. It is built here rather than reconstructed later because
-    this is the only place that knows which run an experiment name resolved to.
+    ``rejected`` is what a filter refuses out of the whole dataset, independent of the
+    others; ``dropped`` is what it removed from what the earlier filters had left. The third
+    return value is that accounting plus the rule and the run behind it, for the lineage
+    file -- built here because this is the only place that knows which run a name resolved to.
     """
     instances = pl.DataFrame({"instance_id": instance_ids}, schema={"instance_id": pl.String})
     total = instances.height
@@ -364,9 +280,8 @@ async def apply_filters(
 
         unmeasured = int(verdict["unmeasured"].sum())
         if unmeasured:
-            # Worth saying out loud rather than leaving to the table's columns: filtering
-            # by a run that covered a different slice of the dataset (`num_tasks`, or an
-            # older parquet) is how a subset silently comes out far too small.
+            # Filtering by a run that covered a different slice of the dataset is how a
+            # subset silently comes out far too small.
             logger.warning(
                 "experiment %s has neither a pass rate nor an abort for %d of %d tasks, "
                 "so they are %s: the run did not cover them",
@@ -431,13 +346,7 @@ def print_filtration(filters: list[TaskFilter], table: pl.DataFrame) -> None:
 
 
 def lineage_path(output: Path) -> Path:
-    """``<output>.lineage.json``, beside the parquet it describes.
-
-    Beside rather than inside: the parquet's columns are the trainer's business and
-    adding a provenance column to every row would ship this text into the batch. The
-    name is derived from the output's so the pair travels together -- copying a parquet
-    somewhere and leaving its lineage behind takes deliberate effort.
-    """
+    """``<output>.lineage.json``, beside the parquet it describes."""
     return output.with_suffix(output.suffix + ".lineage.json")
 
 
@@ -451,15 +360,8 @@ def write_lineage(
 ) -> Path:
     """Record what this parquet is, next to it, and return where that went.
 
-    What a parquet cannot say about itself: which dataset it was cut from, which runs
-    decided what stayed, what each of those cost, and where the pass rates were read.
-    A training run weeks later is otherwise looking at an anonymous pile of tasks --
-    and the question it raises ("why is this task in here?") is answerable only from
-    the shell history of whoever built it.
-
-    ``experiment_start_at`` is in here per filter, which is the part that makes the
-    build reproducible: an experiment name resolves to its latest run, and the latest
-    run is a moving target, so the name alone does not name the same input twice.
+    ``experiment_start_at`` per filter is what makes the build reproducible: an experiment
+    name resolves to its latest run, which is a moving target.
     """
     lineage = {
         "output": str(output),
@@ -470,8 +372,6 @@ def write_lineage(
             "split": SPLIT,
             "docker_namespace": DOCKER_NAMESPACE,
         },
-        # Where the pass rates were read from, since a filter is only as meaningful as
-        # the table it was evaluated against.
         "session_table": {"name": records.dynamodb_table, "region": records.region},
         "pass_rate_window": {"min": args.min_pass_rate, "max": args.max_pass_rate},
         "filters": provenance,
@@ -488,10 +388,8 @@ def write_lineage(
 def load_make_test_spec(swebench_path: Path | None):
     """The harness's ``make_test_spec``, from whichever checkout is on the path.
 
-    SWE-Gym's fork keeps it in ``swebench.harness.test_spec``, a module; upstream
-    SWE-bench has since turned that name into a package with the function one level
-    deeper. Which of the two is importable is the same choice as ``DATA_SOURCE``, so
-    it is discovered rather than configured twice.
+    SWE-Gym's fork keeps it in the ``swebench.harness.test_spec`` module; upstream has since
+    turned that name into a package with the function one level deeper.
     """
     if swebench_path is not None:
         sys.path.append(str(swebench_path))
@@ -506,11 +404,8 @@ def format_docker_image_uri(
     instance_id: str,
     docker_namespace: str,
 ) -> str:
-    # Official SWE-Bench image
     # swebench/sweb.eval.x86_64.django_1776_django-11333:latest
-    # Official SWE-Gym image
     # xingyaoww/sweb.eval.x86_64.pandas-dev_s_pandas-51976:latest
-
     repo, name = instance_id.split("__")
     official_image_name = docker_namespace.rstrip("/")
     separator = "1776" if "swebench" in docker_namespace else "s"
@@ -552,25 +447,21 @@ async def main():
         keep = set(kept_ids)
         dataset = dataset.filter(lambda x: x["instance_id"] in keep)
 
-    # Everything above is cheap -- a query per filter -- which is the whole point of
-    # stopping here: the shape of the result is settled, and what a dry run skips is
-    # generating an eval script per task (the slow part) and the harness import it needs.
+    # Stopping here skips the slow part: an eval script per task, and the harness import.
     if args.dry_run:
         print(f"dry run: would write {dataset.num_rows} tasks to {args.output}")
         return
 
     make_test_spec = load_make_test_spec(args.swebench_path)
 
-    # After the filtering, so that extra_info.index -- what verl and a rollout record
-    # identify a task by -- numbers the rows of this parquet and not of the dataset
-    # some of them were dropped from.
+    # After the filtering, so extra_info.index numbers this parquet's rows, not the
+    # unfiltered dataset's.
     verl_dataset = dataset.map(
         function=process_fn,
         with_indices=True,
         fn_kwargs={"make_test_spec": make_test_spec},
     )
-    # The default output is under this recipe's ``local``, which a fresh checkout does
-    # not have: an hour of eval-script generation must not end on a missing directory.
+    # A fresh checkout has no ``local``, and an hour of generation must not die on that.
     args.output.parent.mkdir(parents=True, exist_ok=True)
     verl_dataset.to_parquet(args.output)
     print(f"wrote {verl_dataset.num_rows} tasks to {args.output}")

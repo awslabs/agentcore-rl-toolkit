@@ -1,3 +1,5 @@
+"""S3 helpers taking ``s3://`` URIs."""
+
 from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
 
 

@@ -1,3 +1,5 @@
+"""Gold-patch baseline backend: applies the reference diff, expecting reward 1.0."""
+
 import logging
 import subprocess
 
@@ -11,12 +13,9 @@ from agentcore_rl_toolkit.rollout_session.wire import (
 
 
 def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
-    """Apply the gold patch, then grade the result.
+    """Apply ``task_input["patch"]``, then grade the result.
 
-    A no-LLM baseline that mirrors the other backends' return shape: it applies the
-    reference diff from ``task_input["patch"]`` to the repo and runs the same
-    evaluation the agent backends do. With a correct patch the reward should be
-    1.0, so this doubles as a sanity check on the eval harness. Never raises --
+    A reward other than 1.0 means the eval harness is broken. Never raises --
     failures are returned in ``exception``.
     """
     exception = None
@@ -27,9 +26,7 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
         repo_path = request.task_input["repo_path"]
         patch = request.task_input["patch"]
 
-        # Apply the reference diff to the working tree. ``-p1`` matches the
-        # repo-relative paths git produces; feed the patch on stdin so we don't
-        # need a temp file.
+        # ``-p1`` matches the repo-relative paths git produces.
         subprocess.run(
             ["git", "apply", "--verbose", "-p1", "-"],
             cwd=repo_path,

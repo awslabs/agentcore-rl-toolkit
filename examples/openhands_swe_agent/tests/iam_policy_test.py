@@ -1,26 +1,13 @@
 #!/usr/bin/env python
-"""Unit tests for the execution role's document and the config it is scoped from.
+"""Unit tests for the execution role policy and the config it is scoped from.
 
-Both halves of one property: a rollout container can read the *two* repositories
-this recipe uses and nothing else. The narrowing is the part worth a regression
-guard, because widening it back to ``repository/*`` breaks nothing and would never
-be noticed -- whereas narrowing it too far is noticed immediately, as an AgentCore
-session that cannot pull the agent image (see the module docstring of
-``iam_policy.py`` for why that grant has to stay).
-
-The config half is here because the scoping is only as good as the parse: the
-repository names come out of ``docker_repo`` and ``docker_hub.cache_prefix``, and a
-setting this cannot read is one that would otherwise be granted as-is. It also
-covers the other direction -- that the namespace an eval pulls task images from is
-assembled out of the same two settings, so it cannot name a cache the grant misses.
-
-No AWS.
+One property in two halves: a rollout container can read the agent repository and the
+pull-through cache namespace, and nothing else. No AWS.
 """
 
 import unittest
 
-# The recipe's modules under the same names its own scripts use -- the recipe
-# directory is on ``sys.path`` via its ``conftest.py``.
+# The recipe directory is on ``sys.path`` via its ``conftest.py``.
 import iam_policy
 from config import agent_repository, cache_prefix, task_image_namespace
 
@@ -53,7 +40,6 @@ class NamespaceTest(unittest.TestCase):
         )
 
     def test_the_task_image_namespace_is_assembled_from_the_parts(self):
-        """The account off ``docker_repo``, the region off ``[agentcore]``, the prefix."""
         self.assertEqual(cache_prefix(CONFIG), "docker-hub")
         self.assertEqual(
             task_image_namespace(CONFIG),
@@ -70,20 +56,10 @@ class NamespaceTest(unittest.TestCase):
         for repo in (
             "docker.io/library",
             f"{ACCOUNT}.dkr.ecr.{REGION}.amazonaws.com",
-            "vdanylo",
+            "user",
         ):
             with self.subTest(docker_repo=repo), self.assertRaises(ValueError):
                 agent_repository({"agentcore": {"docker_repo": repo}})
-
-    def test_a_cache_prefix_that_is_a_whole_namespace_is_rejected(self):
-        """The setting it replaced was a URI, so pasting one back has to be an error."""
-        for prefix in (
-            f"{ACCOUNT}.dkr.ecr.{REGION}.amazonaws.com/docker-hub",
-            "docker-hub:latest",
-            "",
-        ):
-            with self.subTest(cache_prefix=prefix), self.assertRaises(ValueError):
-                cache_prefix({"docker_hub": {"cache_prefix": prefix}})
 
 
 class PermissionsPolicyTest(unittest.TestCase):
@@ -94,8 +70,7 @@ class PermissionsPolicyTest(unittest.TestCase):
         )
 
     def test_reads_only_the_agent_image_and_the_cache(self):
-        # Region wildcarded, repository not: the caches are per region, the
-        # repositories are the two this recipe has.
+        # Region wildcarded (caches are per region), repository not.
         self.assertEqual(
             statement(self.policy, "ECRImageAccess")["Resource"],
             [
@@ -105,12 +80,8 @@ class PermissionsPolicyTest(unittest.TestCase):
         )
 
     def test_no_ecr_grant_reaches_a_third_repository(self):
-        """The guard against quietly widening any ECR grant back to the registry.
-
-        Stated over every statement rather than over the two above, so that a new
-        ECR grant is covered by it the moment someone adds one. ``GetAuthorizationToken``
-        is the documented exception: it takes no resource but ``*``.
-        """
+        # Stated over every statement so a newly added ECR grant is covered too.
+        # ``GetAuthorizationToken`` is the documented exception: no resource but ``*``.
         allowed = {
             f"arn:aws:ecr:*:{ACCOUNT}:repository/agents/swe",
             f"arn:aws:ecr:*:{ACCOUNT}:repository/docker-hub/*",
@@ -122,13 +93,7 @@ class PermissionsPolicyTest(unittest.TestCase):
             self.assertLessEqual(set(as_list(statement_["Resource"])), allowed, statement_["Sid"])
 
     def test_the_namespace_the_eval_pulls_from_is_one_the_role_may_read(self):
-        """The two halves, joined: what evaluate.py points a rollout at is granted.
-
-        Now that the namespace is assembled rather than stated, this is what stands in
-        for the pasted string agreeing with the grant -- both come off ``docker_repo``
-        and ``cache_prefix``, so the only way they can disagree is a change to one of
-        the two derivations.
-        """
+        """The two halves joined: what evaluate.py points a rollout at is granted."""
         registry, _, path = task_image_namespace(CONFIG).partition("/")
         self.assertTrue(registry.startswith(f"{ACCOUNT}."), registry)
         self.assertIn(

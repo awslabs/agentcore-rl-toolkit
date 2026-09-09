@@ -1,11 +1,7 @@
 #!/usr/bin/env python
-"""Unit tests for PersistentDict's dynamodb persistence, and the held-open connection.
-
-The dict half is plain in-memory logic checked against a recording persister. The
-dynamodb half is checked against a fake aioboto3 session: what matters is not the
-request shape (``dynamodb_tools.update_dict`` owns that) but *how many clients get
-opened* -- one per persist by default, exactly one for a whole
-:meth:`DynamoDBPersister.connection` block. No AWS.
+"""Unit tests for PersistentDict's dynamodb persistence and the held-open connection:
+one client per persist by default, exactly one for a whole ``connection()`` block.
+Fake aioboto3 session, no AWS.
 """
 
 import asyncio
@@ -24,8 +20,6 @@ REGION = "us-west-2"
 
 
 class FakeTable:
-    """Stands in for an aioboto3 dynamodb ``Table`` resource."""
-
     def __init__(self, name: str, region: str):
         self.name = name
         self.region = region
@@ -40,15 +34,14 @@ class FakeResource:
         self.closed = False
 
     async def Table(self, name: str) -> FakeTable:
-        # A real Table() is awaitable and lets other tasks interleave here; keep
-        # that suspension point so concurrent persists are genuinely interleaved.
+        # A real Table() suspends here, so concurrent persists genuinely interleave.
         await asyncio.sleep(0)
         self.recorder.tables.append((self.region, name))
         return FakeTable(name, self.region)
 
 
 class FakeResourceContext:
-    """What ``session.resource(...)`` returns: an async context manager."""
+    """What ``session.resource(...)`` returns."""
 
     def __init__(self, resource: FakeResource):
         self.resource = resource
@@ -62,7 +55,7 @@ class FakeResourceContext:
 
 
 class Recorder:
-    """Counts what a run of the code under test opened, and what it wrote."""
+    """Counts what a run opened, and what it wrote."""
 
     def __init__(self):
         self.resources: list[FakeResource] = []
@@ -85,7 +78,6 @@ class Recorder:
         self.writes.append((table.name, dict(key), dict(updates)))
 
     def patch(self):
-        """Patch the module's aioboto3 session and dynamodb write with this recorder."""
         return mock.patch.multiple(
             MODULE,
             get_aioboto3_session=mock.AsyncMock(return_value=self.session()),
@@ -94,7 +86,6 @@ class Recorder:
 
 
 def session_dict(session_id: str = "s1", **data) -> PersistentDict:
-    """A PersistentDict writing to the fake table under ``session_id``."""
     return PersistentDict(data, persister=DynamoDBPersister(TABLE, {"session_id": session_id}, REGION))
 
 
@@ -126,7 +117,7 @@ class PersistentDictTest(IsolatedAsyncioTestCase):
 
 
 class StandalonePersistTest(IsolatedAsyncioTestCase):
-    """Without a scope, every persist opens and closes its own client."""
+    """Without a connection, every persist opens and closes its own client."""
 
     async def test_client_per_persist(self):
         recorder = Recorder()
@@ -174,7 +165,6 @@ class ConnectionTest(IsolatedAsyncioTestCase):
         self.assertEqual(recorder.writes[-1], (TABLE, {"session_id": "s1"}, {"a": 4}))
 
     async def test_concurrent_persists_share_the_one_client(self):
-        """The table is opened before the block, so a burst needs no synchronizing."""
         recorder = Recorder()
         with recorder.patch():
             d = session_dict("s1")
@@ -185,7 +175,7 @@ class ConnectionTest(IsolatedAsyncioTestCase):
         self.assertEqual(len(recorder.writes), 50)
 
     async def test_tasks_spawned_inside_share_the_one_client(self):
-        """The scope is the persister, not the task, so spawned rollouts reuse it."""
+        """The scope is the persister, not the task."""
         recorder = Recorder()
         with recorder.patch():
             d = session_dict("s1")
@@ -202,8 +192,7 @@ class ConnectionTest(IsolatedAsyncioTestCase):
             d1, d2 = session_dict("s1"), session_dict("s2", **{"other": 1})
             async with d1.connection():
                 await d1.set("a", 1)
-                # d2 has no connection of its own; it still persists per call.
-                await d2.set("a", 1)
+                await d2.set("a", 1)  # no connection of its own: persists per call
 
         self.assertEqual(len(recorder.resources), 2)
         self.assertEqual(len(recorder.writes), 2)
@@ -226,8 +215,7 @@ class ConnectionTest(IsolatedAsyncioTestCase):
             held = recorder.resources[0]
             self.assertTrue(held.closed)
 
-            # Outside again: back to a client per persist.
-            await d.set("b", 2)
+            await d.set("b", 2)  # outside again: back to a client per persist
 
         self.assertEqual(len(recorder.resources), 2)
         self.assertIsNot(recorder.resources[1], held)
@@ -252,8 +240,7 @@ class ConnectionTest(IsolatedAsyncioTestCase):
                     await d.set("a", 1)
                     inner = recorder.resources[1]
                 self.assertTrue(inner.closed)
-                # The outer client is still open and still serving.
-                await d.set("b", 2)
+                await d.set("b", 2)  # the outer client is still open and serving
                 self.assertFalse(recorder.resources[0].closed)
 
         self.assertEqual(len(recorder.resources), 2)

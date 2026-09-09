@@ -1,15 +1,6 @@
 #!/usr/bin/env python
-"""Unit tests for the ECR pull through cache control plane.
-
-What is worth pinning down here is not that the boto3 calls happen -- it is *which
-deploy writes nothing*. Both resources are reconciled on every deploy of the recipe,
-and both have a cost for a needless write: a secret gains a version, and the history
-of a credential is the one history worth being able to read. So the tests are mostly
-about the no-op paths, plus the two shapes ECR is unforgiving about (the
-``ecr-pullthroughcache/`` name and the credential keys inside the secret) and the
-errors that exist to replace a much later, much less obvious failure.
-
-Everything runs against fake ECR and Secrets Manager clients, so: no AWS.
+"""Unit tests for the ECR pull through cache control plane: which deploys write, which
+are no-ops, and the shapes ECR is strict about. Fake ECR and Secrets Manager, no AWS.
 """
 
 import asyncio
@@ -31,7 +22,7 @@ OTHER_ARN = f"arn:aws:secretsmanager:{REGION}:123456789012:secret:{SECRET_NAME}-
 
 
 def credential(username: str = "someone", token: str = "dckr_pat_current") -> str:
-    """A secret value of the shape ECR reads, which the code under test must match."""
+    """A secret value in the shape ECR reads."""
     return json.dumps({"username": username, "accessToken": token})
 
 
@@ -40,7 +31,7 @@ def client_error(code: str, operation: str) -> botocore.exceptions.ClientError:
 
 
 class FakeSecretsManager:
-    """Secrets Manager, one secret deep: a name, a current value, and what was written."""
+    """Secrets Manager, one secret deep."""
 
     def __init__(self, value: str | None = None):
         self.value = value
@@ -72,8 +63,7 @@ class FakeEcr:
     def __init__(self, rules: dict | None = None, is_valid: bool = True, empty_describe: bool = False):
         self.rules = dict(rules or {})
         self.is_valid = is_valid
-        # Whether an unknown prefix comes back as an error (what the API does) or as
-        # an empty list. Both are handled, and only one of them can be the real one.
+        # Unknown prefix reported as an empty list instead of an error; both are handled.
         self.empty_describe = empty_describe
         self.created: list[dict] = []
         self.updated: list[dict] = []
@@ -119,7 +109,6 @@ async def fake_client(client):
 
 
 def patch_clients(ecr=None, secrets=None):
-    """Both client factories replaced, so nothing here can reach a real endpoint."""
     return mock.patch.multiple(
         MODULE,
         _ecr_client=lambda region_name: fake_client(ecr),
@@ -141,8 +130,7 @@ class RegistrySecretTest(unittest.TestCase):
             )
         self.assertEqual(arn, SECRET_ARN)
         self.assertEqual(len(secrets.created), 1)
-        # The key names are ECR's, not ours: anything else is accepted by Secrets
-        # Manager and rejected by the rule.
+        # The key names are ECR's: anything else is stored fine but rejected by the rule.
         self.assertEqual(
             json.loads(secrets.created[0]["SecretString"]),
             {"username": "someone", "accessToken": "dckr_pat_new"},
@@ -177,7 +165,7 @@ class RegistrySecretTest(unittest.TestCase):
         self.assertEqual(json.loads(secrets.put[0])["accessToken"], "dckr_pat_rotated")
 
     def test_no_credentials_keeps_the_existing_value(self):
-        """The mode for a deployer with no token on disk: adopt, do not rewrite."""
+        """A deployer with no token on disk adopts the secret rather than rewriting it."""
         secrets = FakeSecretsManager(value=credential())
         with patch_clients(secrets=secrets):
             arn = asyncio.run(ecr_control.ensure_registry_secret(SECRET_NAME, REGION))
@@ -203,7 +191,7 @@ class RegistrySecretTest(unittest.TestCase):
             )
 
     def test_a_name_ecr_cannot_read_is_rejected_before_it_is_written(self):
-        """Caught here rather than as an InvalidParameterException on the *rule*."""
+        """Caught here rather than as an InvalidParameterException on the rule."""
         secrets = FakeSecretsManager(value=None)
         with patch_clients(secrets=secrets), self.assertRaises(ValueError) as caught:
             asyncio.run(
@@ -252,7 +240,7 @@ class CacheRuleTest(unittest.TestCase):
         self.assertEqual(ecr.validated, [PREFIX])
 
     def test_a_rule_on_another_secret_is_repointed(self):
-        """What makes a rotated credential a redeploy rather than a delete."""
+        """Lets a rotated credential be a redeploy rather than a delete."""
         ecr = FakeEcr(rules={PREFIX: existing_rule(credential_arn=OTHER_ARN)})
         with patch_clients(ecr=ecr):
             asyncio.run(ecr_control.ensure_docker_hub_cache_rule(PREFIX, REGION, SECRET_ARN))
@@ -267,7 +255,7 @@ class CacheRuleTest(unittest.TestCase):
         self.assertEqual(ecr.updated, [])
 
     def test_a_rule_that_does_not_validate_fails_the_deploy(self):
-        """A stale token, caught here instead of as a missing task image mid-rollout."""
+        """A stale token, caught here instead of as a missing image mid-rollout."""
         ecr = FakeEcr(rules={PREFIX: existing_rule()}, is_valid=False)
         with patch_clients(ecr=ecr), self.assertRaises(RuntimeError) as caught:
             asyncio.run(ecr_control.ensure_docker_hub_cache_rule(PREFIX, REGION, SECRET_ARN))

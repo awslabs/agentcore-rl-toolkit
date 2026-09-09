@@ -1,15 +1,5 @@
-"""Put this recipe's own directory on ``sys.path`` for the tests under ``tests/``.
-
-The scripts here are entrypoints run from this directory -- ``./deploy.py``,
-``./evaluate.py``, ``./analyze.py``, ``./preprocess.py`` -- so they import their
-siblings as top-level modules (``from config import ...``, ``import iam_policy``).
-pytest runs from the repo root instead and prepends only the test file's own directory
-(``tests/``), which does not contain them.
-
-Adding the recipe root here rather than rewriting the tests to some other name keeps
-one import identity for these modules: exactly what the scripts use. There is no
-package to import them as -- ``examples/`` is not importable, and this directory is a
-recipe rather than a distribution.
+"""Put this recipe's own directory on ``sys.path`` so the tests under ``tests/`` can
+import its scripts as top-level modules, the same way the scripts import each other.
 """
 
 import sys

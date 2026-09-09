@@ -1,9 +1,4 @@
-"""Config -> :class:`RolloutSession` selection.
-
-The single config->session mapping, so that no caller reimplements (and drifts from)
-the selection logic. It lives in the verl-free ``rollout_session`` package so a
-session can be constructed straight from a config without standing up verl.
-"""
+"""The single config -> :class:`RolloutSession` mapping, kept verl-free."""
 
 from typing import Protocol, runtime_checkable
 
@@ -18,13 +13,8 @@ from .lifecycle import RolloutSession
 class SessionConfig(Protocol):
     """The fields :func:`make_session` reads off a config.
 
-    A structural type so this module needs no import of a trainer's config dataclass
-    (which would pull in verl). That dataclass satisfies this protocol, and so does
-    any lightweight stand-in a test builds.
-
-    ``backend`` keeps its name because it is a *config key* -- hydra's
-    ``container_agent_loop.backend``, set in checked-in yaml and on command lines --
-    not a Python identifier we are free to rename here.
+    Structural so this module need not import the trainer's config dataclass (which
+    would pull in verl). ``backend`` is the hydra key ``container_agent_loop.backend``.
     """
 
     backend: str
@@ -41,15 +31,7 @@ def make_session(
     cfg: SessionConfig,
     meta: PersistentDict,
 ) -> RolloutSession:
-    """Construct the rollout session named by ``cfg.backend``.
-
-    ``cfg`` is anything exposing the :class:`SessionConfig` fields -- a trainer's
-    config dataclass, an equivalent ``DictConfig`` node, or a test stand-in.
-
-    The cluster-wide AgentCore session-creation rate limit is not a session's own
-    concern: :func:`~.lifecycle.run_rollout_with_bounds` applies it around ``setup``,
-    alongside the concurrency semaphores.
-    """
+    """Construct the rollout session named by ``cfg.backend``."""
     kind = cfg.backend
     if kind == "agentcore":
         assert cfg.agentcore_runtime_arn is not None and cfg.capacity_provider_arn is not None

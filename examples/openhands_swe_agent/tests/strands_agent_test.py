@@ -1,11 +1,6 @@
-"""Unit tests for the Strands agent backend.
-
-These tests mock the LLM so they run without a live vLLM endpoint. Token/logprob
-capture has been removed from the backend, so what remains to cover is the pieces
-that still carry the backend's correctness: the non-streaming completion path
-(latency accumulation plus re-emitting the turn's stream events), model
-construction from the request's ``llm`` config, tool-timing accumulation, a full
-mocked rollout, and backend dispatch in the app.
+"""Unit tests for the Strands agent backend, with the LLM mocked so no vLLM endpoint is
+needed: the non-streaming completion path, model construction, tool timing, a full
+rollout, and backend dispatch in the app.
 """
 
 import sys
@@ -25,10 +20,8 @@ from agentcore_rl_toolkit.rollout_session.wire import RolloutStartRequest
 
 
 def _fake_response(content: str = "hello") -> SimpleNamespace:
-    """Build a stand-in for a non-streaming LiteLLM completion response.
-
-    Mirrors the message shape the parent re-emit path
-    (``_format_non_streaming_response``) consumes to drive the Strands agent loop.
+    """A non-streaming LiteLLM completion response, shaped as the re-emit path
+    (``_format_non_streaming_response``) consumes it.
     """
     message = SimpleNamespace(content=content, reasoning_content=None, tool_calls=None)
     choice = SimpleNamespace(message=message, finish_reason="stop")
@@ -49,9 +42,8 @@ class HandleNonStreamingResponseTest(IsolatedAsyncioTestCase):
         with mock.patch.object(strands_agent, "_monotonic", side_effect=[100.0, 102.5]):
             chunks = [chunk async for chunk in model._handle_non_streaming_response({})]
 
-        # The completion latency is accumulated (the backend's llm_latency_sum)...
         self.assertEqual(model.llm_latency_sum, 2.5)
-        # ...and the assistant text is re-emitted so the Strands agent loop proceeds.
+        # The assistant text is re-emitted so the Strands agent loop proceeds.
         text = "".join(
             chunk["contentBlockDelta"]["delta"].get("text", "") for chunk in chunks if "contentBlockDelta" in chunk
         )
@@ -77,14 +69,14 @@ class BuildModelTest(unittest.TestCase):
             model.get_config()["params"]["extra_body"],
             {"return_token_ids": True, "logprobs": True},
         )
-        # Remaining keys become LiteLLM client args (not model config).
+        # Remaining keys become LiteLLM client args, not model config.
         self.assertEqual(model.client_args, {"base_url": "http://host/v1", "api_key": "secret"})
 
 
 class ToolTimingHooksTest(unittest.TestCase):
     def test_accumulates_elapsed_time_per_tool_call(self):
         timing = _ToolTimingHooks()
-        # Two tool calls; monotonic reads: t1 start=10, end=12; t2 start=20, end=25.
+        # monotonic reads: t1 start=10, end=12; t2 start=20, end=25.
         with mock.patch.object(strands_agent, "_monotonic", side_effect=[10.0, 12.0, 20.0, 25.0]):
             timing._on_before(SimpleNamespace(tool_use={"toolUseId": "t1"}))
             timing._on_after(SimpleNamespace(tool_use={"toolUseId": "t1"}))
@@ -95,8 +87,7 @@ class ToolTimingHooksTest(unittest.TestCase):
         self.assertEqual(timing.total_time_s, 7.0)
 
     def test_unmatched_after_does_not_add_time(self):
-        # An AfterToolCallEvent with no recorded start (e.g. lookup failure before
-        # BeforeToolCallEvent fired) still counts the call but adds no time.
+        # An AfterToolCallEvent with no recorded start still counts the call.
         timing = _ToolTimingHooks()
         timing._on_after(SimpleNamespace(tool_use={"toolUseId": "orphan"}))
 
@@ -106,9 +97,8 @@ class ToolTimingHooksTest(unittest.TestCase):
 
 class RolloutTest(unittest.TestCase):
     def test_rollout_populates_dump_from_mocked_llm(self):
-        # Drive a full rollout() with a single-turn LLM response (no tool calls, so
-        # the agent loop ends after one turn) and stub git + eval so nothing touches
-        # the network, a live endpoint, or a real repo.
+        # Single-turn LLM response (no tool calls, so the loop ends after one turn), with
+        # git and eval stubbed out.
         response = _fake_response(content="all set")
 
         async def fake_acompletion(self, litellm_request):
@@ -133,8 +123,7 @@ class RolloutTest(unittest.TestCase):
 
         self.assertIsNone(dump.exception)
         self.assertEqual(dump.reward, 1.0)
-        # Backend-agnostic metrics the container agent loop reads are surfaced in the
-        # generic metrics dict (not buried in backend-specific task_output).
+        # Backend-agnostic metrics land in the generic metrics dict, not task_output.
         self.assertIn("llm_latency_sum", dump.metrics)
         assert dump.task_output is not None
         self.assertEqual(dump.task_output["git_diff"], "diff --git a b")
@@ -155,8 +144,8 @@ class BackendDispatchTest(unittest.TestCase):
         self.assertIs(result, sentinel)
 
     def test_dispatches_to_openhands_backend(self):
-        # openhands-sdk is a separate optional dependency and may be absent in this
-        # test environment, so stub the module to assert dispatch without importing it.
+        # openhands-sdk is optional and may be absent here, so stub the module rather
+        # than importing it.
         from swe_agent_server import app
 
         sentinel = object()

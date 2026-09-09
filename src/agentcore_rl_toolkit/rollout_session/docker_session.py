@@ -45,10 +45,8 @@ class DockerSession(RolloutSession):
         self.log_group = log_group
         self.log_region = log_region
 
-        # The container's lifetime spans setup -> run -> shutdown, so this class
-        # *is* the context manager for it: `_running` says whether there is a
-        # container to stop, and is set only once `docker run` has succeeded, so a
-        # run that never started is not stopped.
+        # Set only once `docker run` succeeds, so shutdown skips a container that
+        # never started.
         self._running = False
         self.endpoint: str | None = None
 
@@ -90,11 +88,8 @@ class DockerSession(RolloutSession):
     async def _start_container(self) -> str:
         """``docker run`` the agent image, then wait for the container's endpoint.
 
-        The container is named after the session, which is what makes it findable
-        for the IP lookup and the stop in :meth:`shutdown`. Nothing here undoes a
-        partial start: the caller drives this session under ``async with``, so
-        :meth:`shutdown` runs whether or not ``setup`` got this far, and ``_running``
-        is what tells it there is something to stop.
+        The container is named after the session so the IP lookup and
+        :meth:`shutdown` can find it.
         """
         await _docker(
             "run",
@@ -106,9 +101,8 @@ class DockerSession(RolloutSession):
             "2",
             "--network",
             "bridge",
-            # Logs go to cloudwatch daemon-side, one stream per container, so a
-            # rollout's output outlives the container that produced it (`--rm`).
-            # The group is created on demand rather than assumed to exist.
+            # Daemon-side cloudwatch logs, one stream per container, so output
+            # outlives the `--rm` container.
             "--log-driver",
             "awslogs",
             "--log-opt",
@@ -151,9 +145,8 @@ async def wait_ip_address(container_name: str) -> str:
     return ip
 
 
-# The wire protocol over HTTP. Each call is a POST of an InvocationRequest to
-# /invocations, and the waiting is what distinguishes them: a container refuses
-# connections for a while after it starts.
+# The wire protocol over HTTP: each call POSTs an InvocationRequest to /invocations.
+# A container refuses connections for a while after it starts, hence the waiting.
 
 
 async def start_and_wait_setup(endpoint: str, task: dict):

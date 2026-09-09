@@ -1,17 +1,7 @@
-"""The request/response types spoken over the agent server's HTTP endpoint.
+"""The request/response types spoken over the agent server's ``/invocations`` endpoint.
 
-The agent server in the container is invoked by POSTing an :class:`InvocationRequest` to
-``/invocations`` and reading back an :class:`InvocationResponse`; a rollout is
-four such calls -- setup, start, status (polled), dump. These types *are* that
-protocol, so they are the one thing both sides of the container boundary must
-agree on.
-
-They live on the caller's side deliberately. The protocol is what the trainer
-requires of any agent it can drive, not something each agent gets to define: this
-module and the sessions beside it define the contract, and a harness implements it.
-
-Nothing here imports anything but pydantic, and the package around it has no
-imports at all at package level, which is what lets a task container install this
+A rollout is four POSTs of an :class:`InvocationRequest` -- setup, start, status
+(polled), dump. Pydantic is the only import, so a task container can install this
 distribution with ``--no-deps`` and still get the types.
 """
 
@@ -62,8 +52,7 @@ class RolloutStatusResponse(BaseModel):
 
 class RolloutDumpResponse(BaseModel):
     response_type: Literal["rollout_dump_response"] = Field(default="rollout_dump_response")
-    # Generic per-rollout scalar metrics keyed by name. Each harness fills in
-    # whatever it measures (e.g. llm_latency_sum, tool_calls_time_s, num_tool_calls).
+    # Per-rollout scalar metrics; each harness fills in whatever it measures.
     metrics: dict[str, float] = Field(default_factory=dict)
     task_output: dict | None
     reward: float | None
@@ -72,16 +61,9 @@ class RolloutDumpResponse(BaseModel):
     def failure_reason(self) -> str | None:
         """Why this dump does not describe a usable rollout, or None if it does.
 
-        Which fields mean "failed" is a property of this response, not of any
-        harness: while the todo above is outstanding a dump can come back describing
-        a rollout that did not work, and every caller would otherwise have to know
-        the same three fields to notice. The failure happened inside the container,
-        so the only stack trace worth having is the one in ``exception`` -- when it
-        is set it is reported verbatim, and the other two branches stand in for a
-        container that failed without saying so.
-
-        When the response type is fixed so that a dump implies success, this and
-        :meth:`is_successful` go away together.
+        A dump can come back describing a rollout that did not work; the two
+        non-``exception`` branches stand in for a container that failed without saying
+        so. Goes away once a dump implies success.
         """
         if self.exception is not None:
             return self.exception

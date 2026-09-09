@@ -1,16 +1,6 @@
 #!/usr/bin/env python
-"""Unit tests for the capacity provider's create payload.
-
-A pool's compute configuration is immutable, so this payload is the only chance to
-get it right: a wrong field is not an update, it is another pool under another name
-and a runtime repointed at it. The two things worth pinning down are that the
-optional ssh key is *omitted* rather than sent empty when there is none -- the API
-rejects both ``None`` and ``""``, and an unset config key yields one of them -- and
-that what we send validates against botocore's own model of the operation, which is
-a stronger statement than any assertion about our own dict.
-
-The model is read from the local service definition, and the client is a fake, so:
-no AWS.
+"""Unit tests for the capacity provider's create payload, validated against
+botocore's model of ``CreateCapacityProvider``. Fake client, no AWS.
 """
 
 import asyncio
@@ -37,8 +27,6 @@ CREATE_INPUT = (
 
 
 class FakeControlPlane:
-    """The one call under test, plus the ARNs its caller reads back."""
-
     def __init__(self):
         self.params: dict = {}
 
@@ -48,7 +36,7 @@ class FakeControlPlane:
 
 
 async def _ready(describe, what):
-    """:func:`_wait_ready` without the polling: the fake is READY by construction."""
+    """``_wait_ready`` without the polling."""
     return {"status": "READY"}
 
 
@@ -90,7 +78,6 @@ class CapacityProviderPayloadTest(unittest.TestCase):
         self.assert_valid(params)
 
     def test_a_blank_ssh_key_is_omitted_too(self):
-        """What a config key present but left empty yields."""
         params = create(ssh_key_name="")
         self.assertNotIn("sshKeyName", launch_parameters(params))
         self.assert_valid(params)
@@ -101,7 +88,7 @@ class CapacityProviderPayloadTest(unittest.TestCase):
         self.assert_valid(params)
 
     def test_the_root_volume_keeps_iops_at_four_times_throughput(self):
-        """EC2's own floor for gp3, and the reason root_throughput is one knob."""
+        """4x throughput is EC2's floor for gp3."""
         root = create(root_throughput=750)["computeConfiguration"]["ec2Configuration"]["rootVolume"]
         self.assertEqual((root["throughput"], root["iops"]), (750, 3000))
 

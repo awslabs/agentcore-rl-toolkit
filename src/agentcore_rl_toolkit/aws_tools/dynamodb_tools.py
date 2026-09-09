@@ -1,3 +1,8 @@
+"""DynamoDB data plane: value conversion, item updates, and the session queries.
+
+The table and its ``experiment_sessions`` index are defined in :mod:`.dynamodb_control`.
+"""
+
 import datetime as dt
 from decimal import Decimal, Inexact, Rounded, localcontext
 from typing import Any, AsyncIterator, Mapping
@@ -40,13 +45,9 @@ def to_dynamodb(value: Any) -> Any:
 def from_dynamodb(value: Any) -> Any:
     """:func:`to_dynamodb` undone for numbers: ``Decimal`` back to ``int``/``float``.
 
-    DynamoDB has one numeric type, and boto3 hands it back as a ``Decimal`` -- which
-    is neither an ``int`` nor a ``float``. So any reduction that picks its fields by
-    ``isinstance(value, (int, float))``, which is how both the eval report and the
-    trainer's metric mixin decide what is summarizable, sees *no* numbers at all in a
-    record read back out of the table, and silently reports nothing. Integral values
-    come back as ``int`` and the rest as ``float``, so a rollout record loaded from
-    DynamoDB reduces exactly as the in-memory one it was written from did.
+    boto3 returns every number as a ``Decimal``, which is neither an ``int`` nor a
+    ``float``, so consumers that select fields by ``isinstance(value, (int, float))``
+    silently see no numbers at all in a record read back out of the table.
     """
     if isinstance(value, Decimal):
         return int(value) if value == value.to_integral_value() else float(value)
@@ -120,10 +121,8 @@ async def get_sessions_for_experiment_run(
 ) -> list[dict]:
     """Every session item of one experiment, through the ``experiment_sessions`` index.
 
-    ``experiment_start_at`` narrows the query to a single *run* of the experiment: the
-    sort key is ``"<experiment_start_at>:<session_id>"``, so a run is a
-    ``begins_with`` prefix on it rather than a scan. Empty means every run the name
-    ever had. ``region_name`` of ``None`` takes the session's default region.
+    ``experiment_start_at`` is a ``begins_with`` prefix on the sort key that narrows the
+    query to a single run; empty means every run of that name.
     """
     sessions = []
 

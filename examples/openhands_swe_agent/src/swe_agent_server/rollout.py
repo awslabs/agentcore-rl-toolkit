@@ -1,3 +1,5 @@
+"""Task setup and dispatch of a rollout to the requested agent backend."""
+
 import json
 import os
 import subprocess
@@ -15,15 +17,12 @@ from agentcore_rl_toolkit.rollout_session.wire import (
 def run_rollout(payload: RolloutStartRequest) -> RolloutDumpResponse:
     """Dispatch a rollout to the requested agent backend.
 
-    The backend modules are imported lazily so a deployment only needs the SDK for
-    the backend(s) it actually runs (OpenHands and Strands are separate optional
-    dependencies).
+    Backends are imported lazily so a deployment only needs the SDK for the ones it
+    actually runs.
     """
     match payload.task_input["agent"]:
         case "openhands":
-            # Before the import, not after: importing the OpenHands agent initialises
-            # its tracing layer, and both of the things that can be done about that
-            # have to be settled first (swe_agent_server.observability).
+            # Must precede the import, which initialises OpenHands' tracing layer.
             configure_openhands_tracing()
 
             from swe_agent_server.open_hands_agent import rollout
@@ -39,8 +38,7 @@ def run_rollout(payload: RolloutStartRequest) -> RolloutDumpResponse:
 
 
 def run_setup(request: RolloutSetupRequest):
-    # Write the whole task to a temporary JSON file and hand its path to the
-    # unpack script, which extracts whatever fields it needs (e.g. via jq).
+    # The unpack script reads the fields it needs out of this JSON file (e.g. via jq).
     fd, task_path = tempfile.mkstemp(suffix=".json", prefix="swe_task_")
     try:
         with os.fdopen(fd, "w") as f:

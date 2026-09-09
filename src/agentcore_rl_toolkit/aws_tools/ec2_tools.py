@@ -1,11 +1,4 @@
-"""Reading this host's identity from IMDS, and AgentCore's instances from the EC2 API.
-
-Both halves are needed on the rollout path -- the trainer stamps its instance type
-onto the run, and the EC2 monitor maps running instances back to their sessions --
-so this module reads no config of its own and shells out to nothing: no config
-file, no environment, no ssh, no subprocesses. Anything that needs a shell on a
-cluster host belongs beside its caller instead, not here.
-"""
+"""Reading this host's identity from IMDS, and AgentCore's instances from the EC2 API."""
 
 import logging
 import urllib.request
@@ -48,13 +41,10 @@ def _imds(path: str, timeout: float = 2.0) -> str:
 
 
 def get_current_instance_type(default: str = "unknown") -> str:
-    """Return this host's EC2 instance type via the instance metadata service.
+    """This host's EC2 instance type, or ``default`` if the lookup fails.
 
-    The instance type is read directly from IMDSv2, which requires no IAM
-    permissions. (The EC2 ``DescribeInstances`` API is intentionally avoided:
-    the HyperPod execution role is not authorized to call it.) Returns
-    ``default`` if the host is not on EC2 or the lookup fails, so callers never
-    need to handle exceptions.
+    Uses IMDSv2, which needs no IAM permissions -- the HyperPod execution role is
+    not authorized to call ``DescribeInstances``.
     """
     try:
         return _imds("instance-type") or default

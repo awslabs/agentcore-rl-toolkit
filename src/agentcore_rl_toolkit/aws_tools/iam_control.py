@@ -1,27 +1,8 @@
 """IAM *control plane*: create-or-update a role from the policies you hand it.
 
-The same shape as the other control-plane modules here: a resource a deploy has to
-bring into existence before it can point anything at it. This module holds only the
-create/update mechanics; every policy document is the caller's, so nothing here
-knows what a role is *for*.
-
-:func:`ensure_role` is declarative: what you pass is the role's whole permission set
-afterwards, including the *absence* of anything you did not pass. An inline policy
-already on the role and not named in the call is deleted, and so is an attachment of
-a managed policy the call does not list -- the alternative is a role whose real
-permissions are the union of the checked-in document and whatever a past console
-session left behind, the drift that makes "what can this role actually do?"
-unanswerable without an API call. Both are logged individually so a surprise shows
-up in the deploy output.
-
-The two kinds of grant are not alike, which is worth keeping in mind when deciding
-where a permission belongs. An inline document is *ours*: what we decided this role
-may do, scopeable to our own resources. An attached AWS managed policy is *AWS's*:
-the vendor's answer to what a role in one of their features needs, and it changes
-under us when they add an action. For a role whose job is defined by an AWS feature
--- the operator and instance roles of an AgentCore capacity provider -- that is the
-point: better to inherit the next permission the feature needs than discover it as
-an outage.
+Every policy document is the caller's. :func:`ensure_role` is declarative -- what you
+pass is the role's whole permission set afterwards, so any inline policy or managed
+attachment not named in the call is removed (and logged).
 """
 
 import asyncio
@@ -35,11 +16,8 @@ from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
 
 logger = logging.getLogger(__name__)
 
-# IAM is eventually consistent, and a role is not immediately assumable by the
-# service principal its freshly written trust policy names. The next thing a deploy
-# does is hand the role to another service, which rejects one it cannot yet assume
-# ("Unable to assume role"), so a brand-new role gets a pause before it is used.
-# Only on create: an update leaves an already-propagated role in place.
+# IAM is eventually consistent: a brand-new role is not yet assumable, and handing it
+# straight to another service fails with "Unable to assume role". Only on create.
 ROLE_PROPAGATION_DELAY_SECONDS = 12
 
 
@@ -49,22 +27,13 @@ async def _iam_client(region_name: str | None = None):
 
 
 async def current_account_id(region_name: str | None = None) -> str:
-    """The account the ambient credentials are in.
-
-    Every ARN in a policy document needs it, and asking STS is better than making
-    the caller restate in config something the credentials already know -- a
-    mismatch between the two would grant on one account while deploying to another.
-    """
+    """The account the ambient credentials are in, per STS."""
     async with (await get_aioboto3_session()).client("sts", region_name=region_name) as sts:  # type: ignore
         return (await sts.get_caller_identity())["Account"]
 
 
 async def find_role(role_name: str, region_name: str | None = None) -> dict | None:
-    """The role called ``role_name``, or ``None``.
-
-    By name rather than ARN, like every other ``find_*`` here: the name is what a
-    caller's config can state before the role exists.
-    """
+    """The role called ``role_name``, or ``None``."""
     async with await _iam_client(region_name) as iam:
         try:
             return (await iam.get_role(RoleName=role_name))["Role"]
@@ -84,13 +53,8 @@ async def ensure_role(
 ) -> str:
     """The ARN of the role called ``role_name``, reconciled to the given policies.
 
-    Creates the role if absent, otherwise rewrites its trust policy, description,
-    inline policies and managed policy attachments in place -- so the first deploy
-    and every later one are the same call, and running it twice over changes
-    nothing. ``policies`` maps inline policy name to policy document, and
-    ``managed_policy_arns`` lists the managed policies to attach; see the module
-    docstring on why any inline policy or attachment *not* named here is removed,
-    and on when to reach for which.
+    ``policies`` maps inline policy name to document. Anything on the role but not
+    named here is removed; see the module docstring.
     """
     policies = policies or {}
     existing = await find_role(role_name, region_name)
@@ -125,9 +89,7 @@ async def ensure_role(
             for policy_name in page["PolicyNames"]:
                 if policy_name in policies:
                     continue
-                # Loud, because this is the one thing here that takes a permission
-                # away: it means the role carried a grant that the checked-in
-                # document does not, and the document wins.
+                # Loud: this takes a permission away from the role.
                 logger.warning(
                     "deleting inline policy %s from %s: it is not in the deployed document",
                     policy_name,
@@ -135,8 +97,7 @@ async def ensure_role(
                 )
                 await iam.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
 
-        # Attaching one that is already attached is a no-op, so this needs no
-        # membership check -- unlike the detach below, which does.
+        # Attaching an already-attached policy is a no-op, so no membership check.
         for policy_arn in managed_policy_arns:
             logger.info("attaching managed policy %s to %s", policy_arn, role_name)
             await iam.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
@@ -182,14 +143,8 @@ async def ensure_instance_profile(
 ) -> str:
     """The ARN of the instance profile called ``profile_name``, holding ``role_name``.
 
-    An instance profile is the wrapper EC2 needs in order to give a role to an
-    instance: nothing but the profile can be handed to a launch, and a profile holds
-    at most one role. So this creates the profile if absent and then makes
-    ``role_name`` the role in it, swapping out a different one if it finds it --
-    which keeps the same declarative promise as :func:`ensure_role`, at the one
-    resource where IAM's shape forces a second call to keep it.
-
-    The role must already exist; create it with :func:`ensure_role` first.
+    A profile holds at most one role, so any other role found in it is removed. The
+    role must already exist; create it with :func:`ensure_role` first.
     """
     existing = await find_instance_profile(profile_name, region_name)
 
@@ -217,8 +172,8 @@ async def ensure_instance_profile(
             await iam.add_role_to_instance_profile(InstanceProfileName=profile_name, RoleName=role_name)
 
     if created:
-        # Instance profiles propagate to EC2 more slowly than roles do to STS, and
-        # a launch that races it fails with "Invalid IAM Instance Profile name".
+        # Slower to propagate than roles; a launch that races it fails with
+        # "Invalid IAM Instance Profile name".
         logger.info(
             "waiting %ss for instance profile %s to propagate before EC2 is given it",
             ROLE_PROPAGATION_DELAY_SECONDS,

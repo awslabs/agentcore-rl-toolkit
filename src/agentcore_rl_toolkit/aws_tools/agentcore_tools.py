@@ -1,10 +1,4 @@
-"""AgentCore *data plane*: one session's lifecycle, once per rollout.
-
-Every function here takes the ARNs it needs as arguments, so this module reads no
-config of its own -- which is what makes it safe on the rollout path, where config
-has already arrived as hydra config. Provisioning the pool and runtime these
-sessions run on is the control plane, once per image roll and out of scope here.
-"""
+"""AgentCore data plane: starting, invoking and stopping one session, once per rollout."""
 
 from contextlib import asynccontextmanager
 
@@ -55,10 +49,9 @@ async def stop_agentcore_session(capacity_provider_arn: str, session_id: str):
             await acr.delete_capacity_provider_session(capacityProviderId=capacity_provider_id, sessionId=session_id)
     except Exception as e:
         if type(e).__name__ == "ResourceNotFoundException":
-            # Session is already deleted, nothing else to do
+            # already deleted
             return
         else:
-            # otherwise let caller know that we did not succeed
             raise e
 
 

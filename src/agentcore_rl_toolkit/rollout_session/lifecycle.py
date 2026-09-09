@@ -1,25 +1,9 @@
 """The rollout session contract, and the bounded lifecycle that drives it.
 
-A :class:`RolloutSession` is where one rollout happens -- a live Docker container, an
-AgentCore session -- behind three calls (``setup``, ``run``, ``shutdown``) that say
-nothing about which of those it is. Implementations live beside this module.
-
-A session is an async context manager, so its underlying resources are scoped
-lexically by the caller:
-
-    async with session:
-        await session.setup(task)
-        rollout = await session.run(task)
-
-Exiting the block -- normally, on error, or on cancellation between ``setup`` and
-``run`` -- guarantees ``shutdown`` runs, so callers never hand-roll a ``finally``.
-``shutdown`` is idempotent and may also be called explicitly.
-
-:func:`run_rollout_with_bounds` is that lifecycle driven under the shared limits
-every caller needs -- concurrency slots, group priorities, the session-creation rate
--- bundled as a :class:`ContainerBounds`. Both callers use it unchanged: a trainer
-passes bounds backed by cluster-wide Ray actors, a single-process driver passes
-process-local ones.
+A :class:`RolloutSession` runs one rollout behind ``setup`` / ``run`` / ``shutdown``,
+as an async context manager whose exit always shuts the session down.
+:func:`run_rollout_with_bounds` drives that lifecycle under the shared limits in
+:class:`ContainerBounds`.
 """
 
 import asyncio
@@ -63,21 +47,10 @@ class RolloutSession(Protocol):
 class ContainerBounds:
     """Everything that bounds a container rollout: concurrency, priority, rate, time.
 
-    The resources are interfaces, so the same bundle describes both deployments: a
-    trainer fills it with Ray actors, so its bounds hold across every worker in the
-    cluster, while a single-process driver fills it with the local implementations and
-    needs no cross-process coordination. One instance is built per experiment and
-    shared by every rollout -- that sharing is what makes the semaphores cap anything
-    at all.
-
-    The two assigners are separate so container and rollout priorities are numbered
-    independently. ``session_rate_limiter`` is optional: ``None`` means container
-    creation is throttled only by the semaphores.
-
-    The two timeouts are per-phase deadlines rather than shared state, but they bound
-    a rollout just as much as the semaphores do and are fixed for the same scope --
-    one experiment -- so they travel with the rest instead of as loose arguments at
-    every call site.
+    One instance is built per experiment and shared by every rollout -- that sharing is
+    what makes the semaphores cap anything. The two assigners are separate so container
+    and rollout priorities are numbered independently. ``session_rate_limiter=None``
+    means container creation is throttled only by the semaphores.
     """
 
     container_semaphore: PrioritySemaphore
@@ -96,10 +69,8 @@ async def run_rollout_with_bounds(
     session: RolloutSession,
     task: dict,
 ) -> RolloutDumpResponse:
-    # Each bounded resource is scoped by its own `async with`, so leaving this
-    # function for any reason -- return, error, or cancellation between the nested
-    # steps -- releases the concurrency slots and tears the container down in
-    # reverse order of acquisition, with no manual `finally` bookkeeping.
+    # Each bounded resource is scoped by its own `async with`, so leaving this function
+    # for any reason releases the slots and tears the container down in reverse order.
     container_priority = await bounds.container_priority_assigner.get_priority(priority_key)
     async with bounds.container_semaphore.slot(container_priority):
         await session_state.update(
@@ -109,14 +80,12 @@ async def run_rollout_with_bounds(
             }
         )
 
-        # Cluster-wide throttle on container/session creation, applied once the
-        # container slot is held and before the session provisions anything.
+        # Cluster-wide throttle on container/session creation.
         if bounds.session_rate_limiter is not None:
             async with measure_span_persistent("rate_limit_wait", session_state):
                 await bounds.session_rate_limiter.wait_async()
 
         async with session:
-            # setup with timeout
             async with measure_span_persistent("container_setup", session_state):
                 try:
                     async with asyncio.timeout(bounds.container_setup_timeout):
@@ -127,8 +96,7 @@ async def run_rollout_with_bounds(
                     raise e
             await session_state.set("container_created_at", dt.datetime.now())
 
-            # the rollout slot is held only for the run itself, released as soon
-            # as we leave this block (before the container is torn down).
+            # The rollout slot is held only for the run, released before teardown.
             rollout_priority = await bounds.rollout_priority_assigner.get_priority(priority_key)
             async with bounds.rollout_semaphore.slot(rollout_priority):
                 await session_state.update(
@@ -138,19 +106,14 @@ async def run_rollout_with_bounds(
                     }
                 )
 
-                # run with timeout
                 async with measure_span_persistent("agent_run", session_state):
                     try:
                         async with asyncio.timeout(bounds.agent_run_timeout):
                             rollout = await session.run(task)
                             await session_state.set("agent_run_timeout_exceeded", 0.0)
-                            # A returned dump does not yet imply the rollout worked,
-                            # but that is not this function's call: a rollout that ran
-                            # and failed inside the container is data, and raising
-                            # would replace its dump with a stack trace of our own.
-                            # Callers ask the dump (RolloutDumpResponse.is_successful).
-                            # Only failures on this side -- timeouts, transport --
-                            # raise.
+                            # A dump may describe a failed rollout; that is data, so
+                            # callers ask RolloutDumpResponse.is_successful. Only
+                            # failures on this side (timeout, transport) raise.
                             return rollout
                     except TimeoutError as e:
                         await session_state.set("agent_run_timeout_exceeded", 1.0)

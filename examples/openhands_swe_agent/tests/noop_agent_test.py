@@ -1,9 +1,5 @@
-"""Unit tests for the noop agent backend.
-
-The backend is a no-LLM baseline -- it only diffs the untouched repo and grades it
--- so what's worth covering is that it never modifies the repo (no ``git apply``),
-returns the eval verdict as the reward, swallows failures into ``exception``, and
-is reachable through the app's backend dispatch.
+"""Unit tests for the noop agent backend: the no-LLM baseline that only diffs the
+untouched repo, grades it, and is reachable through the app's backend dispatch.
 """
 
 import subprocess
@@ -39,15 +35,14 @@ class RolloutTest(unittest.TestCase):
         self.assertEqual(dump.metrics["eval_latency_s"], 3.5)
         assert dump.task_output is not None
         self.assertEqual(dump.task_output["git_diff"], "")
-        # The only subprocess the backend runs is a read-only diff: no patch is
-        # applied, which is the whole point of the baseline.
+        # The only subprocess is a read-only diff: no patch is applied.
         (argv,), _ = check_output.call_args
         self.assertEqual(argv[:2], ["git", "--no-pager"])
         self.assertIn("diff", argv)
 
     def test_reports_resolved_base_commit_as_reward_one(self):
-        # A task that grades as resolved with no changes is a broken task, not an
-        # error: the backend reports it as reward 1.0 so the run surfaces it.
+        # A task resolved with no changes is a broken task, not an error: reward 1.0
+        # surfaces it in the run.
         with (
             mock.patch.object(noop_agent.subprocess, "check_output", return_value=b""),
             mock.patch.object(noop_agent, "run_evaluation", return_value={"resolved": True}),

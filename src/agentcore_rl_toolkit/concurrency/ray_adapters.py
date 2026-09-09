@@ -1,33 +1,9 @@
-"""Ray-actor adapters for the protocols in this package -- the only Ray-dependent code here.
+"""Adapters turning Ray actor handles into this package's protocols.
 
-Each of :mod:`.priority_semaphore`, :mod:`.priority_assigner` and
-:mod:`.rate_limiter` defines a protocol plus a process-local implementation, and none
-of them imports Ray. A cluster-wide instance is that same local class run as a Ray
-actor; the adapters below turn an actor handle back into something that satisfies the
-protocol, so callers see one interface either way -- which is what lets one
-configuration describe both the training cluster and a single-process driver.
-
-They live together in one module because each is a handful of ``await
-handle.method.remote(...)`` forwards -- too thin to be worth a file each -- and
-because that keeps this package's whole relationship to Ray in one place. Nothing
-here calls a Ray API: the handle does the remoting and ``ActorProxy`` appears only in
-annotations, so its import sits under ``TYPE_CHECKING`` and even this module imports
-with Ray absent. Ray is a dependency of whoever *hosts* the actors, not of the code
-that talks to them -- and each adapter is parameterised by the concrete class hosted
-as the actor rather than by the protocol, since that is what the handle on the other
-end actually is.
-
-The adapters are not redundant with the actor handle itself. A ``@ray.remote`` handle
-does forward ``acquire``/``release``, but Ray turns the ``@asynccontextmanager``
-``slot`` into an ``ObjectRefGenerator``, which does not implement the async context
-manager protocol -- so ``slot`` has to be rebuilt on this side from the two
-primitives. The same boundary drops ``@property`` accessors, which is why nothing
-here forwards ``value`` and callers ask ``locked()`` instead.
-
-Untested as of 2026-09-04: the tests that booted a local Ray cluster were removed
-from the unit suite (~10s of a ~19s run, and the real subject was the actor wiring
-rather than the semaphore). These adapters are covered again when Ray and the
-trainer integration are tested together.
+Nothing here calls a Ray API -- the handle does the remoting and ``ActorProxy`` is only
+an annotation -- so this module imports with Ray absent. ``slot`` must be rebuilt
+locally rather than forwarded: Ray turns an ``@asynccontextmanager`` into an
+``ObjectRefGenerator``, and drops ``@property`` accessors.
 """
 
 from contextlib import asynccontextmanager
@@ -44,12 +20,7 @@ __all__ = ["RayPrioritySemaphore", "RayPriorityAssigner", "RayRateLimiter"]
 
 
 class RayPrioritySemaphore:
-    """Adapts a Ray actor handle to the :class:`~.priority_semaphore.PrioritySemaphore` interface.
-
-    ``acquire``/``release`` forward to the actor's methods. ``slot`` is
-    reconstructed locally from those two calls rather than forwarded, for the
-    reason given in this module's docstring.
-    """
+    """Adapts a Ray actor handle to the :class:`~.priority_semaphore.PrioritySemaphore` interface."""
 
     def __init__(self, actor: "ActorProxy[LocalPrioritySemaphore]") -> None:
         self._actor = actor

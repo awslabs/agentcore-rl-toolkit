@@ -1,21 +1,9 @@
 #!/usr/bin/env python
-"""Unit tests for the shared bounded container rollout.
-
-:func:`run_rollout_with_bounds` is the one definition of how a container
-rollout is sequenced -- container slot, creation-rate throttle, timed ``setup``,
-rollout slot, timed ``run``, teardown -- used by the training loop
-(``verl_extensions/container_agent_loop.py``), the eval harness
-(``swe_agent/rollout_batch.py``) and
-``tests/integration/rollout_session_integration.py``. The bounds it
-applies are :class:`ContainerBounds`, whose fields are all protocol types, so the
-same bundle is filled with Ray actors in the cluster and with the process-local
-implementations here. These tests drive it with the local implementations and a
-fake session: no Ray, no AWS, no container.
-
-They also cover :meth:`RolloutDumpResponse.failure_reason`, the predicate both
-harnesses use for their abort decision, and the boundary it draws with the bounded
-run: a rollout that ran and failed inside the container comes back as a dump to be
-recorded, while only failures on this side (the timeouts here, transport) raise.
+"""Unit tests for :func:`run_rollout_with_bounds` -- how a container rollout is
+sequenced (container slot, rate throttle, timed setup, rollout slot, timed run,
+teardown) and that every :class:`ContainerBounds` field is consulted -- plus
+:meth:`RolloutDumpResponse.failure_reason`. Local implementations and a fake session:
+no Ray, no AWS, no container.
 """
 
 import asyncio
@@ -38,8 +26,8 @@ _UNSET = object()
 
 def dump(reward=1.0, exception=None, task_output=_UNSET, **metrics) -> RolloutDumpResponse:
     """A dump response; the defaults describe a rollout that worked."""
-    # ``None`` is a meaningful value here -- a rollout that produced no output --
-    # so "argument omitted" needs a sentinel of its own.
+    # ``task_output=None`` is meaningful (a rollout that produced no output), hence
+    # the sentinel for "omitted".
     if task_output is _UNSET:
         task_output = {"patch": "diff"}
     return RolloutDumpResponse(
@@ -56,12 +44,8 @@ def session_state(session_id: str = "s") -> PersistentDict:
 
 
 class FakeSession:
-    """A session that does nothing but hand back the dump it was given.
-
-    Honours the :class:`RolloutSession` contract that ``__aexit__`` tears down,
-    which is what lets the bounded run own the container's lifetime without a
-    ``finally`` of its own.
-    """
+    """Hands back the dump it was given, and tears down in ``__aexit__`` as the
+    :class:`RolloutSession` contract requires."""
 
     def __init__(
         self,
@@ -71,9 +55,8 @@ class FakeSession:
     ):
         self.rollout = rollout if rollout is not None else dump()
         self.slow_phase = slow_phase
-        # Every phase yields to the event loop, as a real session's HTTP calls do.
-        # Without that a rollout would run start to finish in one step and never
-        # overlap another, so no concurrency ceiling could be observed at all.
+        # Each phase yields to the loop, as a real session's HTTP calls do; without it
+        # rollouts never overlap and no concurrency ceiling is observable.
         self.dwell = dwell
         self.calls: list[str] = []
         self.tasks: list[dict] = []
@@ -102,12 +85,8 @@ class FakeSession:
 
 
 class _RecordingSlot:
-    """The permit-held block, with the spy's counters updated inside it.
-
-    Hand-rolled rather than ``@asynccontextmanager`` so ``held``/``peak`` move on
-    the same boundaries the permit does, which is what makes ``peak`` a truthful
-    reading of how many rollouts were ever inside at once.
-    """
+    """The permit-held block. Hand-rolled rather than ``@asynccontextmanager`` so
+    ``held``/``peak`` move on exactly the same boundaries the permit does."""
 
     def __init__(self, spy: "RecordingSemaphore", priority: int) -> None:
         self._spy, self._priority = spy, priority
@@ -125,12 +104,8 @@ class _RecordingSlot:
 
 
 class RecordingSemaphore:
-    """A real :class:`LocalPrioritySemaphore` that also records how it was used.
-
-    Delegating rather than faking means the ceiling under test is the one
-    production enforces; the recording is only there to prove the bounded run
-    consulted this field at all, and with which priority.
-    """
+    """A real :class:`LocalPrioritySemaphore` that also records how it was used, so the
+    ceiling under test is the one production enforces."""
 
     def __init__(self, value: int) -> None:
         self._sem = LocalPrioritySemaphore(value)
@@ -149,7 +124,7 @@ class RecordingSemaphore:
 
 
 class RecordingAssigner:
-    """A real :class:`LocalPriorityAssigner` that records the keys it was asked about."""
+    """A real :class:`LocalPriorityAssigner` that records the keys it was asked for."""
 
     def __init__(self) -> None:
         self._assigner = LocalPriorityAssigner()
@@ -161,7 +136,7 @@ class RecordingAssigner:
 
 
 class RecordingLimiter:
-    """Counts waits instead of sleeping: the throttle's timing is not under test here."""
+    """Counts waits instead of sleeping: the throttle's timing is not under test."""
 
     def __init__(self) -> None:
         self.waits = 0
@@ -189,22 +164,18 @@ def bounds(
 
 
 class SuccessPredicateTest(unittest.TestCase):
-    """The rollout-success predicate that used to be inlined in each harness."""
-
     def test_a_working_rollout_is_successful(self):
         self.assertTrue(dump().is_successful())
         self.assertIsNone(dump().failure_reason())
 
     def test_the_reported_exception_is_the_reason_verbatim(self):
-        # Unwrapped on purpose: the container's own traceback is the only useful
-        # one to be logged.
+        # Unwrapped on purpose: the container's own traceback is the useful one.
         failed = dump(reward=None, exception="Traceback: agent crashed")
         self.assertFalse(failed.is_successful())
         self.assertEqual(failed.failure_reason(), "Traceback: agent crashed")
 
     def test_a_missing_reward_is_a_failure(self):
-        # Nothing to train on and nothing to score, so it cannot be reported as a
-        # rollout that worked -- even though the container said nothing went wrong.
+        # Nothing to train on, even though the container reported no error.
         failed = dump(reward=None)
         self.assertFalse(failed.is_successful())
         self.assertIn("no reward", failed.failure_reason())
@@ -215,16 +186,14 @@ class SuccessPredicateTest(unittest.TestCase):
         self.assertIn("no task output", failed.failure_reason())
 
     def test_a_silent_failure_still_gets_a_reason(self):
-        # The "or nowhere" case: the container failed without recording a trace.
-        # The reason stands in for it so the recorded exception is never null while
-        # `aborted` is true, which would make the failure uncategorisable.
+        # The recorded exception must never be null while `aborted` is true, or the
+        # failure becomes uncategorisable.
         for failed in (dump(reward=None), dump(task_output=None, reward=0.0)):
             self.assertIsInstance(failed.failure_reason(), str)
 
     def test_zero_reward_is_a_success(self):
-        # An unresolved task is a rollout that worked and scored 0, not a failure;
-        # reading `reward is None` rather than falsiness is what keeps it in the
-        # pass@k denominator without being counted as an abort.
+        # Read as `reward is None` rather than falsiness, so an unresolved task stays
+        # in the pass@k denominator instead of counting as an abort.
         self.assertTrue(dump(reward=0.0).is_successful())
 
 
@@ -247,20 +216,18 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         await run_rollout_with_bounds(session_state(), bounds(), "g", session, task)
         self.assertEqual(session.tasks, [task, task])
 
-    # -- a container-side failure is data, not an exception -----------------------
+    # -- a container-side failure is data, not an exception --
 
     async def test_a_failed_dump_is_returned_rather_than_raised(self):
-        # Raising here would replace the container's own account of what went wrong
-        # with a traceback of these lines. The dump comes back intact and the caller
-        # asks it; only failures on this side raise.
+        # Raising would replace the container's account of the failure with a local
+        # traceback; only failures on this side raise.
         session = FakeSession(dump(reward=None, exception="agent crashed"))
         got = await run_rollout_with_bounds(session_state(), bounds(), "g", session, {})
         self.assertIs(got, session.rollout)
         self.assertFalse(got.is_successful())
 
     async def test_a_failed_dump_is_recorded_as_run_not_timed_out(self):
-        # A rollout that crashed must stay distinguishable in the session store from
-        # one that was killed by the deadline.
+        # A crash must stay distinguishable from a deadline kill in the session store.
         session = FakeSession(dump(reward=None, exception="agent crashed"))
         state = session_state()
         await run_rollout_with_bounds(state, bounds(), "g", session, {})
@@ -286,11 +253,10 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(b.container_semaphore.held, 0)
         self.assertEqual(b.rollout_semaphore.held, 0)
 
-    # -- every ContainerBounds field is actually consulted -----------------------
+    # -- every ContainerBounds field is actually consulted --
 
     async def test_both_semaphores_cap_concurrency(self):
-        # Six rollouts that all dwell in every phase, so they would overlap freely
-        # if nothing capped them; each semaphore's peak must be its own ceiling.
+        # All six dwell in every phase, so they would overlap freely if uncapped.
         b = bounds(container_slots=2, rollout_slots=1)
         await asyncio.gather(
             *(
@@ -314,8 +280,7 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(b.rollout_priority_assigner.keys, ["step:task"])
 
     async def test_the_assigned_priority_is_what_the_semaphore_receives(self):
-        # The assigners are separate so the two dimensions are numbered
-        # independently; each semaphore must see its own assigner's number.
+        # The two dimensions are numbered independently by separate assigners.
         b = bounds(container_slots=2, rollout_slots=2)
         for i in range(3):
             await run_rollout_with_bounds(
@@ -329,7 +294,7 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(b.rollout_semaphore.priorities, [0, 1, 2])
 
     async def test_one_priority_for_every_member_of_a_group(self):
-        # A group is one prompt's samples: they queue together, at one priority.
+        # A group is one prompt's samples, so they queue together at one priority.
         b = bounds(container_slots=4, rollout_slots=4)
         await asyncio.gather(
             *(run_rollout_with_bounds(session_state(f"s{i}"), b, "same-group", FakeSession(), {}) for i in range(4))
@@ -344,8 +309,8 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(limiter.waits, 3)
 
     async def test_the_rate_limit_wait_is_timed_and_sits_before_setup(self):
-        # Held inside the container slot and ahead of provisioning: that ordering is
-        # what makes the throttle bound container *creation* rather than dispatch.
+        # Inside the container slot and ahead of provisioning, which is what makes the
+        # throttle bound container creation rather than dispatch.
         class OrderedSession(FakeSession):
             async def setup(self, task):
                 order.append("setup")
@@ -361,12 +326,12 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         b = bounds(limiter=OrderedLimiter())
         await run_rollout_with_bounds(state, b, "g", OrderedSession(), {})
         self.assertEqual(order, ["rate_limit", "setup"])
-        # the container slot was taken before the wait
+        # The container slot was taken before the wait.
         self.assertIn("container_slot_start_at", state)
         self.assertIn("rate_limit_wait", state)
 
     async def test_no_rate_limiter_is_tolerated(self):
-        # None means the semaphores are the only brake, which is the default.
+        # The default: the semaphores are the only brake.
         b = bounds(limiter=None)
         self.assertIsNone(b.session_rate_limiter)
         state = session_state()
@@ -374,8 +339,7 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertNotIn("rate_limit_wait", state)
 
     async def test_the_rollout_slot_is_taken_only_after_setup(self):
-        # Containers may sit warm while fewer of them talk to inference, so the
-        # rollout permit must not be held across provisioning.
+        # Containers may sit warm while fewer of them talk to inference.
         order: list[str] = []
 
         class OrderedSession(FakeSession):
@@ -393,7 +357,7 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         await run_rollout_with_bounds(session_state(), b, "g", OrderedSession(), {})
         self.assertEqual(order, ["setup", "rollout_slot"])
 
-    # -- the two timeouts --------------------------------------------------------
+    # -- the two timeouts --
 
     async def test_setup_timeout_fires_and_is_recorded(self):
         state = session_state()
@@ -406,9 +370,9 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
                 {},
             )
         self.assertEqual(state["container_setup_timeout_exceeded"], 1.0)
-        # the run never started, so its flag must be absent rather than 0.0
+        # The run never started, so its flag is absent rather than 0.0.
         self.assertNotIn("agent_run_timeout_exceeded", state)
-        # the span still closed: measure_span_persistent writes in a finally
+        # The span still closed: measure_span_persistent writes in a finally.
         self.assertIn("container_setup_end_at", state)
 
     async def test_run_timeout_fires_independently_and_is_recorded(self):
@@ -438,7 +402,6 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertTrue(session.torn_down)
 
     async def test_a_timed_out_rollout_frees_its_slots(self):
-        # Nothing is released by hand, so a stuck rollout must not strand a permit.
         b = bounds(container_slots=1, rollout_slots=1, run_timeout=0.05)
         for i in range(3):
             with self.assertRaises(TimeoutError):
@@ -452,7 +415,7 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(b.container_semaphore.held, 0)
         self.assertEqual(b.rollout_semaphore.held, 0)
 
-    # -- the timing spans the session store is read for --------------------------
+    # -- the timing spans the session store is read for --
 
     async def test_the_lifecycle_is_recorded_on_the_session_state(self):
         state = session_state()
@@ -471,8 +434,8 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
 
 
 class ProtocolConformanceTest(unittest.TestCase):
-    """The bounds hold interfaces, which is what lets one bundle describe both
-    deployments -- Ray actors in the cluster, these locals in a single process."""
+    """The bounds hold interfaces, so one bundle describes both deployments: Ray actors
+    in the cluster, these locals in a single process."""
 
     def test_the_local_implementations_satisfy_the_bounds_interfaces(self):
         self.assertIsInstance(LocalPrioritySemaphore(1), PrioritySemaphore)
@@ -480,8 +443,7 @@ class ProtocolConformanceTest(unittest.TestCase):
         self.assertIsInstance(RecordingLimiter(), RateLimiter)
 
     def test_the_ray_wrappers_satisfy_them_too_without_a_cluster(self):
-        # Structural check only: instantiating the wrapper around a placeholder
-        # handle needs no Ray runtime, which is the point of the wrappers.
+        # Structural only: wrapping a placeholder handle needs no Ray runtime.
         from agentcore_rl_toolkit.concurrency.ray_adapters import (
             RayPriorityAssigner,
             RayPrioritySemaphore,
@@ -493,8 +455,8 @@ class ProtocolConformanceTest(unittest.TestCase):
         self.assertIsInstance(RayRateLimiter(None), RateLimiter)  # type: ignore[arg-type]
 
     def test_the_fake_session_satisfies_the_session_interface(self):
-        # Keeps these tests honest: the double stands in for a real session only
-        # as long as it still matches what the bounded run is typed against.
+        # The double is only a valid stand-in while it matches what the bounded run
+        # is typed against.
         self.assertIsInstance(FakeSession(), RolloutSession)
 
 

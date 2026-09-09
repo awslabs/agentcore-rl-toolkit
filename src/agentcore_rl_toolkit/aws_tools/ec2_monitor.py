@@ -1,40 +1,8 @@
 """A long-lived poller that stamps ``ec2_instance_id`` onto agent sessions.
 
-Every AgentCore session runs on an EC2 instance tagged with its
-``bedrock-agentcore:runtime-session-id``, and recording which instance served a
-session is what makes host-level forensics possible after a run (CloudWatch
-metrics per instance, capacity/throttling analysis, ssh into a stuck host).
-
-The obvious place to record it is each session's own setup path, one
-``find_running_instances`` call per session -- but that scales with the number of
-rollouts: at hundreds of concurrent sessions those ``DescribeInstances`` calls
-exhaust the EC2 API rate limit, and the rollout then fails for a reason that has
-nothing to do with the rollout.
-
-This module inverts the lookup. One monitor polls ``DescribeInstances`` for the
-whole capacity provider on a fixed interval -- a constant API cost, independent of
-session count -- reads the session id off each instance's tags, and writes
-``ec2_instance_id`` to those sessions' items in the agent-session table. The trade
-is timing: a session is stamped within one poll interval of starting rather than
-synchronously during setup.
-
-Every running instance is worth monitoring, so the write is an unconditional
-upsert: a session whose item does not exist yet gets one holding just its instance
-id, and the rest of its metadata lands on top of that row whenever its owner writes
-it.
-
-Nothing ever calls into the monitor -- it writes to dynamodb and logs its own stats
-once a minute -- so it needs no Ray actor to be addressable from elsewhere in the
-cluster. It is a plain asyncio background task, hosted either way:
-
-* inside a training run, on the host's event loop -- :func:`start_ec2_monitor`,
-  which the trainer's entrypoint starts alongside the cluster-wide actors;
-* as its own process -- a standalone script around :class:`EC2Monitor`, for
-  stamping a run already in flight, or when the hosting process's credentials are
-  not authorized for ``ec2:DescribeInstances`` (the HyperPod execution role is not;
-  see :func:`~.ec2_tools.get_current_instance_type`). An unauthorized poll is
-  logged and retried, never fatal, so the in-run task is safe to leave enabled
-  either way.
+One ``DescribeInstances`` poll per interval covers a whole capacity provider -- a
+constant API cost -- and upserts each running instance's id onto its session's
+dynamodb item, instead of one lookup per session at rollout setup.
 """
 
 import asyncio
@@ -56,7 +24,6 @@ DEFAULT_STATS_INTERVAL = 60.0
 
 
 def _new_stats() -> dict[str, Any]:
-    """Zeroed counters for one reporting interval (see :meth:`EC2Monitor.stats`)."""
     return {
         "polls": 0,
         "poll_errors": 0,
@@ -70,16 +37,8 @@ def _new_stats() -> dict[str, Any]:
 class EC2Monitor:
     """Polls a capacity provider's instances and records them on their sessions.
 
-    One instance of this class serves a whole run: call :meth:`start` once to
-    spawn the polling loop as a background task on the caller's event loop (or
-    drive :meth:`poll_once` yourself), and :meth:`stop` to cancel it. Both are
-    idempotent. The monitor holds the only reference to its task, so the caller
-    has to keep the monitor itself alive.
-
-    A session is written at most once per instance it is seen on: the
-    session -> instance map of already-written pairs is kept in memory and
-    pruned to the instances still running on every poll, so it stays bounded by
-    live capacity rather than growing with the run's total session count.
+    :meth:`start`/:meth:`stop` are idempotent. The monitor holds the only reference
+    to its polling task, so the caller must keep the monitor itself alive.
     """
 
     def __init__(
@@ -95,15 +54,8 @@ class EC2Monitor:
     ):
         """
         ``session_prefix`` narrows the instances considered to sessions whose id
-        starts with it (the agent loop's ids all start with ``verl_``); ``None``
-        considers every instance the capacity provider launched.
-
-        ``stats_interval`` is how often :meth:`run_forever` logs :meth:`stats`
-        and then zeroes its counters -- the monitor's only routine output, since
-        nothing queries it.
-
-        ``region_name`` is the dynamodb region -- the EC2 region is taken from
-        ``capacity_provider_arn``.
+        starts with it; ``None`` considers all of them. ``region_name`` is the
+        dynamodb region -- the EC2 region comes from ``capacity_provider_arn``.
         """
         self.capacity_provider_arn = capacity_provider_arn
         self.dynamodb_table = dynamodb_table
@@ -121,10 +73,7 @@ class EC2Monitor:
     # --- polling -----------------------------------------------------------
 
     async def poll_once(self) -> dict[str, str]:
-        """Run one EC2 lookup and stamp every newly-seen session.
-
-        Returns the ``session_id -> instance_id`` pairs written by this poll.
-        """
+        """Run one EC2 lookup; return the ``session_id -> instance_id`` pairs written."""
         instances = await find_running_instances(self.capacity_provider_arn, self.session_prefix)
 
         live: dict[str, str] = {}
@@ -133,7 +82,6 @@ class EC2Monitor:
             if session_id:
                 live[session_id] = instance["InstanceId"]
 
-        # Only sessions not yet stamped with this instance are worth a write.
         pending = {
             session_id: instance_id
             for session_id, instance_id in live.items()
@@ -141,8 +89,8 @@ class EC2Monitor:
         }
         written = await self._write(pending)
 
-        # Forget sessions whose instances are gone; their state can no longer
-        # change and keeping them would grow with the run.
+        # Prune to live instances, so the map stays bounded by capacity rather than
+        # growing with the run's total session count.
         self._stamped = {s: i for s, i in self._stamped.items() if s in live}
         self._stamped.update(written)
 
@@ -161,9 +109,8 @@ class EC2Monitor:
     async def _write(self, updates: dict[str, str]) -> dict[str, str]:
         """Write ``ec2_instance_id`` for each session, sharing one dynamodb client.
 
-        Returns the pairs successfully written; a session whose write errored is
-        simply left unstamped, so the next poll picks it up again for as long as
-        its instance runs.
+        Returns only the pairs written; a failed write leaves the session unstamped
+        so the next poll retries it.
         """
         if not updates:
             return {}
@@ -175,8 +122,8 @@ class EC2Monitor:
 
             async def write_one(session_id: str, instance_id: str):
                 async with semaphore:
-                    # An upsert: a session whose item does not exist yet is
-                    # created here and filled in by its agent loop later.
+                    # An upsert: a session with no item yet is created here and
+                    # filled in by its agent loop later.
                     return await update_dict(
                         table,
                         {"session_id": session_id},
@@ -200,16 +147,9 @@ class EC2Monitor:
     async def run_forever(self) -> None:
         """Poll every ``poll_interval`` seconds until cancelled.
 
-        A failing poll (throttling, expired credentials, a missing permission)
-        is logged and retried on the next tick rather than killing the monitor:
-        the instance ids it records are diagnostics, so an outage here must
-        never take a training run with it.
-
-        :meth:`stats` is logged every ``stats_interval`` seconds (starting with
-        the first poll), which is how a run's log shows the monitor is alive and
-        keeping up -- per-poll detail stays at debug level. The counters are
-        reset after each such line, so consecutive lines read as a rate and a
-        long-past outage does not keep showing up in them.
+        A failing poll is logged and retried on the next tick, never fatal: the ids
+        recorded are diagnostics and must not take a training run down. :meth:`stats`
+        is logged every ``stats_interval`` seconds and its counters then zeroed.
         """
         last_stats_at = -self.stats_interval
         while True:
@@ -234,8 +174,7 @@ class EC2Monitor:
     async def start(self) -> None:
         """Spawn the polling loop as a background task. Idempotent.
 
-        Async because the task has to be created on a *running* loop, which the
-        caller's ``await`` guarantees.
+        Async because the task has to be created on a *running* loop.
         """
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self.run_forever())
@@ -251,12 +190,9 @@ class EC2Monitor:
     def stats(self) -> dict[str, Any]:
         """What happened since the last :meth:`run_forever` stats line.
 
-        ``polls``, ``poll_errors``, ``write_errors`` and ``sessions_stamped``
-        count only the current reporting interval -- :meth:`run_forever` zeroes
-        them right after logging them -- while ``instances`` and
-        ``sessions_tracked`` are gauges read off the latest poll.
-
-        Sorted by key, so successive lines in a run's log line up column-wise.
+        Counters cover only the current reporting interval; ``instances`` and
+        ``sessions_tracked`` are gauges off the latest poll. Sorted by key so
+        successive log lines line up column-wise.
         """
         return dict(sorted(dict(self._stats, sessions_tracked=len(self._stamped)).items()))
 
@@ -279,9 +215,8 @@ async def start_ec2_monitor(
 ) -> EC2Monitor:
     """Build an :class:`EC2Monitor` and start polling on the caller's loop.
 
-    The one-liner for an async host (the trainer's entrypoint): keep the returned
-    monitor referenced for as long as the run -- it owns the only reference to
-    its polling task -- and optionally ``await monitor.stop()`` at the end.
+    Keep the returned monitor referenced for the life of the run -- it owns the only
+    reference to its polling task.
     """
     monitor = EC2Monitor(
         capacity_provider_arn,

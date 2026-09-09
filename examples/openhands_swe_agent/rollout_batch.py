@@ -1,57 +1,8 @@
 """Batch evaluation harness for container-based agents.
 
-This module is the *machinery*: the endpoints, the :class:`EvalConfig` shape and the
-driver that runs one such config. What to actually run -- the dataset paths and the
-config grid -- lives in this recipe's ``evaluate.py``, which is what you invoke; this
-file holds nothing run-specific and reads no config of its own, since :func:`run_eval`
-takes the resolved values as an ``env`` mapping.
-
-It lives in the recipe rather than beside the sessions it drives, unlike
-``rollout_session.lifecycle``: what is shared is the *session*, and this is one way to
-drive a batch of them -- the toolkit has another with a different session model
-(``agentcore_rl_toolkit.client``'s ``run_batch``), and this recipe is the only consumer
-of this one. It is the eval-only counterpart to training-time rollout, running a
-dataset of tasks through the same session lifecycle -- ``setup(task)`` ->
-``run(task) -> RolloutDumpResponse`` -> ``shutdown()`` -- but driving
-:class:`RolloutSession` directly, with no trainer and no Ray.
-
-The point is measurement, not training: per rollout we record the reward and the generic
-scalar ``metrics`` off the returned ``RolloutDumpResponse`` (plus the session's timing
-spans) and persist them -- metrics to DynamoDB, a full dump to S3 -- rather than feeding
-tokens back to a trainer. Those per-rollout writes are the run's record; the report file
-:func:`run_eval` leaves behind is a snapshot of them, built by :mod:`rollout_report` so
-the same numbers can be recomputed from the table for any past run.
-
-Two things are parameters, not fixed:
-
-* the **dataset** -- any parquet whose rows are tasks the agent server accepts;
-* the **inference endpoint** -- one of three :class:`Endpoint` flavors, differing only
-  in the ``task["llm"]`` seam:
-
-  - :class:`NullEndpoint` -- no inference at all, for agent types that never call an
-    LLM (``oracle`` applies the gold patch, ``noop`` grades the untouched repo), so
-    those runs still get the whole harness with the inference seam removed.
-  - :class:`BedrockEndpoint` -- the agent talks straight to Bedrock (OpenAI-compatible
-    chat), with a fresh bearer token minted per rollout off a long-lived STS session
-    (see :func:`bedrock_token`, :class:`LateBoundLlmSession`). The light path: reward +
-    latencies, **no token capture**, because Bedrock is chat-only and returns neither
-    token-id prompts nor output token ids for a token-in/token-out gateway to front.
-  - :class:`VllmGatewayEndpoint` -- stands up a standalone rollout **gateway** (the same
-    capture layer training uses, wired directly rather than through a Ray host) over a
-    specified vLLM server. The agent points at the gateway (``api_key = session_id``
-    routes the trajectory) and each rollout drains into ``TraceRecord``s -- token ids,
-    loss mask, logprobs -- saved to S3 beside the dump. The heavy path.
-
-Each rollout goes through :func:`run_rollout_with_bounds` rather than resequencing the
-bounded lifecycle here. Its bounds arrive as one ``ContainerBounds`` of interfaces, so
-this driver fills it with process-local implementations (:func:`local_bounds`) and needs
-no cross-process coordination, where a trainer fills it with Ray actors.
-
-Each task is replayed ``n`` times (``n_idx`` 0..n-1) so pass@k and reward/latency
-variance are reportable; a group is one task and its ``n`` samples.
-
-Beyond the ``env`` mapping, a run needs ambient AWS creds for Bedrock token minting and
--- for a gateway endpoint -- a reachable vLLM server plus the model's HF tokenizer.
+Holds the machinery only: the inference :class:`Endpoint` flavors, the :class:`EvalConfig`
+shape and :func:`run_eval`, which drives one config's rollouts through the same bounded
+session lifecycle training uses. The datasets and config grid live in ``evaluate.py``.
 """
 
 import asyncio
@@ -63,9 +14,8 @@ import os
 from typing import Callable, Protocol, runtime_checkable
 from uuid import uuid4
 
-# This recipe's own module, imported as a top-level name: it is a sibling of the
-# ``./evaluate.py`` entrypoint that drives this harness, and ``conftest.py`` puts the
-# same directory on ``sys.path`` so the tests resolve it identically.
+# Sibling module of the ``./evaluate.py`` entrypoint; ``conftest.py`` puts the same
+# directory on ``sys.path`` so tests resolve it identically.
 from rollout_report import summarize
 
 from agentcore_rl_toolkit.aws_tools.boto3_tools import LongLivedCredentials
@@ -76,8 +26,7 @@ from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssi
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore
 from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
 
-# BaseTrace/TraceRecord are torch-free and aiohttp-free; the heavy gateway pieces
-# (RolloutGateway, ThreadedGatewayServer, VllmHttpBackend) and transformers are
+# BaseTrace/TraceRecord are torch-free and aiohttp-free; the heavy gateway pieces are
 # imported lazily in VllmGatewayEndpoint.start() so a Bedrock-only run stays light.
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.agentcore_session import AgentCoreSession
@@ -91,9 +40,8 @@ from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
 logger = logging.getLogger(__name__)
 
-# Every session this harness creates is named with this prefix, which is both how eval
-# sessions are recognizable in the session table (training runs use another) and what
-# narrows the EC2 monitor's instance scan to this run's sessions.
+# Distinguishes eval sessions from training ones in the session table, and narrows the
+# EC2 monitor's instance scan to this run.
 SESSION_PREFIX = "eval_"
 
 
@@ -104,10 +52,9 @@ SESSION_PREFIX = "eval_"
 class Endpoint(Protocol):
     """How the agent reaches inference, and whether the run captures tokens.
 
-    The lifecycle mirrors the gateway's: ``start`` once per experiment,
-    ``open_session``/``finish_session`` per rollout, ``build_task_llm`` produces
-    the ``task["llm"]`` client config the agent server consumes (``None`` when the
-    endpoint has no inference, in which case the task carries no ``llm`` key).
+    ``start``/``stop`` are per experiment, the session methods per rollout.
+    ``build_task_llm`` returns the ``task["llm"]`` client config, or ``None`` when the
+    endpoint has no inference (the task then carries no ``llm`` key).
     """
 
     model: str
@@ -136,14 +83,10 @@ class Endpoint(Protocol):
 
 @dataclasses.dataclass
 class NullEndpoint:
-    """No inference: the container runs the agent with no ``task["llm"]`` at all.
+    """No inference at all, for no-LLM agent types (``oracle``, ``noop``).
 
-    The endpoint for agent types that need no model -- ``oracle`` (applies the reference
-    patch and grades it), ``noop`` (grades the repo as-is) and other no-LLM baselines.
-    Every seam is a no-op and ``build_task_llm`` returns ``None``, so no ``llm`` key
-    reaches the agent server and a session that did read it would fail loudly rather
-    than silently talk to a stray model. ``model`` is a label only: it names the run and
-    the session item, where a real endpoint records a model id.
+    ``build_task_llm`` returns ``None`` so no ``llm`` key reaches the agent server and a
+    session that did read it fails loudly. ``model`` is a label only.
     """
 
     model: str = "none"
@@ -171,30 +114,15 @@ class NullEndpoint:
         return []
 
 
-# --- Bedrock bearer tokens ----------------------------------------------------
-#
-# A Bedrock bearer token is a SigV4-presigned URL, so it inherits the awkward property
-# of one: signed with temporary credentials, it dies when those credentials do, whatever
-# its X-Amz-Expires claims. A token's real lifetime is its signing credentials' remaining
-# lifetime -- hence LongLivedCredentials rather than whatever the ambient chain holds.
-#
-# That is also what makes signing per rollout affordable: `provide_token` builds a fresh
-# botocore Session and walks the whole credential chain on every call, but the signing
-# itself is local HMAC, so handing it resolved credentials removes the chain walk -- the
-# part that gets rate limited when a batch opens hundreds of containers in bursts.
-#
-# *When* a token is minted is the other half of the problem, and is not solved here --
-# see :class:`LateBoundLlmSession`.
+# A Bedrock bearer token is a SigV4-presigned URL: it dies with its signing credentials
+# whatever X-Amz-Expires claims, and resolved credentials skip provide_token's per-call
+# credential-chain walk, which is what gets rate limited in bursts.
 _bedrock_credentials = LongLivedCredentials(role_session_name="batch-agent-eval")
 
 
 def bedrock_token(region: str) -> str:
-    """Mint a Bedrock bearer token for ``region`` off the shared long-lived session.
-
-    Call this from inside the bounded run, not when the rollout is queued: the
-    token's life starts here. Warns if the signing credentials cannot cover the
-    session's floor, which only happens in the ambient fallback.
-    """
+    """Mint a Bedrock bearer token; call it from inside the bounded run, since the
+    token's life starts here."""
     from aws_bedrock_token_generator import provide_token
 
     _bedrock_credentials.load()
@@ -207,9 +135,8 @@ def bedrock_token(region: str) -> str:
             remaining,
         )
 
-    # Cap the token's advertised expiry at the credentials' own so X-Amz-Expires does
-    # not promise a lifetime the signature cannot back -- a token that outlives its
-    # credentials then fails as plainly expired rather than as an opaque auth error.
+    # Cap the advertised expiry at the credentials' own, so an outlived token fails as
+    # plainly expired rather than as an opaque auth error.
     max_expiry = _bedrock_credentials.duration_seconds
     expiry_seconds = max_expiry if remaining is None else remaining
     expiry_seconds = max(1, min(expiry_seconds, max_expiry))
@@ -224,11 +151,8 @@ def bedrock_token(region: str) -> str:
 class BedrockEndpoint:
     """The agent talks straight to Bedrock -- no gateway, no token capture.
 
-    ``model`` is the LiteLLM model id (e.g. ``openai/qwen.qwen3-coder-30b-a3b-instruct``);
-    the ``openai/`` provider prefix routes LiteLLM at ``base_url``. Every rollout
-    mints its own bearer token via :func:`bedrock_token`; because
-    :class:`LateBoundLlmSession` calls ``build_task_llm`` from inside the bounded
-    run, no container is handed a token older than its own rollout.
+    ``model`` is a LiteLLM model id whose ``openai/`` prefix routes at ``base_url``.
+    Every rollout mints its own bearer token, from inside the bounded run.
     """
 
     model: str
@@ -265,19 +189,12 @@ class BedrockEndpoint:
 
 @dataclasses.dataclass
 class VllmGatewayEndpoint:
-    """The agent talks to a rollout gateway fronting a specified vLLM server.
+    """The agent talks to a rollout gateway fronting the vLLM server at ``vllm_url``.
 
-    ``start`` assembles a ``RolloutGateway`` (tokenizer + renderer + a
-    :class:`VllmHttpBackend` pointed at ``vllm_url``) and serves it on a background
-    thread via ``ThreadedGatewayServer`` -- the same capture layer training uses, but
-    wired directly here (no verl/Ray). The gateway is a per-experiment singleton
-    shared by every concurrent rollout.
-
-    Per rollout: ``open_session`` registers the sid, the agent's OpenAI client
-    (``api_key = session_id``) drives the gateway, and ``finish_session`` drains the
-    trajectory tree into ``TraceRecord``s. ``vllm_url`` is the base the backend POSTs
-    ``{vllm_url}/inference/v1/generate`` to; ``tokenizer_path`` is the HF tokenizer
-    the gateway renders and derenders with (must match the served model).
+    ``start`` serves the training capture layer on a background thread (no verl/Ray);
+    the gateway is a per-experiment singleton shared by every concurrent rollout, and
+    ``finish_session`` drains one rollout's trajectory into ``TraceRecord``s.
+    ``tokenizer_path`` must match the served model.
     """
 
     model: str
@@ -330,8 +247,7 @@ class VllmGatewayEndpoint:
 
     def build_task_llm(self, session_id: str, temperature: float, top_p: float) -> dict:
         # The session id rides in the api-key slot, as on the training side, so the
-        # gateway keys token capture off it. base_url already ends in /v1, so the
-        # OpenAI client hits /v1/chat/completions on the gateway.
+        # gateway keys token capture off it.
         return dict(
             model=f"openai/{self.model.split('/')[-1]}",
             base_url=self._server.base_url,
@@ -357,8 +273,7 @@ class VllmGatewayEndpoint:
         records = await self._gateway.finish_session(
             session_id, base_sample=BaseTrace(rollout_id=session_id), reward=0.0
         )
-        # An empty-token record is a turn that produced nothing trainable; drop it,
-        # as the training side does.
+        # Drop turns that produced nothing trainable, as the training side does.
         return [r for r in records if r.token_ids]
 
 
@@ -366,18 +281,10 @@ class VllmGatewayEndpoint:
 class EvalConfig:
     """One evaluation run: a (dataset slice, endpoint, sampling, concurrency) point.
 
-    ``dataset`` is a parquet path whose rows are tasks -- the same schema training
-    reads. ``num_tasks`` caps how many rows are used (None = all); ``n`` is the
-    samples-per-task for pass@k / variance.
-
-    The concurrency/rate/timeout fields are the eval-side counterparts of the bounds
-    training feeds into :func:`run_rollout_with_bounds`, here bounded process-locally.
-
-    ``task_kwargs`` is the same seam training has: extra keys merged into every task
-    the agent server receives (the ``agent`` dispatch key, the
-    ``docker_image_namespace`` its task images are pulled from, ...). The harness
-    passes it through without interpreting it, so which keys a given agent needs is a
-    property of this config, not of the driver.
+    ``dataset`` is a parquet whose rows are tasks in the schema training reads;
+    ``num_tasks`` caps the rows used (None = all) and ``n`` is samples per task.
+    ``task_kwargs`` is merged into every task and passed through uninterpreted, so which
+    keys an agent needs is a property of this config, not of the driver.
     """
 
     experiment_name: str
@@ -388,15 +295,12 @@ class EvalConfig:
     concurrency: int  # max in-flight containers
     session_create_rate: float  # container/session creation req/sec ceiling
     timeout: int  # per-rollout agent_run wall-clock budget (seconds)
-    # Where this run's report is written, as `{report_dir}/{experiment_name}.json`.
-    # Deliberately without a default: the report is an artifact of the recipe being
-    # evaluated, so only the driver knows where it belongs. Pass an absolute path if it
-    # must mean one particular directory -- it is resolved when the run finishes, so a
-    # relative one answers to whatever cwd the driver happened to have.
+    # Written as `{report_dir}/{experiment_name}.json`. No default: only the driver knows
+    # where the recipe's artifacts belong. Resolved when the run finishes, so a relative
+    # path answers to whatever cwd the driver happened to have.
     report_dir: str
-    # max concurrent agent runs (None = `concurrency`, i.e. non-binding: every
-    # container that exists may run). Lower it to hold containers warm while
-    # throttling how many talk to inference at once, as training does.
+    # max concurrent agent runs (None = `concurrency`, i.e. non-binding). Lower it to
+    # hold containers warm while throttling how many talk to inference at once.
     rollout_concurrency: int | None = None
     container_setup_timeout: int = 1200  # per-rollout container provisioning budget
     temperature: float = 1.0
@@ -409,12 +313,9 @@ class EvalConfig:
 def task_index(task_row: dict) -> int:
     """The dataset's own index for a task row, resolved as verl resolves it.
 
-    verl's ``RLHFDataset`` promotes ``extra_info["index"]`` to a top-level ``index``
-    field on the batch, which the training side reads as the task id
-    (``task_id = str(task["index"])``). Reading it the same way here means an eval task
-    id names the same dataset row a training task id does, instead of a number that
-    shifts with how the slice was cut. A row that already carries a top-level ``index``
-    wins.
+    verl's ``RLHFDataset`` promotes ``extra_info["index"]`` to a top-level ``index``,
+    which the training side reads as the task id; reading it the same way means an eval
+    task id names the same dataset row rather than a number that shifts with the slice.
     """
     if "index" in task_row:
         return task_row["index"]
@@ -422,22 +323,12 @@ def task_index(task_row: dict) -> int:
 
 
 def token_stats(records: list[TraceRecord]) -> dict:
-    """Token counts for one trajectory, from its captured trace records.
+    """Token counts for one trajectory, captured as one record per trainable turn.
 
-    A trajectory is captured as one record per trainable turn, each a full
-    prompt+response token sequence whose loss mask marks the LLM-generated span.
-    Over the whole trajectory that gives three different numbers, all worth having:
-
-    * ``num_tokens`` -- every token in every record. Records overlap (a turn's
-      prompt is the previous turns replayed), so this is the trainer's cost of the
-      trajectory, not the length of the agent's conversation.
-    * ``num_generated_tokens`` -- the loss-masked tokens only, i.e. what the LLM
-      actually produced and what the policy update trains on.
-    * ``max_record_tokens`` -- the longest single record, which is the sequence
-      that has to fit the context window; it, not the sum, is what bumps against
-      ``max_context_tokens``.
-
-    Plus ``num_records``, the number of trainable turns.
+    Records overlap (a turn's prompt is the previous turns replayed), so ``num_tokens``
+    is the trainer's cost of the trajectory rather than the conversation's length, and
+    ``max_record_tokens`` -- not the sum -- is what bumps ``max_context_tokens``.
+    ``num_generated_tokens`` is the loss-masked span the policy update trains on.
     """
     token_counts = [len(record.token_ids) for record in records]
     return {
@@ -449,7 +340,7 @@ def token_stats(records: list[TraceRecord]) -> dict:
 
 
 def _trace_to_dict(record: TraceRecord) -> dict:
-    """JSON-safe view of a TraceRecord (token ids / loss mask / logprobs)."""
+    """JSON-safe view of a TraceRecord."""
     return {
         "rollout_id": record.rollout_id,
         "token_ids": record.token_ids,
@@ -464,12 +355,9 @@ def _trace_to_dict(record: TraceRecord) -> dict:
 
 
 def local_bounds(config: EvalConfig) -> ContainerBounds:
-    """Fill :class:`ContainerBounds` with the process-local implementations.
-
-    The bounds are all interfaces, so where training hands the bounded run Ray actors,
-    this driver hands it these. Built once per experiment and shared by every rollout,
-    which is what makes the semaphores cap anything.
-    """
+    """Fill :class:`ContainerBounds` with process-local implementations (training fills
+    it with Ray actors). Built once per experiment, which is what makes the semaphores
+    cap anything."""
     return ContainerBounds(
         container_semaphore=LocalPrioritySemaphore(config.concurrency),
         rollout_semaphore=LocalPrioritySemaphore(config.rollout_concurrency or config.concurrency),
@@ -484,22 +372,11 @@ def local_bounds(config: EvalConfig) -> ContainerBounds:
 class LateBoundLlmSession:
     """Wraps a session so ``task["llm"]`` is built inside the bounded run, not before it.
 
-    Every rollout coroutine is created up front, so the wait for a container slot
-    happens *inside* :func:`run_one` -- which means anything perishable prepared before
-    that wait rots while its rollout sits in the queue. A Bedrock bearer token built at
-    dispatch is expired long before the container it was minted for exists.
-
-    Rather than add a second gate outside :func:`run_rollout_with_bounds`, this defers
-    the perishable step to the one place already behind that function's gates. ``run``
-    is the tightest such point and it is not too late: the agent server reads
-    ``task_input["llm"]`` only from the rollout-start payload that ``run`` sends, never
-    from the setup payload. By then the container slot, the session-creation throttle,
-    ``setup`` and the rollout slot are all behind us, so the token's age at the agent's
-    last LLM call is bounded by ``agent_run_timeout`` -- a config value -- rather than
-    by how long the queue was.
-
-    Delegates the rest of the :class:`RolloutSession` protocol untouched, so the
-    wrapped session keeps owning the container lifecycle.
+    Rollout coroutines are all created up front, so a perishable Bedrock bearer token
+    minted at dispatch would rot while its rollout waits for a container slot. ``run`` is
+    the last point that still works -- the agent server reads ``task_input["llm"]`` only
+    from the rollout-start payload -- so a token's age is bounded by ``agent_run_timeout``
+    rather than by the queue. The rest of :class:`RolloutSession` is delegated untouched.
     """
 
     def __init__(self, session: RolloutSession, build_llm: Callable[[], dict | None]) -> None:
@@ -517,9 +394,8 @@ class LateBoundLlmSession:
         await self._session.setup(task)
 
     async def run(self, task: dict) -> RolloutDumpResponse:
-        # The token's clock starts here, one step before the payload carrying it
-        # goes to the container. A ``None`` config means the endpoint has no
-        # inference, and the key must stay absent rather than be set to None.
+        # A ``None`` config means the endpoint has no inference, and the key must stay
+        # absent rather than be set to None.
         llm = self._build_llm()
         if llm is not None:
             task["llm"] = llm
@@ -543,30 +419,19 @@ async def run_one(
 ) -> dict:
     """Drive one rollout (one sample of one task) end to end.
 
-    The bounded lifecycle -- container slot, creation-rate throttle, timed ``setup``,
-    rollout slot, timed ``run``, teardown -- is :func:`run_rollout_with_bounds`, the
-    same function training calls, so both share one definition of how a container
-    rollout is sequenced and bounded. This wrapper only supplies what is eval-specific:
-    the session state, the endpoint's capture session, the token-trace drain, and the
-    S3 dump. One thing it deliberately does *not* supply is the ``task["llm"]`` config:
-    that is perishable and this coroutine is created long before it runs, so
-    :class:`LateBoundLlmSession` builds it inside the bounded run instead.
-
-    The session state is a :class:`PersistentDict` that persists itself to DynamoDB on
-    every mutation (here and inside the bounded run), so an in-flight rollout is
-    observable as it progresses. Returns that meta as a plain dict -- reward, metrics
-    and token counts folded in, so the report reduces one flat row per rollout. Never
-    raises: a failed rollout is recorded with ``aborted=True`` and a null reward so it
-    still counts in pass@k denominators.
+    The bounded lifecycle itself is :func:`run_rollout_with_bounds`, the same function
+    training calls; this wrapper adds the session state, the capture session, the
+    token-trace drain and the S3 dump. Returns the session meta as a flat dict so the
+    report reduces one row per rollout. Never raises: a failed rollout is recorded with
+    ``aborted=True`` and a null reward so it still counts in pass@k denominators.
     """
     session_id = SESSION_PREFIX + uuid4().hex
     endpoint = config.endpoint
     index = task_index(task_row)
     task_id = str(index)
 
-    # meta is a PersistentDict over this session's item in the session table -- the
-    # same table training writes to, here named out of the caller's ``env`` mapping.
-    # Every mutation below persists itself, so DynamoDB tracks a rollout live.
+    # A PersistentDict over this session's item in the table training also writes to;
+    # every mutation below persists itself, so DynamoDB tracks a rollout live.
     meta = PersistentDict(
         {
             "session_id": session_id,
@@ -594,12 +459,8 @@ async def run_one(
     task = dict(task_row)
     task["sampling_params"] = sampling_params
     task.update(config.task_kwargs)
-    # No task["llm"] yet: it is perishable, and this coroutine is created long before
-    # it runs. LateBoundLlmSession fills it in once the bounded run reaches `run`.
-
-    # A fresh session per rollout, as on the training side. It shares this rollout's
-    # `meta` as its session_state, so the session's own keys (runtime_arn, its timing
-    # spans) land in the same session item.
+    # No task["llm"] yet: LateBoundLlmSession fills it in once the bounded run reaches
+    # `run`, and shares this rollout's `meta` so session keys land in the same item.
     session = LateBoundLlmSession(
         AgentCoreSession(
             session_id,
@@ -610,31 +471,25 @@ async def run_one(
         lambda: endpoint.build_task_llm(session_id, config.temperature, config.top_p),
     )
 
-    # The initial state is adopted, not written, by the constructor; persist it so
-    # the session shows up before the rollout starts.
+    # The constructor adopts the initial state without writing it.
     await meta.persist()
 
     rollout: RolloutDumpResponse | None = None
     records: list[TraceRecord] = []
     exception: str | None = None
     try:
-        # Register the capture session before the agent can make any LLM call
-        # (no-op for the Bedrock endpoint), as the training side does.
+        # Register the capture session before the agent can make any LLM call.
         endpoint.open_session(session_id, sampling_params)
         rollout = await run_rollout_with_bounds(
             meta,
             bounds,
-            # A group is one task and its n samples, so the task id is the priority
-            # key: all n samples of a task queue at one priority, in task arrival
-            # order (training adds the step to the same key).
+            # A group is one task and its n samples, so the task id is the priority key.
             task_id,
             session,
             task,
         )
-        # A dump comes back for a rollout that failed inside the container too, so
-        # the response is asked rather than assumed: its metrics are kept either way,
-        # while an unsuccessful one counts as aborted and its reward is not read.
-        # Only a failure on this side (timeout, transport) raises.
+        # A dump comes back for a rollout that failed inside the container too, so the
+        # response is asked rather than assumed; only failures on this side raise.
         exception = rollout.failure_reason()
         if exception is not None:
             logger.error(
@@ -650,24 +505,19 @@ async def run_one(
         exception = exception_to_string(error)
         await meta.set("aborted", True)
     finally:
-        # Drain the gateway session (frees its trajectory tree and cancels any
-        # in-flight turn). The container is already gone: the bounded run tears it
-        # down on the way out of its `async with session`, on success or failure.
+        # Frees the trajectory tree and cancels any in-flight turn. The container is
+        # already gone: the bounded run tears it down on the way out.
         try:
             records = await endpoint.finish_session(session_id)
         except Exception as error:
             logger.error("finish_session %s failed: %r", session_id, error)
 
-    # Reward and resolved are the only fields named downstream (pass@k needs them);
-    # the dump's metrics dict rides along under its own key names. Reward comes off a
-    # successful rollout only -- an aborted one reports null, which is what keeps it
-    # in the pass@k denominator without counting as a pass -- while the metrics come
-    # off whatever dump exists, so a failed attempt's timings are not lost.
+    # An aborted rollout reports a null reward, which keeps it in the pass@k denominator
+    # without counting as a pass, while metrics come off whatever dump exists.
     reward = rollout.reward if rollout is not None and rollout.is_successful() else None
     metrics = dict(rollout.metrics) if rollout is not None else {}
     resolved = bool(reward) if reward is not None else False
 
-    # Token counts exist only where the trajectory was captured (gateway path);
     # None, not zeros, for an endpoint that captures nothing.
     tokens = token_stats(records) if endpoint.captures_tokens() else None
 
@@ -675,7 +525,6 @@ async def run_one(
     if tokens is not None:
         rollout_summary.update(tokens)
 
-    # One persisted update for everything known once the rollout has settled.
     await meta.update(
         {
             "eval_end_at": dt.datetime.now(),
@@ -699,24 +548,18 @@ async def run_one(
 
     await meta.set("output_s3_uri", s3_uri)
 
-    # The row IS the session meta: reward/resolved, the session's metrics, the token
-    # counts and every lifecycle timing span were folded into it above, flat, so the
-    # report can reduce whatever is numeric without knowing any of their names.
+    # The row IS the session meta: reward/resolved, metrics, token counts and timing
+    # spans were all folded into it above, flat, under no names the report has to know.
     return dict(meta)
 
 
 def build_report(config: EvalConfig, experiment_start_at: str, rows: list[dict]) -> dict:
-    """This run's rows as a report: the shared summary, plus what produced it.
+    """This run's rows as a report: :func:`~rollout_report.summarize`'s numbers, plus the
+    config that produced them and the rows themselves.
 
-    The arithmetic is :func:`~rollout_report.summarize`, deliberately not this
-    module's: the same rows are in the session table, so the same summary can be
-    recomputed from there for any past run, and a second implementation here is how
-    the two would come to disagree. What this adds is what only the driver knows --
-    the config the run was launched with -- and the rows themselves, so a report stays
-    a self-contained artifact even though it is no longer a source of truth.
-
-    ``k`` is passed explicitly rather than observed from the rows so that a run cut
-    short still reports pass@n for the ``n`` it was asked for.
+    The arithmetic is deliberately not duplicated here: the same rows are in the session
+    table, so any past run can be re-summarized from there. ``k`` is passed explicitly so
+    that a run cut short still reports pass@n for the ``n`` it was asked for.
     """
     return {
         "config": dataclasses.asdict(config),
@@ -729,10 +572,7 @@ def build_report(config: EvalConfig, experiment_start_at: str, rows: list[dict])
 async def start_eval_ec2_monitor(config: EvalConfig, env: dict) -> EC2Monitor | None:
     """Start the EC2 -> session instance-id poller for this eval, or ``None``.
 
-    The eval-side counterpart of the trainer entrypoint's monitor startup:
-    same gating (needs a capacity provider, a session table and a positive poll
-    interval), same background-task hosting on the caller's loop. ``None`` means
-    the run simply goes unstamped -- nothing downstream depends on the monitor.
+    ``None`` means the run simply goes unstamped -- nothing downstream depends on it.
     """
     table = env.get("agent_dynamodb_table")
     capacity_provider_arn = env.get("agentcore_capacity_provider_arn")
@@ -756,25 +596,16 @@ async def run_eval(config: EvalConfig, env: dict) -> dict:
 
     The AgentCore ARNs, the session table and the output bucket come from ``env``;
     anything the *task* needs rides in ``config.task_kwargs`` instead.
-
-    Two things live for the whole eval rather than per rollout: the inference
-    endpoint and the :class:`EC2Monitor`.
     """
-    # The only two uses of polars and tqdm here, both belonging to this driver rather
-    # than to the pieces other callers import. Imported inside the function for the
-    # same reason transformers and the Bedrock token generator are further down: it
-    # keeps importing this module a base-install operation, while these two ship in the
-    # ``swe-agent`` dependency group alongside the scripts that call ``run_eval``.
+    # Imported here, not at module scope: these ship in the ``swe-agent`` dependency
+    # group, so importing this module stays a base-install operation.
     import polars as pl
     from tqdm import tqdm
 
     runtime_arn = env["agentcore_runtime_arn"]
     capacity_provider_arn = env["agentcore_capacity_provider_arn"]
-    # required here, unlike in the monitor: every rollout's session state is written
-    # through it, so an eval without a table would report nothing to look at later.
+    # Required here, unlike in the monitor: every rollout's state is written through it.
     session_table = env["agent_dynamodb_table"]
-    # The region the session table and the dump bucket live in -- ``env``'s single
-    # ``aws_region``, so eval writes land beside training's.
     storage_region = env["aws_region"]
     experiment_start_at = dt.datetime.now().isoformat()
     s3_prefix = f"{env['rollout_output_s3']}/{experiment_start_at}"
@@ -808,7 +639,6 @@ async def run_eval(config: EvalConfig, env: dict) -> dict:
     aborted = 0
 
     async def _tracked(coro):
-        """Run one rollout and tick the progress bar as it settles."""
         nonlocal resolved, aborted
         row = await coro
         resolved += bool(row["resolved"])
@@ -840,17 +670,14 @@ async def run_eval(config: EvalConfig, env: dict) -> dict:
     finally:
         bar.close()
         await config.endpoint.stop()
-        # The monitor owns the only reference to its polling task, so it has to be
-        # stopped here or the task outlives the eval it was stamping for.
+        # The monitor owns the only reference to its polling task.
         if monitor is not None:
             await monitor.stop()
 
     report = build_report(config, experiment_start_at, rows)
 
-    # Written once, at the end, and nothing reads it as an authority: every row in it
-    # was already persisted to the session table as the rollout produced it, and can be
-    # summarized again from there, so a run whose driver dies here loses a convenience
-    # rather than its results.
+    # A convenience snapshot: every row in it was already persisted to the session table
+    # as the rollout produced it, and can be summarized again from there.
     os.makedirs(config.report_dir, exist_ok=True)
     report_path = os.path.join(config.report_dir, f"{config.experiment_name}.json")
     with open(report_path, "w") as handle:

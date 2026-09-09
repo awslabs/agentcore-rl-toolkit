@@ -2,27 +2,16 @@
 
 """What to evaluate: the dataset slices and the config grid, plus the entrypoint.
 
-The harness itself -- the endpoints, :class:`EvalConfig`, the bounded per-rollout
-driver and the report -- is :mod:`rollout_batch` and does not change between runs.
-This file holds only the run-specific part: which parquet, which endpoint, how many
-samples, how much concurrency.
-
-Everything else comes from this recipe's ``config.toml`` (see :mod:`config`),
-including the AgentCore ARNs, which are resolved from the names it states rather
-than pasted in -- so an eval necessarily hits the runtime ``./deploy.py`` last
-deployed. Also needs ambient AWS creds for Bedrock token minting, and -- for a
-gateway endpoint -- a reachable vLLM server plus the model's HF tokenizer. See
-``rollout_batch``'s module docstring for what each endpoint flavor costs and
-captures.
+The harness itself lives in :mod:`rollout_batch`; this file holds only the run-specific
+part (which parquet, which endpoint, how many samples, how much concurrency). Everything
+else comes from ``config.toml``. Needs ambient AWS creds, and -- for a gateway endpoint --
+a reachable vLLM server plus the model's HF tokenizer.
 """
 
 import asyncio
 import logging
 import pprint
 
-# This recipe's own modules, imported as top-level names: these scripts are
-# entrypoints run from this directory (``./evaluate.py``), and ``conftest.py`` puts the
-# same directory on ``sys.path`` so the tests resolve them identically.
 from config import (
     LOCAL_DIR,
     dataset_parquet,
@@ -31,10 +20,8 @@ from config import (
     task_image_namespace,
 )
 
-# All three endpoint flavors are imported, not only the one the grid below has
-# enabled: switching a run over is meant to be uncommenting a line, not also
-# remembering an import. Hence the noqa -- whichever flavors the grid has commented
-# out are unused imports by definition, and that is the point.
+# All flavors imported so switching a run over is just uncommenting a line in the grid;
+# the ones left commented out are unused imports by definition, hence the noqa.
 from rollout_batch import (  # noqa: F401
     BedrockEndpoint,
     EvalConfig,
@@ -45,23 +32,15 @@ from rollout_batch import (  # noqa: F401
 
 CONFIG = load_config()
 
-# Where task images are pulled from: the pull through cache the deploy brought up,
-# assembled from the config's parts rather than spelled out, so an eval cannot pull
-# through a cache the deploy did not create -- see ``config.task_image_namespace``.
+# The pull through cache the deploy brought up, assembled from the config's parts so an
+# eval cannot pull through a cache the deploy did not create.
 TASK_IMAGE_NAMESPACE = task_image_namespace(CONFIG)
 
-# Run reports go next to this script rather than under the repo's top-level ``local``:
-# they are artifacts of this recipe, so every script here finds them relative to its own
-# location instead of reaching for the repo root. Absolute, so an eval writes to the
-# same place whatever directory it is launched from.
 REPORT_DIR = str(LOCAL_DIR)
 
 # --- dataset slices -----------------------------------------------------------
-# The built parquets by dataset key, rather than paths spelled out here: writer and
-# reader are the two halves of one convention (``config.dataset_parquet``), so a rebuilt
-# dataset is the one the next eval reads without either side being edited. A filtered cut
-# lives under its own name and is the case for stating a path --
-# ``str(dataset_parquet("swegym").with_name(...))``.
+# Built parquets by dataset key, so a rebuilt dataset is the one the next eval reads. A
+# filtered cut lives under its own name and is the case for stating a path.
 SWE_GYM = str(dataset_parquet("swegym"))
 # SWE_BENCH = str(dataset_parquet("swebench"))
 

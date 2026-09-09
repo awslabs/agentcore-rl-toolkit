@@ -1,3 +1,7 @@
+"""boto3/aioboto3 plumbing: cached sessions, self-assumed role credentials with a known
+lifetime, and small shared helpers.
+"""
+
 import datetime as dt
 import logging
 import threading
@@ -30,12 +34,9 @@ def _aioboto3_session() -> aioboto3.Session:
 async def get_aioboto3_session() -> aioboto3.Session:
     """Return the process-wide aioboto3 session with credentials resolved.
 
-    The session object is cached, but ``AioSession.get_credentials()`` resolves
-    credentials lazily and without a lock: the first time a client is created it
-    checks ``self._credentials is None`` and then ``await``s the provider chain.
-    Under a concurrent burst every coroutine sees ``None`` before the first resolution finishes,
-    so they all hit the credential provider in parallel, which may fail.
-    For example, IMDS starts to throttle/fail after a hundred calls.
+    ``AioSession.get_credentials()`` resolves lazily and without a lock, so a concurrent
+    burst would all walk the provider chain in parallel and IMDS starts failing after a
+    hundred or so calls. Resolve once behind our own lock instead.
     """
     global _aioboto3_credentials_ready
     session = _aioboto3_session()
@@ -67,50 +68,28 @@ def get_role_credentials(role_arn: str) -> dict[str, str]:
 
 # --- credentials with a known lifetime ----------------------------------------
 #
-# Ambient credentials tell you almost nothing about how long they will last. On EC2
-# the instance-profile chain hands back whatever the metadata service currently
-# holds, and the only documented promise is that "we make new credentials available
-# at least five minutes before the expiration of the old credentials" -- nothing
-# about how much life is left on a set it just handed you. Worse, botocore's own
-# reported expiry is optimistic: when IMDS is degraded
-# `InstanceMetadataFetcher._evaluate_expiration` rewrites that value past the
-# credentials' true expiration so it can retry later.
-#
-# That is fine for a client that refreshes transparently mid-call, and useless for
-# anything that has to *commit* to a lifetime up front -- presigning a URL, minting a
-# bearer token, or handing credentials to a process that will outlive the call. Those
-# need a floor, and `AssumeRole` is where a floor comes from: it states
-# DurationSeconds explicitly, so the expiry is known rather than inferred. 12h is
-# reachable because EC2 instance-profile credentials are exempt from the one-hour
-# role-chaining cap (verified in this account: DurationSeconds=43200 succeeds).
+# Ambient credentials promise nothing about their remaining lifetime, and botocore's
+# reported expiry is optimistic (a degraded IMDS pushes it past the true expiration so it
+# can retry). Callers that must commit to a lifetime up front -- presigning a URL, minting
+# a token -- need a floor, and only `AssumeRole` gives one, via an explicit
+# DurationSeconds. 12h is reachable because EC2 instance-profile credentials are exempt
+# from the one-hour role-chaining cap.
 
 DEFAULT_SESSION_DURATION_SECONDS = 12 * 60 * 60  # STS max for a self-assumed role
 DEFAULT_MIN_LIFETIME_SECONDS = 6 * 60 * 60  # re-assume below this
 
 
 class LongLivedCredentials:
-    """Shared credentials with a known floor on their remaining lifetime.
+    """Shared, thread-safe credentials with a known floor on their remaining lifetime.
 
-    For callers that must commit to a lifetime rather than refresh transparently:
-    the credentials returned by :meth:`load` are an STS session for the ambient role
-    with an explicit duration, re-assumed once they fall below
-    ``min_lifetime_seconds``, so every ``load`` returns something with at least that
-    long to live. See the note above for why ambient credentials cannot promise this.
+    :meth:`load` returns an STS session for the ambient role, re-assumed once it falls
+    below ``min_lifetime_seconds``. Resolved once as process state, so callers can sign
+    cheaply per use instead of caching signatures that may outlive their work.
 
-    Held as process state and resolved once, so callers can afford to sign per use
-    rather than caching whatever they signed. Resolving the credential chain is the
-    expensive, rate-limited part -- IMDS starts failing after a few hundred calls --
-    while signing with credentials already in hand is local and cheap. A signature
-    that is cheap to produce can be produced late, which is what keeps it from
-    outliving the work it was produced for.
-
-    ``load`` is the whole interface a botocore-style credentials provider needs, so
-    an instance can be passed anywhere one is expected. Thread-safe; the caller may
-    be a thread pool.
-
-    If the role cannot assume itself -- which needs a trust policy that says so --
-    this falls back to the ambient chain and the floor is lost. :meth:`expires_in`
-    reports what is known in either case so callers can warn rather than fail.
+    ``load`` is the whole botocore credentials-provider interface, so an instance can be
+    passed anywhere one is expected. If the role cannot assume itself (its trust policy
+    must allow it) this falls back to the ambient chain and the floor is lost;
+    :meth:`expires_in` reports what is known either way.
     """
 
     def __init__(
@@ -141,10 +120,8 @@ class LongLivedCredentials:
     def expires_in(self) -> float | None:
         """Seconds of life left, or ``None`` if unknown.
 
-        Exact in assume-role mode, where STS stated the expiry. In the ambient
-        fallback it reads botocore's own expiry, which is optimistic for the reason
-        described above -- fine for driving a warning, not for concluding that
-        anything signed with these credentials is safe.
+        Exact in assume-role mode; in the ambient fallback it is botocore's optimistic
+        expiry -- good enough for a warning, not for concluding a signature is safe.
         """
         expires_at = self._expires_at or getattr(self._credentials, "_expiry_time", None)
         if expires_at is None:
@@ -159,10 +136,8 @@ class LongLivedCredentials:
     def _initialize(self) -> None:
         from botocore.session import Session
 
-        # One Session for the whole process, rather than the thread-local
-        # get_boto3_session(): it owns the resolved credential chain, and its STS
-        # client reuses that instead of walking the chain again. That keeps the
-        # guarantee of exactly one chain walk no matter which thread calls in.
+        # One Session for the whole process rather than the thread-local
+        # get_boto3_session(), so the credential chain is walked exactly once.
         self._session = Session()
         logger.info("resolving AWS credentials")
         ambient = self._session.get_credentials()

@@ -1,3 +1,5 @@
+"""Run a task's test suite in the container and grade it with the SWE-bench grader."""
+
 import logging
 import os
 import subprocess
@@ -15,7 +17,6 @@ class EvalReport(TypedDict):
     eval_log: str | None
     eval_timeout: bool
     grade_report: dict | None
-    # Wall-clock time spent running the test suite (eval.sh), in seconds.
     eval_latency_s: float | None
 
 
@@ -26,11 +27,9 @@ def run_evaluation(task: dict) -> EvalReport:
     eval_file = Path("/testbed/eval.sh")
     eval_file.write_text(task["eval_script"])
 
-    # Run eval script, write output to logs
     test_start = time.perf_counter()
-    # Capture stderr too: the `set -x` trace (which is the ONLY thing that
-    # emits the `>>>>> Start/End Test Output` markers, since `:` is a no-op)
-    # goes to stderr, and swebench's grader parses the combined stream.
+    # stderr carries the `set -x` trace, the only source of the `>>>>> Start/End Test
+    # Output` markers swebench's grader parses.
     test_output = subprocess.check_output(["/bin/bash", "-x", "/testbed/eval.sh"], stderr=subprocess.STDOUT).decode()
     eval_latency_s = time.perf_counter() - test_start
 
@@ -38,10 +37,8 @@ def run_evaluation(task: dict) -> EvalReport:
 
     logging.info(f"Test runtime: {eval_latency_s} seconds")
 
-    # Get git diff after running eval script
     git_diff_output_after = subprocess.check_output(["git", "diff"], cwd="/testbed").decode("utf-8").strip()
 
-    # Check if git diff changed after running eval script
     logging.info(f"Git diff after:\n{git_diff_output_after}")
     if git_diff_output_after != git_diff_output_before:
         logging.info("Git diff changed after running eval script")
@@ -83,10 +80,8 @@ def make_grade_report(task, test_output, git_diff):
             "instance_id": task["instance_id"],
             "model_patch": git_diff,
         }
-        # SWE-bench and SWE-Gym use slightly out-of-sync package versions:
-        # SWE-bench renamed the log-path kwarg `log_path` -> `test_log_path`.
-        # Both keep it as the 3rd positional arg, so pass positionally to
-        # stay compatible with either version.
+        # SWE-bench renamed the log-path kwarg (`log_path` -> `test_log_path`); both it
+        # and SWE-Gym keep it 3rd positional, so pass positionally for either version.
         return get_eval_report(
             test_spec,
             pred,
