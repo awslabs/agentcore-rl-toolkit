@@ -25,9 +25,10 @@ to interact with that same lifecycle:
 - `background=true` starts the invocation and returns a handle before it
   finishes.
 
-Invocation state and terminal results must survive the loss of process-local
-state in both modes. Managed session storage is the proposed default, while
-storage and retrieval remain replaceable.
+Invocation records are written outside process-local memory in both modes. A
+microVM-local filesystem is the baseline store. Placing the same file layout on
+a managed session-storage mount extends its lifetime across compute
+stop/resume, while S3 remains an alternative for external retrieval.
 
 The protocol is not an RL-specific abstraction. It can support both:
 
@@ -61,7 +62,7 @@ stateful-compute boundary, but it is too broad to be an execution handle:
 - a client may stop waiting while the invocation continues;
 - the execution environment may become idle before the result is retrieved;
   and
-- retrying a network request must not implicitly create a second execution.
+- normal network retries must not implicitly create a second execution.
 
 The missing abstraction is therefore:
 
@@ -72,9 +73,10 @@ Foreground and background delivery follow from that abstraction. They are not
 two execution lifecycles. Foreground means start and wait; background means
 start and return the invocation handle.
 
-Keeping a task running after the client disconnects is not enough. If the
-Runtime process is later replaced, the invocation ID, status, and result must
-still be recoverable without rerunning the workload.
+Keeping a task running after the client disconnects is not enough. Invocation
+records must also live outside request-local memory so a later `get` can recover
+status and results. The selected store determines whether that recovery is
+limited to the current compute or extends across compute replacement.
 
 ## Reference pattern: OpenAI Responses
 
@@ -120,11 +122,10 @@ AgentCore execution environment remains elastic and may stop and resume.
 
 This proposal borrows the execution-resource pattern, not the full Responses
 API or control plane. ART does not have a separate Responses-style control
-plane. Its initial implementation must persist invocation state inside the
-selected storage backend and retrieve it through an available AgentCore
-Runtime invocation API.
+plane. Its initial implementation persists invocation state in the selected
+store and retrieves it through an available AgentCore Runtime invocation API.
 
-The durable invocation record is the closest equivalent to a Response
+The persisted invocation record is the closest equivalent to a Response
 resource: it has an ID, lifecycle status, and terminal output. It is not a new
 conversation database or a claim that ART already has an independently
 queryable control-plane resource.
@@ -133,7 +134,7 @@ queryable control-plane resource.
 
 ART is a suitable place to incubate this protocol because the Rollout and
 Sandbox SDKs both need it now. However, invocation identity,
-foreground/background delivery, durable status, and result retrieval are
+foreground/background delivery, persisted status, and result retrieval are
 general AgentCore Runtime capabilities rather than training- or
 evaluation-specific concepts.
 
@@ -167,7 +168,7 @@ ART already has two execution-facing SDK surfaces:
 | Consumer | Execution target | Current behavior | Missing or coupled behavior |
 | --- | --- | --- | --- |
 | Rollout SDK | An application handler reached through `InvokeAgentRuntime` | Detaches every handler, writes results to S3, and returns a `RolloutFuture` | Foreground delivery, per-invocation identity, storage-independent retrieval, sticky-session follow-up, and separation from RL naming |
-| Sandbox SDK | A process in an isolated Runtime session | Reaches one command through `InvokeAgentRuntimeCommand`, consumes its stream synchronously, and returns `ExecResult` | Detached execution, durable handles, polling, reconnection, and recovery |
+| Sandbox SDK | A process in an isolated Runtime session | Reaches one command through `InvokeAgentRuntimeCommand`, consumes its stream synchronously, and returns `ExecResult` | Detached execution, invocation handles, polling, reconnection, and recovery |
 
 These surfaces use different AgentCore APIs, but need the same answers to:
 
@@ -177,7 +178,7 @@ These surfaces use different AgentCore APIs, but need the same answers to:
 - What happens when a submission is retried?
 - How are status, failure, and interruption represented?
 - When may the Runtime session stop?
-- Which state must survive execution-environment replacement?
+- What persistence scope does the workload require?
 
 RIP defines those semantics once. An app-handler adapter may carry RIP through
 `InvokeAgentRuntime`. For Sandbox, ART still needs to validate whether the
@@ -205,7 +206,7 @@ or attaches to a Runtime session and executes shell commands through
 
 Today, `Sandbox.exec()` is foreground-only and consumes the command stream
 until the process exits or times out. Native Interactive Shell covers
-persistent PTY and reconnection, but not a durable per-command lifecycle.
+persistent PTY and reconnection, but not a persisted result for each command.
 Detached execution therefore needs its own invocation handle, status, and
 result. The detailed boundary appears under
 [Consumer 2: Sandbox SDK](#consumer-2-sandbox-sdk).
@@ -215,11 +216,11 @@ result. The detailed boundary appears under
 | Current behavior or gap | Consequence | RIP direction |
 | --- | --- | --- |
 | Rollout execution is always detached. | Short or interactive calls pay persistence and polling costs unnecessarily. | Support foreground and background delivery as modes of the same execution. |
-| Sandbox commands are always attached to their initial stream. | Long commands cannot be safely detached and reattached. | Give detached commands the same durable invocation handle. |
+| Sandbox commands are always attached to their initial stream. | Long commands cannot be safely detached and reattached. | Give detached commands their own invocation handle. |
 | `runtimeSessionId` also acts as the rollout execution identity. | Multiple calls and follow-ups in one sticky session cannot be addressed independently. | Add one invocation ID per logical execution. |
 | S3 storage, polling, and background execution are combined in `rollout_entrypoint`. | Connection mode cannot evolve independently from storage or retrieval. | Separate execution mode, persistent state, storage backend, and retrieval path. |
-| Rollout results require a customer-managed bucket and policy. | Users configure shared storage even when session-scoped state is sufficient. | Default to managed session storage while retaining S3 as an alternative backend. |
-| S3 prefixes are conventions under one Runtime role. | They do not provide session isolation from code running with broad bucket access. | Scope the default execution state to managed session storage. |
+| Rollout results require a customer-managed bucket and policy. | Users configure shared storage even when compute-scoped state is sufficient. | Provide a filesystem-backed store while retaining S3 as an alternative backend. |
+| One persistence scope does not fit every workload. | Making managed storage mandatory adds configuration, while local storage cannot survive compute replacement. | Use the same file layout on local or managed filesystems and state the resulting guarantee. |
 | There is no explicit `start` versus `get` operation. | A polling request could accidentally execute the workload again after process-local state is lost. | Make retrieval an operation that can never enter the user workload. |
 | Payload equality is easily confused with duplicate execution. | Two intentionally identical requests may be rejected, or retries may run twice. | Deduplicate by invocation identity, never by payload equality alone. |
 | Invocation completion currently implies rollout session cleanup. | Automatic `StopRuntimeSession` prevents sticky-session follow-up. | Separate invocation completion, wait timeout, and session termination. |
@@ -234,8 +235,9 @@ result. The detailed boundary appears under
   independently from local sync or async client APIs.
 - Give each invocation explicit identity, retry, status, and terminal-result
   semantics.
-- Persist lifecycle state through replaceable storage and retrieval
-  adapters, with managed session storage as the proposed default.
+- Persist lifecycle state through a filesystem-backed store with an explicit
+  compute- or session-scoped lifetime, while retaining replaceable storage and
+  retrieval adapters.
 - Keep Runtime session termination separate from invocation completion and
   waiting.
 - Let Rollout and Sandbox retain workload-specific APIs over a generic
@@ -250,6 +252,7 @@ result. The detailed boundary appears under
 - Automatically rerunning interrupted workloads with side effects, or
   protecting protocol state from arbitrary code inside the same Runtime
   session.
+- Guaranteeing recovery or idempotency after the selected store is lost.
 - Defining generic invocation cancellation in the initial protocol.
 - Replaying foreground stream contents after a disconnect in the initial
   implementation.
@@ -362,11 +365,11 @@ in_progress ------> completed
 
 A completed invocation contains either a result or a structured error.
 
-`interrupted` means durable state shows that execution started, but no live
-execution and no terminal result can be recovered. RIP must not automatically
-rerun an interrupted workload because app handlers and commands may have side
-effects. It prevents implicit duplicate execution during normal retries, but
-does not guarantee exactly-once external side effects across a Runtime failure.
+`interrupted` means a persisted start record shows that execution began, but no
+live execution and no terminal result can be recovered. RIP must not
+automatically rerun an interrupted workload because app handlers and commands
+may have side effects. If the selected store itself is lost, the invocation
+instead becomes `not_found`.
 
 Adapters may expose additional transient detail, but consumers must be able to
 reason using this minimum state model.
@@ -374,7 +377,7 @@ reason using this minimum state model.
 ### Start and retry behavior
 
 The execution adapter must record an invocation ID before beginning the user
-workload. A repeated `start` for the same ID:
+workload. While that record exists, a repeated `start` for the same ID:
 
 - returns the stored result or error when completed;
 - returns `in_progress` when the execution is still live;
@@ -388,6 +391,12 @@ execution identity. Internal retries reuse the same ID.
 Most users should not need to provide invocation IDs manually. Advanced callers
 may supply or persist one when they need to transfer a handle between
 processes, retry after losing local state, or reattach from another client.
+
+Idempotency is scoped to the selected store's lifetime. If a microVM-local
+store disappears with its compute, the protocol can no longer distinguish that
+invocation from one that never started, and the same ID may execute again.
+Callers that require the identity to survive compute replacement must place the
+records on managed session storage, S3, or another store with that lifetime.
 
 ### Waiting and session lifecycle
 
@@ -427,22 +436,26 @@ does not replay output after a disconnect.
 
 ## Persistence and retrieval
 
-### Durable invocation state
+### Filesystem-backed invocation state
 
-Process-local tasks, process IDs, and caches are useful operational state, but
-they cannot be the authority for an invocation lifecycle. A Runtime environment
-may become idle, terminate, or be replaced before the client retrieves a
-result.
+Process-local tasks, process IDs, and caches remain useful for tracking live
+work, but invocation identity and terminal results are written to a store that
+other requests or processes can read. The initial implementation can use one
+filesystem store configured with a root path.
 
-The selected persistence backend must store:
+Local files do not by themselves provide session durability. Their value is
+cross-request or cross-process visibility and an identical upgrade path to a
+managed mount.
+
+The store contains:
 
 - a start record persisted before the user workload begins; and
 - one terminal record containing the result or a structured error.
 
-An illustrative managed-storage layout is:
+An illustrative layout is:
 
 ```text
-<session-storage-mount>/.agentcore-runtime/
+<invocation-store-root>/.agentcore-runtime/
   invocations/
     inv-001/
       started.json
@@ -470,33 +483,30 @@ The complete input payload should not be persisted by default. Rollout payloads
 may contain model credentials, and Sandbox commands may contain sensitive
 arguments or environment values.
 
-### Storage backend versus retrieval path
+### Persistence scope and retrieval path
 
-Persistence and retrieval are separate choices:
+The same filesystem implementation can use either a microVM-local root or a
+managed session-storage mount:
 
-```text
-Storage backend
-  - managed session storage
-  - S3
-  - future alternatives
+| Store location | Persistence scope | Retrieval path |
+| --- | --- | --- |
+| MicroVM-local filesystem | Current compute | Same-session `get` request |
+| Managed session-storage mount | Runtime session, within the managed-storage lifecycle | Same-session `get` request |
+| S3 | Configured bucket and retention policy | Direct S3 read or `get` request |
 
-Retrieval path
-  - same-session InvokeAgentRuntime or InvokeAgentRuntimeCommand request
-  - direct S3 read
-```
+A microVM-local root is the baseline implementation: it requires no additional
+storage configuration and can be exercised in local Docker tests. Its records
+disappear when that compute is replaced.
 
 AgentCore
 [managed session storage](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)
-is the proposed default because it scopes state to a Runtime session and avoids
-requiring a customer-managed result bucket and policy. It is currently a
-Preview feature on microVM runtimes: the documented lifecycle survives
-stop/resume, expires after 14 idle days, and resets on a Runtime version update.
-RIP must therefore describe durability relative to that storage lifecycle, not
-as permanent retention.
+uses the same file layout at a configured mount path. It extends record
+lifetime across compute stop/resume without requiring a customer-managed
+bucket. It is currently a Preview feature on microVM runtimes: the documented
+lifecycle expires after 14 idle days and resets on a Runtime version update.
 
-There is currently no documented external API for reading an arbitrary managed
-session-storage path directly. The initial managed-storage retrieval path
-therefore needs a same-session data-plane adapter. Candidate implementations
+Filesystem records are retrieved through a same-session data-plane adapter
+regardless of whether the root is local or managed. Candidate implementations
 include:
 
 - an internal `InvokeAgentRuntime` operation intercepted before the user
@@ -505,41 +515,50 @@ include:
   emits the invocation record.
 
 This proposal intentionally does not select between them without live
-validation. In particular, the chosen path must work when execution completes
-and the environment becomes idle before the first poll.
+validation. Managed storage additionally requires validating `get` after the
+original compute becomes idle and a new compute resumes the session.
 
 S3 remains an alternative backend for workloads that need direct external
-reads, larger artifacts, or retention beyond the managed session-storage
-lifecycle.
+reads, larger artifacts, or independent retention.
 
-The public handle should expose neither the storage backend nor the retrieval
-transport. Keeping those choices internal lets adapters evolve without
-changing invocation identity or workload APIs.
+RIP does not prescribe one universal default for every consumer. The public
+handle need not expose a physical path, but the SDK must document whether its
+records are compute-scoped, session-scoped, or externally retained.
 
 ### Recovery
 
-A client can retrieve a terminal result after the initial connection closes or
-the Runtime session becomes idle. Retrieval reads the durable record and never
-re-enters the workload.
+A client can retrieve a terminal result after the initial connection closes as
+long as the selected store still contains the record. Retrieval reads that
+record and never re-enters the workload.
 
 If a start record exists but no task or process is active and no terminal
 record exists, the invocation is `interrupted`.
 
-Terminal state must be persisted before the adapter reports success or allows
-the session to become idle. If persistence ultimately fails, the adapter
-reports failure rather than success.
+A local filesystem can recover records while the current compute remains. If
+the compute is replaced, those records are lost and `get` returns `not_found`.
+A managed session-storage mount can instead recover `completed` or
+`interrupted` after compute stop/resume.
+
+The same distinction applies if a hosted workload kills its app server. Local
+records help only if the same compute later serves `get`; managed records
+remain available if Runtime replaces the compute.
+
+Terminal state must be persisted to the selected store before the adapter
+reports success. If persistence ultimately fails, the adapter reports failure
+rather than success.
 
 ### Security boundary
 
-Managed session storage improves isolation relative to a shared result bucket:
+Both local and managed filesystems avoid using one shared result bucket:
 
-- invocation state is scoped to the Runtime session;
+- invocation state is scoped to the current compute or Runtime session;
 - applications do not need broad access to one shared bucket; and
 - users do not need to construct per-session S3 prefix policies.
 
-This is session isolation, not protection from code inside the session. A user
-handler or shell command with arbitrary filesystem access in the same
-environment may read or alter protocol files.
+Managed storage adds recovery across compute replacement; it does not add
+protection from code inside the session. A user handler or shell command with
+arbitrary filesystem access in the same environment may read or alter either
+filesystem store.
 
 An S3 backend instead relies on its configured IAM policy, bucket, and key
 layout. Selecting S3 does not give those objects AgentCore session isolation.
@@ -576,7 +595,7 @@ the child process independently from the initial client connection:
 InvokeAgentRuntime or InvokeAgentRuntimeCommand
   -> RIP-aware Sandbox process manager
        -> child process
-       -> durable status and output
+       -> persisted status and output
        -> foreground stream and wait
           or background handle
 ```
@@ -650,7 +669,8 @@ meanings.
 
 - Training keeps the current fire-and-retrieve background model.
 - Evaluation and interactive use can call the same handler in foreground mode.
-- Managed session storage can remove mandatory S3 bucket and policy setup.
+- A filesystem-backed store can remove mandatory S3 bucket and policy setup;
+  managed storage additionally supports recovery across compute replacement.
 - A single sticky Runtime session can support follow-up invocations without
   treating result retrieval as session completion.
 - Retries can address one execution without guessing from payload or S3 key.
@@ -673,7 +693,7 @@ RIP applies specifically to command execution lifecycle. It does not absorb:
 
 The native AgentCore interactive shell remains a separate Sandbox surface for
 persistent terminal sessions. RIP applies when one command needs its own
-identity, foreground or detached delivery, structured status, durable result,
+identity, foreground or detached delivery, structured status, persisted result,
 and retry semantics.
 
 ### Concrete Sandbox flows
@@ -711,7 +731,8 @@ Sandbox termination.
 
 - Long builds, tests, and coding-agent harnesses do not depend on one command
   stream remaining connected.
-- A detached command has a durable, transferable handle.
+- A detached command has a transferable handle for the lifetime of its
+  selected store.
 - Polling cannot accidentally rerun the command.
 - Timeout can stop local waiting without destroying the environment.
 - Rollout orchestration can use the same execution state model whether the
@@ -725,12 +746,12 @@ workloads.
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| RIP | Invocation identity, foreground/background delivery, durable lifecycle state and terminal result, retry semantics, waiting, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
+| RIP | Invocation identity, foreground/background delivery, persisted lifecycle state and terminal result, retry semantics, waiting, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
 | Rollout SDK | Rollout payload and model configuration, batch submission, grouping, result policy, and session policy | Generic app task management, trajectory capture, conversation storage |
 | Sandbox SDK | Sandbox sessions, command/shell/file UX, structured process results, Sandbox-specific handles | Agent payloads, rewards, trajectory capture |
 | Rollout Gateway | Token-level trajectory capture and trace construction | Runtime invocation lifecycle and result delivery |
 | Training backends | Capture-session orchestration, reward and trace joining, trainer-native sample construction | Generic Runtime execution protocol |
-| AgentCore Runtime | Session routing, isolation, compute lifecycle, Runtime invocation APIs, managed storage substrate | ART workload semantics |
+| AgentCore Runtime | Session routing, isolation, compute lifecycle, Runtime invocation APIs, and local or managed filesystem substrate | ART workload semantics |
 
 This boundary intentionally leaves conversation implementation to the
 application or agent framework. RIP accepts an optional conversation ID so it
@@ -755,9 +776,10 @@ exposing a new public `Retriever` abstraction.
 - Define versioned `start` and `get` envelopes.
 - Define invocation identity, repeated-start behavior, and the minimum state
   model.
-- Define the persistent start and terminal records.
-- Validate managed session-storage behavior across idle termination and
-  session reactivation.
+- Implement the filesystem store against a configurable local root.
+- Define compute- and session-scoped persistence guarantees.
+- Add local Docker coverage for start, get, retry, completion, and
+  interruption.
 - Validate both candidate same-session retrieval transports.
 - Test two identical requests with distinct invocation IDs and repeated
   submission of one invocation ID without re-entering the workload.
@@ -766,8 +788,9 @@ exposing a new public `Retriever` abstraction.
 
 - Introduce the generic app adapter and `AgentCoreRuntimeApp`.
 - Add foreground/background modes to the client machinery.
-- Add managed session storage as the default invocation-state backend.
-- Preserve S3 as an optional backend and direct retrieval path.
+- Allow the filesystem store root to use a managed session-storage mount.
+- Validate stop/resume recovery with managed storage.
+- Preserve the current S3 backend and direct retrieval path for Rollout.
 - Separate wait timeout from session cleanup.
 - Refactor `RolloutClient` and `RolloutFuture` into rollout-facing wrappers
   over RIP.
@@ -788,8 +811,8 @@ exposing a new public `Retriever` abstraction.
 ### Phase 4: hardening and upstreaming
 
 - Separate data-plane and new-session rate limiting.
-- Add live integration coverage for interruption, reactivation, persistence
-  failure, and storage retention.
+- Add live integration coverage for local-store loss, managed-store
+  reactivation, persistence failure, and storage retention.
 - Define artifact policies for results that exceed the manifest format.
 - Evaluate moving the generic app, client, and protocol behavior into
   `bedrock-agentcore-sdk-python`.
@@ -800,8 +823,10 @@ exposing a new public `Retriever` abstraction.
 
 - Should the Sandbox client use `InvokeAgentRuntime` or
   `InvokeAgentRuntimeCommand` to reach the process manager?
-- Which existing Runtime API should retrieve managed-storage invocation
-  records?
+- Which existing Runtime API should serve `get` for filesystem records?
+- Which consumers should default to compute- versus session-scoped
+  persistence?
+- Does the persistence scope need to be visible in the public client API?
 - Which result and artifact size limits belong in the protocol versus each
   workload adapter?
 - Which generic classes should be public in ART before the capability has an
@@ -869,7 +894,7 @@ is private and must not reuse `_rollout`.
 
 Both execution adapters can share three internal concepts:
 
-- an invocation store that reads and publishes persistent records;
+- a filesystem invocation store configured with a root path;
 - a process-local registry that retains live tasks or process handles; and
 - an adapter that starts the workload through the appropriate Runtime
   mechanism.
@@ -887,18 +912,19 @@ with start_lock(invocation_id):
 ```
 
 The lock prevents an overlapping request or retry from observing the ID as
-absent and starting the same workload again. The persistent layout can remain
-an implementation detail:
+absent and starting the same workload again. The layout can remain an
+implementation detail:
 
 ```text
-<mount>/.agentcore-runtime/invocations/inv-123/
+<invocation-store-root>/.agentcore-runtime/invocations/inv-123/
   started.json
   result.json
 ```
 
-The store is authoritative for invocation identity and terminal result across
-process replacement. The live registry controls work in the current process
-and establishes whether a start record still has a live execution owner.
+The store is authoritative for invocation identity and terminal result for as
+long as its files remain available. The live registry controls work in the
+current process and establishes whether a start record still has a live
+execution owner.
 
 ### App-handler `start`
 
@@ -939,17 +965,22 @@ no record exists             -> not_found
 
 Writing the start record and installing the live registry entry must be
 serialized against `get`, so a concurrent read cannot mistake the brief
-registration window for interruption. After process replacement, the registry
-is empty and a remaining start-only record can be reported as `interrupted`.
+registration window for interruption. If a server process restarts while the
+filesystem remains, the registry is empty and a remaining start-only record
+can be reported as `interrupted`. If a local filesystem disappears with its
+compute, the record is absent and the invocation becomes `not_found`; a managed
+mount preserves the record across compute replacement.
 
 The client initially performs this operation through another
-`InvokeAgentRuntime` call using the same Runtime session ID. This path must be
-validated after the original execution environment has become idle.
+`InvokeAgentRuntime` call using the same Runtime session ID. The same request
+works for local and managed filesystem roots. Managed storage additionally
+requires validating the path after the original compute becomes idle and the
+session resumes.
 
 ### Sandbox command operations
 
 Foreground and detached execution both require an in-container process owner
-for durable lifecycle semantics. One illustrative ART implementation extends
+for persisted lifecycle state. One illustrative ART implementation extends
 `agentcore-sandboxd` so its invocation path dispatches `start` and `get` to a
 process manager:
 
@@ -979,7 +1010,7 @@ an implementation experiment rather than a commitment to make the health shim
 the permanent protocol boundary.
 
 The native AgentCore Interactive Shell remains a direct Sandbox feature for
-PTY-oriented workflows. It does not provide the per-command durable lifecycle
+PTY-oriented workflows. It does not provide the per-command invocation records
 defined by RIP.
 
 ## Appendix B: Related process and connection models
@@ -992,16 +1023,16 @@ lifecycle, but none is a protocol dependency.
 
 | Model | Execution identity | Disconnect behavior | Later retrieval | Retry behavior |
 | --- | --- | --- | --- | --- |
-| `InvokeAgentRuntimeCommand` | Initial command request and stream | Provides structured one-shot output while the stream is available | No separate durable command handle is exposed to the current Sandbox SDK | Retrying is a new command |
-| AgentCore Interactive Shell | Runtime session ID plus shell ID | The named PTY can continue and reconnect | Replays terminal output, but does not define a durable result for each command entered in the shell | Reusing a shell ID reconnects the terminal; it does not identify a command retry |
+| `InvokeAgentRuntimeCommand` | Initial command request and stream | Provides structured one-shot output while the stream is available | No separate command handle is exposed to the current Sandbox SDK | Retrying is a new command |
+| AgentCore Interactive Shell | Runtime session ID plus shell ID | The named PTY can continue and reconnect | Replays terminal output, but does not define a persisted result for each command entered in the shell | Reusing a shell ID reconnects the terminal; it does not identify a command retry |
 | E2B `envd` | Process ID or tag | The process is owned independently from the request stream | A client can reconnect to a live process; the inspected implementation retains terminal status briefly but does not replay missed output | Starting again creates another process |
-| RIP Sandbox process adapter | Invocation ID | The managed process continues independently from the initial wait | Durable status and terminal result are retrieved by invocation ID | Reusing an invocation ID addresses the existing execution |
+| RIP Sandbox process adapter | Invocation ID | The managed process continues independently from the initial wait | Persisted status and terminal result are retrieved by invocation ID while the selected store survives | Reusing an invocation ID addresses the existing execution while its record survives |
 
 The AgentCore
 [interactive-shell documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-command-shell.html)
 shows that persistent terminal identity and reconnect are native Runtime
 capabilities. The shell is therefore the right substrate for interactive
-terminal UX, while RIP supplies the missing per-command durable lifecycle.
+terminal UX, while RIP supplies the missing per-command invocation lifecycle.
 
 The
 [E2B SDK](https://github.com/e2b-dev/E2B)
@@ -1020,8 +1051,9 @@ lifetime. Its current
 [process service](https://github.com/e2b-dev/infra/blob/main/packages/envd/internal/services/process/service.go)
 keeps live process state in memory and briefly retains terminal status, while
 missed output is not replayed. This makes it a useful precedent for process
-continuity, but not a substitute for RIP's durable invocation record,
-idempotent claim, and terminal-result retrieval.
+continuity, but not a substitute for RIP's persisted invocation record,
+idempotent claim, and terminal-result retrieval within the selected store's
+lifetime.
 
 The resulting distinction is:
 
@@ -1029,7 +1061,10 @@ The resulting distinction is:
 E2B envd and AgentCore Interactive Shell
   -> execution can outlive a connection
 
-RIP
-  -> invocation identity and terminal result can outlive process-local state
-     and the execution environment
+RIP with a local filesystem
+  -> invocation identity and terminal result outlive the initial connection
+     and process-local memory while the compute survives
+
+RIP with managed session storage
+  -> the same records additionally survive compute replacement
 ```
