@@ -185,32 +185,6 @@ RIP defines those semantics once. An app-handler adapter may carry RIP through
 client should reach the process manager through `InvokeAgentRuntime` or through
 `InvokeAgentRuntimeCommand` calling an in-container helper.
 
-### Rollout SDK
-
-The current Rollout SDK combines `AgentCoreRLApp`,
-`@app.rollout_entrypoint`, `RolloutClient`, and `RolloutFuture` to support
-long-running background rollouts. The app detaches each handler and writes its
-result to S3; the client submits work and retrieves the result later without
-holding one connection per rollout.
-
-This proves the background execution pattern, but couples generic Runtime task
-management, S3 persistence, session lifecycle, and rollout-specific
-configuration. The detailed scope split appears under
-[Consumer 1: Rollout SDK](#consumer-1-rollout-sdk).
-
-### Sandbox SDK
-
-The Sandbox SDK provides `SandboxClient`, `Sandbox`, and `ExecResult`. It starts
-or attaches to a Runtime session and executes shell commands through
-`InvokeAgentRuntimeCommand`.
-
-Today, `Sandbox.exec()` is foreground-only and consumes the command stream
-until the process exits or times out. Native Interactive Shell covers
-persistent PTY and reconnection, but not a persisted result for each command.
-Detached execution therefore needs its own invocation handle, status, and
-result. The detailed boundary appears under
-[Consumer 2: Sandbox SDK](#consumer-2-sandbox-sdk).
-
 ## Problems addressed
 
 | Current behavior or gap | Consequence | RIP direction |
@@ -219,8 +193,7 @@ result. The detailed boundary appears under
 | Sandbox commands are always attached to their initial stream. | Long commands cannot be safely detached and reattached. | Give detached commands their own invocation handle. |
 | `runtimeSessionId` also acts as the rollout execution identity. | Multiple calls and follow-ups in one sticky session cannot be addressed independently. | Add one invocation ID per logical execution. |
 | S3 storage, polling, and background execution are combined in `rollout_entrypoint`. | Connection mode cannot evolve independently from storage or retrieval. | Separate execution mode, persistent state, storage backend, and retrieval path. |
-| Rollout results require a customer-managed bucket and policy. | Users configure shared storage even when compute-scoped state is sufficient. | Provide a filesystem-backed store while retaining S3 as an alternative backend. |
-| One persistence scope does not fit every workload. | Making managed storage mandatory adds configuration, while local storage cannot survive compute replacement. | Use the same file layout on local or managed filesystems and state the resulting guarantee. |
+| Rollout results require a customer-managed bucket, while other workloads may need only compute-scoped state or session-scoped recovery. | One mandatory persistence scope either adds setup or weakens recovery. | Use the same filesystem store on local or managed roots and retain S3 for external retrieval. |
 | There is no explicit `start` versus `get` operation. | A polling request could accidentally execute the workload again after process-local state is lost. | Make retrieval an operation that can never enter the user workload. |
 | Payload equality is easily confused with duplicate execution. | Two intentionally identical requests may be rejected, or retries may run twice. | Deduplicate by invocation identity, never by payload equality alone. |
 | Invocation completion currently implies rollout session cleanup. | Automatic `StopRuntimeSession` prevents sticky-session follow-up. | Separate invocation completion, wait timeout, and session termination. |
@@ -452,22 +425,6 @@ The store contains:
 - a start record persisted before the user workload begins; and
 - one terminal record containing the result or a structured error.
 
-An illustrative layout is:
-
-```text
-<invocation-store-root>/.agentcore-runtime/
-  invocations/
-    inv-001/
-      started.json
-      result.json
-    inv-002/
-      started.json
-      result.json
-```
-
-The exact paths and filenames are private implementation details. Readers must
-not observe partially published terminal state.
-
 The start record identifies an accepted invocation. The terminal record stores
 its result or structured error. Their exact schemas are implementation
 details.
@@ -527,21 +484,13 @@ records are compute-scoped, session-scoped, or externally retained.
 
 ### Recovery
 
-A client can retrieve a terminal result after the initial connection closes as
-long as the selected store still contains the record. Retrieval reads that
-record and never re-enters the workload.
+`get` reads the selected store without entering the workload. A terminal
+record returns `completed`; a surviving start-only record with no live
+execution returns `interrupted`; no record returns `not_found`.
 
-If a start record exists but no task or process is active and no terminal
-record exists, the invocation is `interrupted`.
-
-A local filesystem can recover records while the current compute remains. If
-the compute is replaced, those records are lost and `get` returns `not_found`.
-A managed session-storage mount can instead recover `completed` or
-`interrupted` after compute stop/resume.
-
-The same distinction applies if a hosted workload kills its app server. Local
-records help only if the same compute later serves `get`; managed records
-remain available if Runtime replaces the compute.
+Managed storage preserves this distinction across compute replacement. A
+local store does not, including when a hosted workload kills the app server
+and Runtime replaces its compute.
 
 Terminal state must be persisted to the selected store before the adapter
 reports success. If persistence ultimately fails, the adapter reports failure
@@ -824,9 +773,7 @@ exposing a new public `Retriever` abstraction.
 - Should the Sandbox client use `InvokeAgentRuntime` or
   `InvokeAgentRuntimeCommand` to reach the process manager?
 - Which existing Runtime API should serve `get` for filesystem records?
-- Which consumers should default to compute- versus session-scoped
-  persistence?
-- Does the persistence scope need to be visible in the public client API?
+- How should each consumer select and expose its persistence scope?
 - Which result and artifact size limits belong in the protocol versus each
   workload adapter?
 - Which generic classes should be public in ART before the capability has an
@@ -930,21 +877,16 @@ execution owner.
 
 The app wrapper can implement `start` in this order:
 
-1. Read `runtimeSessionId` from the upstream request context.
-2. Validate the private envelope and resolve the effective conversation ID.
-3. Acquire the process-local start lock for the invocation ID.
-4. Read the selected store. If the ID already exists, return its observable
+1. Read the request context and validate the private envelope.
+2. Acquire the process-local start lock for the invocation ID.
+3. Read the selected store. If the ID already exists, return its observable
    state without entering the user handler.
-5. Persist the start record.
-6. Register AgentCore async-task tracking for the invocation.
-7. Create and retain a live task that calls the upstream `_invoke_handler`, so
-   existing sync and async handler support remains unchanged.
-8. Install the task in the live registry before releasing the start lock.
-9. For foreground delivery, await the task and return its terminal response.
-10. For background delivery, return `in_progress` after the task and tracking
-    state are installed.
-11. Publish the terminal result before releasing async-task tracking or
-    removing the live registry entry.
+4. Persist the start record.
+5. Create and retain the handler task, install it in the live registry, and
+   register AgentCore async-task tracking before releasing the lock.
+6. Await the task for foreground delivery or return `in_progress` for
+   background delivery.
+7. Publish the terminal result before removing live tracking state.
 
 Persisting terminal state for foreground and background invocations gives both
 modes the same recovery semantics. The execution task must be owned
