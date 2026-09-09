@@ -5,16 +5,16 @@ description: Train an AgentCore Runtime-deployed agent with verl, the v1 agent-l
 
 The direct verl backend integrates AgentCore rollouts as a custom
 `AgentCoreAgentLoop` through verl's v1 agent-loop API. The agent loop works with
-stock `trainer.v1.trainer_mode=sync` when every rollout is guaranteed to produce
+default `trainer.v1.trainer_mode=sync` when every rollout is guaranteed to produce
 exactly one training row. The checked-in recipes allow trajectory-tree branches,
-so they invoke `python -m agentcore_rl_toolkit.backends.verl.main_ppo` with
-`trainer.v1.trainer_mode=agentcore_sync`. The launcher creates stock
-`TaskRunnerV1` and uses Ray's developer actor-call API to queue trainer
-registration on that actor before stock `run()`. This narrow compatibility
-bridge is needed because verl 0.9.0's trainer registry is process-local. The
-in-repo rollout gateway captures token IDs, log probabilities, and loss masks
-from multi-turn agent calls and converts each trajectory-tree leaf into a verl
-training row.
+so they export
+`VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer` and invoke
+default `python -m verl.trainer.main_ppo` with
+`trainer.v1.trainer_mode=agentcore_sync`. verl imports the external module before
+the process-local trainer lookup in the driver and inherited Ray actor
+environments. The in-repo rollout gateway captures token IDs, log probabilities,
+and loss masks from multi-turn agent calls and converts each trajectory-tree leaf
+into a verl training row.
 
 The checked-in recipes have been run end to end with:
 

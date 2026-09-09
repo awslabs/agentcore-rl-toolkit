@@ -28,6 +28,7 @@
 set -x
 
 export HYDRA_FULL_ERROR=1
+export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AGENT_LOOP_CONFIG=$SCRIPT_DIR/agentcore_agent.yaml
@@ -60,7 +61,7 @@ EXPERIMENT_NAME=${EXPERIMENT_NAME:-migrationbench_qwen3_coder_30b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 
 # moe_backend=triton is required on AWS P6-B200 (NVIDIA Blackwell) to avoid the default FlashInfer MoE kernel failure.
-python3 -m agentcore_rl_toolkit.backends.verl.main_ppo \
+python3 -m verl.trainer.main_ppo \
     --config-name ppo_megatron_trainer \
     trainer.v1.trainer_mode=agentcore_sync \
     algorithm.adv_estimator=grpo \

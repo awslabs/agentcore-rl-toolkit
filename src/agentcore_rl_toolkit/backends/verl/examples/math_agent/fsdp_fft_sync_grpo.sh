@@ -34,6 +34,7 @@
 set -x
 
 export HYDRA_FULL_ERROR=1
+export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AGENT_LOOP_CONFIG=$SCRIPT_DIR/agentcore_agent.yaml
@@ -49,7 +50,7 @@ EXPERIMENT_NAME=${EXPERIMENT_NAME:-gsm8k_qwen3_4b}
 CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
 
-python3 -m agentcore_rl_toolkit.backends.verl.main_ppo \
+python3 -m verl.trainer.main_ppo \
     trainer.v1.trainer_mode=agentcore_sync \
     algorithm.adv_estimator=grpo \
     algorithm.norm_adv_by_std_in_grpo=true \

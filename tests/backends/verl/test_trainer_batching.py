@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -32,11 +33,14 @@ class _ActorWorkerGroup:
 
 def test_import_registers_agentcore_sync_in_fresh_process():
     code = """
-import agentcore_rl_toolkit.backends.verl.trainer
 from verl.trainer.ppo.v1 import get_trainer_cls
 assert get_trainer_cls("agentcore_sync").__name__ == "AgentCorePPOTrainerSync"
 """
-    subprocess.run([sys.executable, "-c", code], check=True)
+    env = {
+        **os.environ,
+        "VERL_USE_EXTERNAL_MODULES": "agentcore_rl_toolkit.backends.verl.trainer",
+    }
+    subprocess.run([sys.executable, "-c", code], check=True, env=env)
 
 
 @pytest.mark.parametrize("config_name", ["ppo_trainer", "ppo_megatron_trainer"])

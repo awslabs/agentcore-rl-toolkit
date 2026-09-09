@@ -34,12 +34,14 @@ use that interface, pad only enough for the configured number of actor optimizer
 and actor data-parallel ranks, and otherwise preserve V1's current whole-batch DP balancing.
 
 The integration uses verl's public trainer registry and subclasses `PPOTrainerSync`.
-Because the registry is process-local and trainer lookup happens inside a separate Ray
-task-runner actor, the AgentCore launcher queues registration on the stock `TaskRunnerV1`
-actor before queuing its stock `run()` method.
+The recipes set verl's official `VERL_USE_EXTERNAL_MODULES` variable before invoking
+default `main_ppo`, so both the driver and inherited Ray task-runner actor import the
+registration module before their process-local trainer lookup.
 
-**Status:** implemented in this worktree. A one-step, eight-GPU Qwen3-4B/GSM8K run has
-validated the full FSDP + ACR path; end-to-end MigrationBench validation remains.
+**Status:** implemented and validated in this worktree. A one-step, eight-GPU
+Qwen3-4B/GSM8K run validated the full FSDP + ACR path. A 101-step
+Qwen3-Coder-30B-A3B MigrationBench run validated the Megatron + LoRA path and
+reached a best validation reward of 0.7876.
 
 ## Goals
 
@@ -201,7 +203,7 @@ the configuration if it returns true:
 if need_critic(config):
     raise NotImplementedError(
         "agentcore_sync currently supports actor-only training; "
-        "use a stock verl trainer for actor-critic training"
+        "use a default verl trainer for actor-critic training"
     )
 ```
 
@@ -350,7 +352,7 @@ def validate_agentcore_sync_config(config) -> None:
         )
 ```
 
-After the custom registry alias is normalized to stock `"sync"` semantics, also assert
+After the custom registry alias is normalized to default `"sync"` semantics, also assert
 `parameter_sync_step == 1`. The schedule is defined per sync `_step_once`; supporting
 multi-trigger async schedules should be an upstream generalization.
 
@@ -363,7 +365,7 @@ policy/KL, rollout correction, dynamic micro-batching, or `ppo_epochs >= 1`.
 ### Public interface to use: trainer registry
 
 verl's registry accepts any `PPOTrainer` subclass, but the concrete lifecycle contract is
-mode-specific. This implementation should directly subclass and register the stock sync
+mode-specific. This implementation should directly subclass and register the default sync
 trainer:
 
 ```python
@@ -386,70 +388,38 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
 The normalization to `"sync"` is necessary in verl 0.9.0 because the base trainer uses the
 literal mode string to select `ReplayBuffer` versus `ReplayBufferAsync`, exact-refill
 behavior, and mode-specific config. The custom registry name is only a lookup key; runtime
-semantics remain stock sync.
+semantics remain default sync.
 
-### Trainer registration on the stock task-runner actor
+### Trainer registration through verl external modules
 
-Stock `TaskRunnerV1.run()` performs:
+Default `TaskRunnerV1.run()` performs:
 
 ```python
 trainer_cls = get_trainer_cls(config.trainer.v1.trainer_mode)
 ```
 
-before it loads `agent_loop_manager_class` or any AgentCore-owned class. Therefore this does
-not work by itself:
+before it loads `agent_loop_manager_class` or any AgentCore-owned class. The trainer module
+must therefore be imported before that lookup. verl 0.9.0 provides the
+`VERL_USE_EXTERNAL_MODULES` environment variable for this purpose:
 
 ```bash
+export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
 python -m verl.trainer.main_ppo trainer.v1.trainer_mode=agentcore_sync
 ```
 
-Nothing has imported the module containing `@register_trainer("agentcore_sync")` when the
-lookup occurs.
-
-Importing the trainer in the driver process is still insufficient. `run_ppo` creates
-`TaskRunnerV1` as a separate Ray actor, and verl's trainer registry is ordinary
-process-local Python state. Registration performed in the driver does not appear in that
-actor.
-
-The launcher uses verl's public `run_ppo(..., task_runner_class=...)` seam with a thin
-factory. The factory creates stock `TaskRunnerV1`, then uses Ray's built-in
-`__ray_call__` developer API to queue one import on that actor:
-
-```python
-# agentcore_rl_toolkit/backends/verl/main_ppo.py
-def _register_agentcore_trainer(_task_runner):
-    from . import trainer as _trainer  # noqa: F401
-
-
-class _ConfiguredTaskRunnerV1:
-    def remote(self):
-        runner = self.task_runner.remote()
-        runner.__ray_call__.remote(_register_agentcore_trainer)
-        return runner
-```
-
-Calls submitted through one single-threaded actor handle execute in submission order.
-`run_ppo` therefore queues stock `run()` after registration without replacing its body.
-
 The full import/registration chain is:
 
-1. `python -m agentcore_rl_toolkit.backends.verl.main_ppo` starts the Ray job.
-2. Stock `run_ppo` asks the factory for a task-runner actor.
-3. The factory creates stock `TaskRunnerV1` and queues `_register_agentcore_trainer`.
-4. Importing `trainer.py` inserts the class into that actor's
-   `TRAINER_REGISTRY`.
-5. Stock `TaskRunnerV1.run()` performs the lookup and owns initialization, TransferQueue,
+1. The recipe exports `VERL_USE_EXTERNAL_MODULES` before starting verl.
+2. verl initialization imports `trainer.py`; its `@register_trainer("agentcore_sync")`
+   decorator updates the registry in that process.
+3. The locally spawned Ray task-runner actor inherits the environment and performs the
+   same external-module import during its own verl initialization.
+4. Default `TaskRunnerV1.run()` performs the lookup and owns initialization, TransferQueue,
    fitting, logger shutdown, and queue shutdown.
 
-The registry and module discovery are separate concerns. verl 0.9.0 provides the former
-but has no config field that imports an external trainer module before
-`get_trainer_cls(...)`. Running stock `python -m verl.trainer.main_ppo` therefore imports
-only verl's built-in trainer modules; it has no reason to import this package's
-`trainer.py`, so the external decorator never executes. Driver-side import alone also
-cannot cross the Ray process boundary. Actor-specific setup hooks are not executed by the
-pinned Ray version, while job-level setup hooks import trainer/torch before GPU workers are
-assigned and break CUDA rank isolation. Queuing one actor call is the narrow compatibility
-bridge that avoids both failures.
+The registry remains process-local, but the official environment-based module discovery
+runs in every inherited process that imports verl. No custom launcher, task-runner factory,
+Ray developer API, or venv patch is required.
 
 ### Why not use `agent_loop_manager_class`
 
@@ -464,14 +434,14 @@ The custom subclass should override only:
 
 - `_get_required_batch_multiple(dp_size)` — return
   `dp_size * actor_num_mini_batches`;
-- `_update_actor(...)` — preserve stock actor metadata/metrics while replacing
+- `_update_actor(...)` — preserve default actor metadata/metrics while replacing
   `mini_batch_size` with `num_mini_batch`.
 
 The inherited `_balance_batch` remains unchanged. It discovers actor DP through verl's
 existing `"actor"` mesh dispatch metadata, calls the overridden required-multiple method,
 pads to `D * M`, and performs V1's normal whole-batch DP balancing.
 
-Since distillation is explicitly unsupported, `_update_actor` only needs to preserve stock
+Since distillation is explicitly unsupported, `_update_actor` only needs to preserve default
 entropy, epoch, seed, temperature, metric-reduction, and worker-call behavior while setting
 the two distillation booleans to false. verl 0.9.0 does not expose a hook for constructing
 update `extra_info`, so this small override is the unavoidable compatibility surface. The
@@ -487,21 +457,19 @@ replaced.
 
 | File | Purpose |
 |---|---|
-| `src/agentcore_rl_toolkit/backends/verl/trainer.py` | `AgentCorePPOTrainerSync`, config validation, inline schedule arithmetic, the two narrow overrides, and the Ray registration hook. |
-| `src/agentcore_rl_toolkit/backends/verl/main_ppo.py` | Stock validation and `run_ppo`, plus a thin factory that queues trainer registration on stock `TaskRunnerV1`. |
+| `src/agentcore_rl_toolkit/backends/verl/trainer.py` | `AgentCorePPOTrainerSync`, config validation, inline schedule arithmetic, the two narrow overrides, and external-module registration. |
 | `tests/backends/verl/test_training_worker_batching.py` | Regression tests against the installed verl `TrainingWorker.train_mini_batch`, using a counting worker method only at the real optimizer boundary. |
 | `tests/backends/verl/test_trainer_batching.py` | Trainer metadata, fail-fast configuration, and fresh-process registration tests; no fake TransferQueue. |
-| `tests/backends/verl/test_main_ppo.py` | Verifies that the factory preserves task-runner options and queues registration before returning the actor. |
 
 ### Modified files
 
 | File | Change |
 |---|---|
 | `src/agentcore_rl_toolkit/backends/verl/__init__.py` | Update the integration description; lazily expose the trainer only if a public import is useful. Keep ordinary package import verl-light. |
-| `src/agentcore_rl_toolkit/backends/verl/agent_loop.py` | Document the AgentCore launcher contract. No rollout logic changes. |
+| `src/agentcore_rl_toolkit/backends/verl/agent_loop.py` | Document the AgentCore training contract. No rollout logic changes. |
 | `src/agentcore_rl_toolkit/backends/verl/README.md` | Document stable optimizer steps, minimal padding, `agentcore_sync`, and preserved V1 balancing semantics. |
-| `src/agentcore_rl_toolkit/backends/verl/examples/math_agent/fsdp_fft_sync_grpo.sh` | Select the AgentCore launcher and custom trainer registry name. |
-| `src/agentcore_rl_toolkit/backends/verl/examples/migration_agent/megatron_lora_sync_grpo.sh` | Select the AgentCore launcher and custom trainer registry name. This is the primary regression case. |
+| `src/agentcore_rl_toolkit/backends/verl/examples/math_agent/fsdp_fft_sync_grpo.sh` | Export the external trainer module and select its registry name while using default verl `main_ppo`. |
+| `src/agentcore_rl_toolkit/backends/verl/examples/migration_agent/megatron_lora_sync_grpo.sh` | Export the external trainer module and select its registry name while using default verl `main_ppo`. This is the primary regression case. |
 | `docs/site/src/content/docs/guides/verl-backend-setup.md` | Document the AgentCore invocation and registration behavior. |
 
 No change is planned for the rollout gateway, `AgentCoreAgentLoop`, trajectory grouping, or
@@ -569,11 +537,10 @@ These tests protect wiring but are not presented as proof of the optimizer-step 
   `mini_batch_size`;
 - `global_batch_size` remains `ppo_mini_batch_size * rollout.n`;
 - actor entropy, epochs, seed, shuffle, temperature, and metric-prefix behavior remain
-  stock-compatible; distillation flags are false;
+  default-compatible; distillation flags are false;
 - critic, distillation, and unsupported loss aggregation each fail before worker
   initialization;
-- importing the trainer registers `agentcore_sync` in a fresh process;
-- the task-runner factory queues registration before returning the stock actor.
+- a fresh process using `VERL_USE_EXTERNAL_MODULES` resolves `agentcore_sync`.
 
 ### End-to-end smoke tests
 
@@ -589,11 +556,11 @@ For a synthetic `num_mini_batches=4` configuration:
 
 - assert four actor steps per PPO epoch for several expanded row counts;
 - assert each rank's local row count is divisible by four;
-- do not require per-mini-batch DP token balance, matching stock V1.
+- do not require per-mini-batch DP token balance, matching default V1.
 
-The final smoke run on September 4, 2026 uses the thin launcher above with stock
-`TaskRunnerV1`, Qwen3-4B, FSDP, eight GPUs, two real GSM8K rows, and one configured
-mini-batch. It exited successfully after one ACR rollout/update step with:
+The batching smoke run on September 4, 2026 used Qwen3-4B, FSDP, eight GPUs, two
+real GSM8K rows, and one configured mini-batch. It exited successfully after one
+ACR rollout/update step with:
 
 - `batching/real_rows=2`;
 - `batching/total_rows=8`;
@@ -602,9 +569,21 @@ mini-batch. It exited successfully after one ACR rollout/update step with:
 - `batching/configured_optimizer_steps=1`.
 
 The worker teardown emitted the same post-training `DataLoader worker ... killed` weakref
-traceback seen in the earlier copied-task-runner smoke, after `Training Progress: 100%` and
+traceback seen in the earlier custom-launcher smoke, after `Training Progress: 100%` and
 the step metrics. The launcher process still exited zero and all GPUs were released; this
 is existing verl teardown noise rather than a registration or batching failure.
+
+After replacing the temporary launcher with `VERL_USE_EXTERNAL_MODULES`, a September 5,
+2026 smoke ran default `python -m verl.trainer.main_ppo` through one complete ACR rollout
+and actor update. The live `TaskRunnerV1` inherited the external-module variable, resolved
+`agentcore_sync`, and exited zero with:
+
+- `batching/real_rows=8`;
+- `batching/total_rows=8`;
+- `batching/padding_rows=0`;
+- `batching/required_multiple=8`;
+- `batching/configured_optimizer_steps=1`;
+- `training/rollout_failure/missing_sessions=0`.
 
 ## Observability
 
@@ -637,7 +616,7 @@ counter would require a separate worker-level change.
 ## Compatibility and rollout
 
 - The new behavior is enabled by selecting `trainer.v1.trainer_mode=agentcore_sync` through
-  the AgentCore launcher. Stock verl modes remain untouched.
+  `VERL_USE_EXTERNAL_MODULES`. Default verl modes remain untouched.
 - The confirmed Art scope is actor-only sync training with distillation disabled and
   `loss_agg_mode=seq-mean-token-sum`; unsupported configurations fail fast.
 - Existing AgentCore recipes should switch immediately because variable trajectory rows are
@@ -656,6 +635,5 @@ counter would require a separate worker-level change.
    API concern.
 4. Work with verl on a generic V1 fix covering the broader trainer surface that this local
    implementation intentionally rejects.
-5. Once the upstream fix and any external-trainer discovery hook are available in the
-   pinned verl version, adopt them and remove the local custom trainer, launcher, and
-   copied `_update_actor` compatibility surface.
+5. Once the upstream fix is available in the pinned verl version, adopt it and remove the
+   local custom trainer and copied `_update_actor` compatibility surface.

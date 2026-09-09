@@ -5,14 +5,14 @@ using the in-repo [rollout gateway](../../rollout_gateway/) for token-level traj
 capture.
 
 The integration uses verl's public v1 agent-loop interface. The agent loop itself
-also works with stock `trainer.v1.trainer_mode=sync` when every rollout is
+also works with default `trainer.v1.trainer_mode=sync` when every rollout is
 guaranteed to produce exactly one training row. The checked-in recipes support
-trajectory-tree branches, so they run
-`python -m agentcore_rl_toolkit.backends.verl.main_ppo` with
-`trainer.v1.trainer_mode=agentcore_sync`. The launcher creates stock
-`TaskRunnerV1`, uses Ray's developer actor-call API to queue trainer registration
-on that actor, then delegates to stock `run()`. This is a narrow compatibility
-bridge for verl 0.9.0's process-local registry; replay buffering, filtering,
+trajectory-tree branches, so they export
+`VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer` and run
+default `python -m verl.trainer.main_ppo` with
+`trainer.v1.trainer_mode=agentcore_sync`. verl imports the external module in the
+driver and inherited Ray actor environments, registering the custom trainer
+before its process-local registry lookup. Replay buffering, filtering,
 checkpointing, rollout correction, worker execution, and data-parallel balancing
 remain verl-owned.
 
@@ -172,7 +172,7 @@ counter of completed optimizer calls.
 The integration keeps four limits separate:
 
 - `rollout.max_model_len` is the inference engine's model-context capacity. It
-  must be set explicitly; stock verl validates it against the model's Hugging
+  must be set explicitly; default verl validates it against the model's Hugging
   Face `max_position_embeddings`.
 - `prompt_length` is verl's fixed storage width for the leading context of each
   emitted training row; it does not cap the prompts the gateway sends to the
@@ -197,7 +197,7 @@ memory and transfer overhead. Set `prompt_length` high enough for the leading
 contexts expected in emitted rows (or to `max_model_len` to rule out overflow).
 If a leading context does exceed `prompt_length`, the adapter preserves its
 overflow at the front of the response region with loss mask and rollout logprob
-zero. Training remains correct, but verl's stock length metrics count those
+zero. Training remains correct, but verl's default length metrics count those
 overflow tokens as part of the response region, so overflow should be a
 fallback rather than the normal configuration.
 
