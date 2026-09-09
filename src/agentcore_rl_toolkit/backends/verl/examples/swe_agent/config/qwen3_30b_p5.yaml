@@ -1,0 +1,35 @@
+actor_rollout_ref:
+  model:
+    path: /opt/dlami/nvme/models/Qwen3-Coder-30B-A3B-Instruct
+
+  actor:
+    # performance-tuning
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 65000
+
+    megatron:
+      pipeline_model_parallel_size: 1
+      tensor_model_parallel_size: 4
+      context_parallel_size: 1
+
+      override_transformer_config:
+        # must recompute
+        recompute_method: uniform
+        recompute_granularity: full
+        recompute_num_layers: 1
+
+        # this could improve stability
+        moe_router_dtype: fp32
+        moe_permute_fusion: True
+        apply_rope_fusion: True
+
+  rollout:
+    tensor_model_parallel_size: 4
+  
+    engine_kwargs:
+      vllm:
+        reasoning_parser: qwen3 
+        tool_call_parser: qwen3_coder
+        max_model_len: ${data.max_response_length}
+        # 4M tokens = 94 requests @ 44K
+        max_num_seqs: 128

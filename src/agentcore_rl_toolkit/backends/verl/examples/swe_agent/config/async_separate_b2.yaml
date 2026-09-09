@@ -1,0 +1,13 @@
+transfer_queue:
+  enable: true
+
+trainer:
+  v1:
+    trainer_mode: art_separate_async
+
+    # separete_async trainer uses its own name
+    separate_async:
+      parameter_sync_step: 2
+
+    # base trainer uses the config under the value of "trainer_mode"
+    art_separate_async: ${trainer.v1.separate_async}

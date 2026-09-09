@@ -1,0 +1,9 @@
+actor_rollout_ref:
+  actor:
+    policy_loss:
+      loss_mode: vanilla
+    use_rollout_log_probs: false
+
+algorithm:
+  rollout_correction:
+    bypass_mode: false

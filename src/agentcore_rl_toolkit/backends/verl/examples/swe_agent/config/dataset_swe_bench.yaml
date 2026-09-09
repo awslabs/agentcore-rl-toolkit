@@ -1,0 +1,15 @@
+actor_rollout_ref:
+  actor:
+    # loss-configuration
+    ppo_mini_batch_size: 32
+  rollout:
+    # loss-configuration
+    n: 16
+
+data:
+  filter_overlong_prompts: true
+  max_prompt_length: ${data.max_response_length}
+  max_response_length: 64000
+  train_files: /fsx/ubuntu/users/vdanylo/verl/swe_bench_verified.parquet
+  truncation: error
+  val_files: /fsx/ubuntu/users/vdanylo/verl/swe_bench_verified.parquet
