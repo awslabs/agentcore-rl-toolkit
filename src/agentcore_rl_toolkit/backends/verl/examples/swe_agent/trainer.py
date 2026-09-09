@@ -1,7 +1,6 @@
-"""This recipe's PPO trainer: verl's v1 backends plus the metric mixins we want.
+"""This recipe's PPO trainers: verl's v1 backends plus the metric mixins we want.
 
-Keep this module importable by any verl worker: no ray actors, no AWS clients, no
-driver-only imports at module scope.
+Must stay importable by any verl worker: no driver-only imports at module scope.
 """
 
 from verl.trainer.ppo.v1 import (

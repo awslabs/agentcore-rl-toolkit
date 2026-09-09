@@ -1,18 +1,8 @@
 """verl's task runner plus the shared resources a rollout-session agent loop needs.
 
-``run_ppo(config, task_runner_class=...)`` takes the runner class by parameter, so
-an agent's ``main.py`` swaps this in for verl's ``TaskRunnerV1`` and gets the
-cluster-wide semaphores, priority assigners, session rate limiter and EC2 monitor
-set up before training starts.
-
-It **wraps** ``TaskRunnerV1`` rather than subclassing it: ``TaskRunnerV1`` is
-already ``@ray.remote``-decorated, so the name is a Ray ``ActorClass`` and there
-is no class to inherit from. Composition also keeps this actor's event loop free
-for the EC2 monitor to poll on, which a synchronous trainer hook could not offer.
-
-This module is deliberately **not** star-imported by the package ``__init__``:
-that ``__init__`` is loaded in every verl worker via ``VERL_USE_EXTERNAL_MODULES``
-, and this class only ever runs on the driver, ``main.py`` imports it by module path.
+Pass to ``run_ppo(config, task_runner_class=...)`` in place of verl's ``TaskRunnerV1``.
+It wraps rather than subclasses ``TaskRunnerV1`` (already ``@ray.remote``, so there is no
+class to inherit from), and driver-only, so it is not star-imported by the package init.
 """
 
 import ray
@@ -33,10 +23,8 @@ class TaskRunnerWithRolloutSessionResources:
         self.runner = TaskRunnerV1.remote()
 
         if "rollout_session_agent_loop" in self.config:
-            # Kept on self for the length of the run: the named actors are not
-            # detached, so dropping the handles would collect them mid-run, and the
-            # monitor holds the only reference to its polling task. See
-            # RolloutSessionAgentLoopResources.
+            # kept on self for the run's length: dropping the handles would collect the
+            # non-detached actors mid-run (see RolloutSessionAgentLoopResources)
             self.rollout_session_resources = await start_rollout_session_agent_loop_resources(config)
 
         await self.runner.run.remote(config)

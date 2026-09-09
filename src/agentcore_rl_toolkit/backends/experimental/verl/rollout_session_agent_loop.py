@@ -50,23 +50,17 @@ def build_llm(model: str, sampling_params: dict[str, Any], inference_url: str, s
 
 
 class ExtraFields(TypedDict):
-    """
-    Verl requires every loop output to have the same extra key set in a given run.
-    request_id is required for rollout data dumping.
-    min_global_steps/max_global_steps is required for async training.
-    ``metrics`` carries the generic per-rollout scalar metrics (the harness's
-    RolloutDumpResponse.metrics plus loop-computed entries); the trainer mixin
-    reduces every key/value pair in it to agent_loop/<name>/{mean,min,max}.
+    """Extra fields on every loop output; verl requires the same key set for a whole run.
+
+    ``metrics`` entries are each reduced by the trainer to agent_loop/<name>/{mean,min,max}.
     """
 
     max_global_steps: int
     metrics: dict[str, float]
     min_global_steps: int
     request_id: str
-    # verl's _agent_loop_postprocess copies reward_extra_info from the final output
-    # to earlier ones for multi-output trajectories; its async-reward path only
-    # populates this when reward_score is None, but we set reward_score directly,
-    # so we must provide the key ourselves to avoid a KeyError.
+    # verl only populates this itself when reward_score is None; we set reward_score
+    # directly, so supply the key to avoid a KeyError in _agent_loop_postprocess
     reward_extra_info: dict
 
 
@@ -84,9 +78,7 @@ class AgentSessionMeta(TypedDict):
 
 
 class RolloutOutput(BaseModel):
-    """
-    The detailed output for uploading to S3 (includes large, variable-size objects).
-    """
+    """Detailed rollout output uploaded to S3 (includes large, variable-size objects)."""
 
     task: dict[str, Any]
     agent_loop_outputs: list[AgentLoopOutput]
@@ -97,20 +89,15 @@ class RolloutOutput(BaseModel):
 
 @register("rollout_session_agent_loop")
 class RolloutSessionAgentLoop(AgentLoopBase):
-    """An agent based on an HTTP server in a container.
+    """An agent loop over an HTTP agent server running in a container.
 
-    The verl-facing contracts (config, tokenization, semaphores, AgentLoopOutput
-    assembly) live here. The deployment-specific container lifecycle -- Bedrock
-    AgentCore vs. a local Docker container -- is delegated to a composed
-    :class:`~.lifecycle.RolloutSession`, selected by the
-    ``rollout_session_agent_loop.rollout_session_backend.backend`` config field.
+    Holds the verl-facing contracts; the container lifecycle is delegated to a composed
+    ``RolloutSession`` chosen by the ``rollout_session_backend.backend`` config field.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # build the typed config from the rollout_session_agent_loop node (resolves
-        # interpolations/env vars and validates the schema in config.py).
         self.loop_config: RolloutSessionAgentLoopConfig = instantiate(
             self.config.rollout_session_agent_loop, _convert_="all"
         )
@@ -135,20 +122,15 @@ class RolloutSessionAgentLoop(AgentLoopBase):
 
         self.meta = PersistentDict(data={"session_id": self.session_id}, persister=persister)
 
-        # the gateway settings are the gateway's own: this node is its whole
-        # keyword set, so a new one is added in yaml and read there, not here.
         self._gateway: GatewayHandle = get_or_start_gateway(
             server_manager=kwargs["server_manager"],
             tokenizer=self.tokenizer,
             **self.loop_config.rollout_gateway,
         )
 
-        # The bounds on a rollout.
         self.bounds = get_rollout_session_bounds(self.loop_config.rollout_session_bounds)
 
-        # the container lifecycle is delegated to a rollout session; it shares
-        # this loop's session_id and meta dict and persists meta through the
-        # same session store.
+        # the session shares this loop's session_id and meta dict
         self.rollout_session: RolloutSession = self._make_session()
 
     def _make_session(self) -> RolloutSession:
@@ -177,11 +159,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                 try:
                     rollout_dump_response, agent_loop_outputs = await self.run_or_throw(task)
                     if agent_loop_outputs is None:
-                        # The rollout ran and reported failure, which is a fact about
-                        # the container, not an error on this side: whatever stack
-                        # trace exists is already in the dump, so record it and abort
-                        # the sample rather than raise a traceback of our own that
-                        # only ever points back at these lines.
+                        # container-reported failure: its stack trace is already in the
+                        # dump, so record and abort instead of raising our own
                         exception = rollout_dump_response.failure_reason()
                         logger.error(f"Failed rollout {self.session_id} in container: {exception}")
                         await self.meta.set("aborted", True)
@@ -214,11 +193,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         await self.meta.set("output_s3_uri", s3_uri)
 
     def make_task(self, sampling_params, kwargs):
-        # The TransferQueue runner (main_ppo_sync.AgentLoopWorkerTQ) forwards every
-        # batch field into the loop kwargs, including tensor fields (input_ids,
-        # attention_mask, position_ids, ...). The container only needs the dataset
-        # task fields, and torch.Tensor/np.ndarray values cannot be JSON-serialized
-        # when the task is sent to the agent server, so drop them here.
+        # the TransferQueue runner forwards every batch field into kwargs, including
+        # tensors the container does not need and that are not JSON-serializable
         task = {k: v for k, v in kwargs.items() if not isinstance(v, (torch.Tensor, np.ndarray))}
         task.update(self.loop_config.task_kwargs)
         task["sampling_params"] = sampling_params
@@ -227,21 +203,13 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         return task
 
     def _group_key(self) -> str:
-        """Identify the rollout group this session belongs to.
-
-        A group is one prompt's set of rollouts at a given training step, so all
-        members share (step, task_id). ``step`` is absent when the trainer did
-        not broadcast global_steps (-1), which keeps every group distinct by
-        task_id in that case.
-        """
+        """Identify the rollout group (one prompt's rollouts at one step) this session belongs to."""
         return f"{self.meta.get('step', -1)}:{self.meta['task_id']}"
 
     async def run_or_throw(self, task: dict) -> tuple[RolloutDumpResponse, list[AgentLoopOutput] | None]:
         """Run one rollout, raising only on failures of *this* side.
 
-        Returns ``(dump, None)`` when the container itself reported failure -- that
-        is a rollout outcome to be recorded, not an exception to be thrown, so the
-        caller aborts the sample and keeps the dump.
+        Returns ``(dump, None)`` when the container itself reported failure.
         """
 
         try:
@@ -258,11 +226,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                 task,
             )
             if not rollout.is_successful():
-                # Its reward is unusable, so there is no trajectory to train on --
-                # but its metrics still describe what the container did before it
-                # failed, which is how a bad rollout gets diagnosed. Returning
-                # (rather than raising) still runs the finally below, so the gateway
-                # session is drained either way.
+                # no trainable trajectory, but keep the metrics for diagnosis; returning
+                # rather than raising still runs the finally below, draining the session
                 await self.meta.update(rollout.metrics)
                 return rollout, None
 
@@ -281,9 +246,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         # verl v1 trainer does not yet handle multi-record scenario well
         best_record = sorted(records, key=lambda r: sum(r.token_ids))[-1]
 
-        # In gateway linear-history mode the LinearHealer stamps its per-session counters
-        # onto every record's metadata under "linear_healer" (all records of a session
-        # carry the same dict). Forward whatever counters it emitted.
+        # in gateway linear-history mode every record carries the same LinearHealer counters
         healer_stats = best_record.metadata.get("linear_healer")
         linear_metrics = {f"linear_healer_{k}": float(v) for k, v in (healer_stats or {}).items()}
 
@@ -318,19 +281,15 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         prompt_ids = list(record.token_ids[:prompt_end])
         assert len(prompt_ids) <= self.prompt_length, f"{len(prompt_ids)} > {self.prompt_length}"
 
-        # response_length is the intended full-trajectory token budget (prompt +
-        # all turns), which has to be enforced before we return tokens to the trainer.
+        # response_length is the full-trajectory budget (prompt + all turns)
         max_response_length = max(0, self.response_length - len(prompt_ids))
 
         response_ids = list(record.token_ids[prompt_end:])[:max_response_length]
         response_mask = list(record.loss_mask)[:max_response_length]
         response_logprobs = list(record.logprobs)[:max_response_length]
 
-        # A zero-length response can never carry a policy gradient and would crash
-        # verl's AgentLoopOutput.as_dict (rm_scores[-1] = reward on an empty tensor).
-        # This happens when the prompt alone fills the whole trajectory budget
-        # (len(prompt_ids) >= self.response_length -> max_response_length == 0).
-        # Emit a single masked token so the sample stays a valid, no-loss group member.
+        # the prompt alone can fill the whole budget; an empty response crashes verl's
+        # AgentLoopOutput.as_dict, so emit one masked token to keep a valid no-loss sample
         if not response_ids:
             response_ids = [0]
             response_mask = [1]
@@ -343,8 +302,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
             context_length=float(context_length),
         )
 
-        # verl's fixed AgentLoopMetrics schema needs these three scalars; pull them
-        # by name from the harness metrics (absent -> 0.0).
+        # verl's fixed AgentLoopMetrics schema needs these three scalars
         llm_latency_sum = self.meta.get("llm_latency_sum", 0.0)
         tool_call_latency = self.meta.get("tool_calls_time_s", 0.0)
         eval_latency_s = self.meta.get("eval_latency_s", 0.0)
@@ -374,14 +332,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         )
 
     def make_failed_loop_output(self) -> AgentLoopOutput:
-        # A failed rollout produced no engine-reported weight version, so tag it
-        # with the dispatch step (kwargs["global_steps"], stored on meta as "step").
-        # A valid trajectory's min/max_global_steps is the weight version it was
-        # generated on -- essentially the dispatch step in async off-policy -- so
-        # reusing that keeps the failure's trajectory_staleness in line with the
-        # valid data instead of a bogus (global_steps - 0) inflation. This marker
-        # feeds only the staleness metric; the replay buffer's off-policy dropping
-        # uses tag["global_steps"] (kwargs), which is set for every output.
+        # no engine-reported weight version exists, so stand in the dispatch step: it keeps
+        # trajectory_staleness comparable to valid data instead of inflating it to global_steps
         dispatch_step = self.meta["step"]
         extra_fields = ExtraFields(
             max_global_steps=dispatch_step,

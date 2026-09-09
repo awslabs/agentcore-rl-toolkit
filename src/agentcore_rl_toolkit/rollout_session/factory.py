@@ -10,13 +10,10 @@ from .lifecycle import RolloutSession
 
 
 class SessionBackendConfig(TypedDict, total=False):
-    """The keys :func:`make_session` reads.
+    """The keys make_session reads, as a plain mapping so this module need not import
+    the trainer's config dataclass (which would pull in verl).
 
-    A plain mapping so the trainer can hand over its ``rollout_session_backend``
-    config node whole, and so this module need not import the trainer's config
-    dataclass (which would pull in verl). ``backend`` is the hydra key
-    ``rollout_session_agent_loop.rollout_session_backend.backend``; every other key
-    belongs to one backend and only that backend's keys have to be set.
+    Every key other than ``backend`` belongs to one backend; only that backend's need setting.
     """
 
     backend: Required[str]

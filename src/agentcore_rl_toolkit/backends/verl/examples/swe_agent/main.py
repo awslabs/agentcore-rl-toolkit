@@ -6,16 +6,14 @@ from verl.experimental.reward_loop.reward_loop import migrate_legacy_reward_impl
 from verl.trainer.main_ppo import run_ppo
 from verl.utils.device import auto_set_device
 
-# Imported by module path rather than from the package, which star-imports only
-# what every verl worker needs; this runs on the driver alone.
+# Imported by module path, not from the package: this runs on the driver alone.
 from agentcore_rl_toolkit.backends.experimental.verl.task_runner import (
     TaskRunnerWithRolloutSessionResources,
 )
 
-# The trainer this recipe runs -- its mixin list, and the trainer.v1.trainer_mode
-# names it registers -- is declared in swe_agent_verl/trainer.py. It is not
-# imported here: registration has to happen inside verl's TaskRunnerV1 actor, so
-# the module is named in VERL_USE_EXTERNAL_MODULES.
+# trainer.py declares this recipe's trainer_mode names. It is not imported here:
+# registration must happen inside verl's TaskRunnerV1 actor, so the module is
+# named in VERL_USE_EXTERNAL_MODULES instead.
 
 
 def main(config):
