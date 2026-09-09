@@ -17,25 +17,24 @@ also serve as the identity and lifecycle of every execution inside the session.
 
 This proposal defines an explicit invocation lifecycle nested within a Runtime
 session. Every invocation has its own ID, status, terminal result, retry
-semantics, and cancellation target. Foreground and background are two ways to
-interact with that same lifecycle:
+semantics, and result-retrieval path. Foreground and background are two ways
+to interact with that same lifecycle:
 
 - `background=false` starts the invocation and waits on the initial
   connection; and
 - `background=true` starts the invocation and returns a handle before it
   finishes.
 
-Invocation state and bounded terminal results must survive the loss of
-process-local state in both modes. Managed session storage is the proposed
-default, while storage and retrieval remain replaceable.
+Invocation state and terminal results must survive the loss of process-local
+state in both modes. Managed session storage is the proposed default, while
+storage and retrieval remain replaceable.
 
 The protocol is not an RL-specific abstraction. It can support both:
 
 - the Rollout SDK, which submits long-running agent rollouts for training and
   evaluation; and
 - the Sandbox SDK, which executes commands in isolated task environments and
-  needs the same foreground, detached, polling, cancellation, and recovery
-  semantics.
+  needs the same foreground, detached, polling, and recovery semantics.
 
 The two SDKs retain their workload-specific APIs. The protocol supplies the
 shared execution contract underneath them.
@@ -88,8 +87,6 @@ provides an existing example of this separation:
 - a background request returns an addressable response before processing is
   complete;
 - the client can retrieve its status and output later;
-- cancellation targets that response rather than the conversation or the
-  underlying compute; and
 - connection lifetime is separate from execution lifetime.
 
 In this pattern, `background` controls result delivery and whether the initial
@@ -128,17 +125,17 @@ selected storage backend and retrieve it through an available AgentCore
 Runtime invocation API.
 
 The durable invocation record is the closest equivalent to a Response
-resource: it has an ID, lifecycle status, terminal output, and cancellation
-target. It is not a new conversation database or a claim that ART already has
-an independently queryable control-plane resource.
+resource: it has an ID, lifecycle status, and terminal output. It is not a new
+conversation database or a claim that ART already has an independently
+queryable control-plane resource.
 
 ## Intended destination and the name
 
 ART is a suitable place to incubate this protocol because the Rollout and
 Sandbox SDKs both need it now. However, invocation identity,
-foreground/background delivery, durable status, result retrieval, and
-cancellation are general AgentCore Runtime capabilities rather than training-
-or evaluation-specific concepts.
+foreground/background delivery, durable status, and result retrieval are
+general AgentCore Runtime capabilities rather than training- or
+evaluation-specific concepts.
 
 The intended destination is therefore the
 [official AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main)
@@ -170,7 +167,7 @@ ART already has two execution-facing SDK surfaces:
 | Consumer | Execution target | Current behavior | Missing or coupled behavior |
 | --- | --- | --- | --- |
 | Rollout SDK | An application handler reached through `InvokeAgentRuntime` | Detaches every handler, writes results to S3, and returns a `RolloutFuture` | Foreground delivery, per-invocation identity, storage-independent retrieval, sticky-session follow-up, and separation from RL naming |
-| Sandbox SDK | A process in an isolated Runtime session | Reaches one command through `InvokeAgentRuntimeCommand`, consumes its stream synchronously, and returns `ExecResult` | Detached execution, durable handles, polling, cancellation, reconnection, and recovery |
+| Sandbox SDK | A process in an isolated Runtime session | Reaches one command through `InvokeAgentRuntimeCommand`, consumes its stream synchronously, and returns `ExecResult` | Detached execution, durable handles, polling, reconnection, and recovery |
 
 These surfaces use different AgentCore APIs, but need the same answers to:
 
@@ -178,7 +175,7 @@ These surfaces use different AgentCore APIs, but need the same answers to:
 - Does the initial connection wait for the result?
 - How does a client retrieve a result after disconnecting?
 - What happens when a submission is retried?
-- How are status, failure, cancellation, and interruption represented?
+- How are status, failure, and interruption represented?
 - When may the Runtime session stop?
 - Which state must survive execution-environment replacement?
 
@@ -209,8 +206,8 @@ or attaches to a Runtime session and executes shell commands through
 Today, `Sandbox.exec()` is foreground-only and consumes the command stream
 until the process exits or times out. Native Interactive Shell covers
 persistent PTY and reconnection, but not a durable per-command lifecycle.
-Detached execution therefore needs its own invocation handle, status, result,
-and cancellation target. The detailed boundary appears under
+Detached execution therefore needs its own invocation handle, status, and
+result. The detailed boundary appears under
 [Consumer 2: Sandbox SDK](#consumer-2-sandbox-sdk).
 
 ## Problems addressed
@@ -225,9 +222,9 @@ and cancellation target. The detailed boundary appears under
 | S3 prefixes are conventions under one Runtime role. | They do not provide session isolation from code running with broad bucket access. | Scope the default execution state to managed session storage. |
 | There is no explicit `start` versus `get` operation. | A polling request could accidentally execute the workload again after process-local state is lost. | Make retrieval an operation that can never enter the user workload. |
 | Payload equality is easily confused with duplicate execution. | Two intentionally identical requests may be rejected, or retries may run twice. | Deduplicate by invocation identity, never by payload equality alone. |
-| Invocation completion currently implies rollout session cleanup. | Automatic `StopRuntimeSession` prevents sticky-session follow-up. | Separate invocation completion, wait timeout, cancellation, and session termination. |
+| Invocation completion currently implies rollout session cleanup. | Automatic `StopRuntimeSession` prevents sticky-session follow-up. | Separate invocation completion, wait timeout, and session termination. |
 | Runtime-specific mechanics are named `AgentCoreRLApp` and `rollout_entrypoint`. | A general capability appears specific to RL. | Move generic behavior into a Runtime-level app and protocol layer. |
-| Rollout and Sandbox clients would otherwise implement detached lifecycle independently. | Identity, recovery, and cancellation semantics can drift. | Reuse the RIP contract through workload-specific adapters. |
+| Rollout and Sandbox clients would otherwise implement detached lifecycle independently. | Identity and recovery semantics can drift. | Reuse the RIP contract through workload-specific adapters. |
 
 ## Goals
 
@@ -235,12 +232,12 @@ and cancellation target. The detailed boundary appears under
   session lifetime, for application handlers and processes.
 - Treat foreground and background as delivery modes over the same execution,
   independently from local sync or async client APIs.
-- Give each invocation explicit identity, retry, status, cancellation, and
-  terminal-result semantics.
-- Persist bounded lifecycle state through replaceable storage and retrieval
+- Give each invocation explicit identity, retry, status, and terminal-result
+  semantics.
+- Persist lifecycle state through replaceable storage and retrieval
   adapters, with managed session storage as the proposed default.
-- Keep Runtime session termination separate from invocation completion,
-  waiting, and cancellation.
+- Keep Runtime session termination separate from invocation completion and
+  waiting.
 - Let Rollout and Sandbox retain workload-specific APIs over a generic
   capability suitable for eventual upstream adoption.
 
@@ -253,6 +250,7 @@ and cancellation target. The detailed boundary appears under
 - Automatically rerunning interrupted workloads with side effects, or
   protecting protocol state from arbitrary code inside the same Runtime
   session.
+- Defining generic invocation cancellation in the initial protocol.
 - Replaying foreground stream contents after a disconnect in the initial
   implementation.
 
@@ -316,16 +314,16 @@ handle = client.invoke(request, background=True)
 result = handle.result(timeout=600)
 ```
 
-An asyncio client can expose the same remote modes:
+An asynchronous client can expose the same method names:
 
 ```python
 # The caller's event loop remains non-blocking, while the remote connection
 # waits for completion.
-result = await client.invoke_async(request, background=False)
+result = await async_client.invoke(request, background=False)
 
 # Submission and later waiting are both non-blocking to the caller's loop.
-handle = await client.invoke_async(request, background=True)
-result = await handle.result_async(timeout=600)
+handle = await async_client.invoke(request, background=True)
+result = await handle.result(timeout=600)
 ```
 
 Each workload-facing SDK can choose domain-appropriate names. For example,
@@ -335,17 +333,14 @@ do not change the RIP lifecycle.
 
 ### Logical operations
 
-RIP needs three logical invocation operations:
+RIP needs two logical invocation operations:
 
 - `start(invocation_id)`: record and begin an execution if that ID does not
   already exist.
 - `get(invocation_id)`: return current status or terminal output without
   entering the user workload.
-- `cancel(invocation_id)`: request cancellation of that execution without
-  terminating the Runtime session.
 
-Stopping a Runtime session is a fourth, separate lifecycle operation. It is not
-invocation cancellation.
+Stopping a Runtime session is a separate lifecycle operation outside RIP.
 
 App-handler requests carry these operations in a reserved payload field
 separate from application data and from `_rollout`, which is rollout-specific
@@ -362,12 +357,10 @@ absent
   v
 in_progress ------> completed
       |
-      +-----------> failed
-      |
-      +-----------> cancelled
-      |
       +-----------> interrupted
 ```
+
+A completed invocation contains either a result or a structured error.
 
 `interrupted` means durable state shows that execution started, but no live
 execution and no terminal result can be recovered. RIP must not automatically
@@ -383,7 +376,7 @@ reason using this minimum state model.
 The execution adapter must record an invocation ID before beginning the user
 workload. A repeated `start` for the same ID:
 
-- returns the existing result when terminal;
+- returns the stored result or error when completed;
 - returns `in_progress` when the execution is still live;
 - returns `interrupted` when only a stale start record remains; and
 - never implicitly starts the workload a second time.
@@ -396,17 +389,20 @@ Most users should not need to provide invocation IDs manually. Advanced callers
 may supply or persist one when they need to transfer a handle between
 processes, retry after losing local state, or reattach from another client.
 
-### Waiting, cancellation, and session lifecycle
+### Waiting and session lifecycle
 
-RIP keeps three actions distinct:
+RIP keeps two actions distinct:
 
 - **Stop waiting**: a local timeout returns control to the caller. The remote
   execution continues by default.
-- **Cancel the invocation**: the execution adapter cooperatively stops the
-  targeted app task or command and persists `cancelled`.
 - **Stop the Runtime session**: `StopRuntimeSession` terminates the execution
   environment and may affect every invocation or conversation in that
   session.
+
+The initial protocol does not support invocation cancellation. A generic
+handler may own asynchronous tasks, worker threads, subprocesses, or external
+work that cannot be reliably stopped through one contract. Applications may
+expose workload-specific cleanup outside RIP.
 
 A workload-specific SDK may add lifecycle policy. A one-shot rollout client can
 optionally stop its session after terminal result retrieval. That policy must
@@ -424,10 +420,10 @@ responsibility.
 
 ### Streaming
 
-Stream recovery is future work. The first implementation may preserve native
-foreground streaming while the connection remains open, but RIP recovery
-guarantees only lifecycle status and a bounded terminal result. It does not
-replay the original foreground stream after a disconnect.
+RIP v1 does not define an incremental streaming protocol. An adapter may
+preserve an existing SSE or EventStream response while the connection remains
+open, but recovery covers only lifecycle status and the terminal result. RIP
+does not replay output after a disconnect.
 
 ## Persistence and retrieval
 
@@ -441,8 +437,7 @@ result.
 The selected persistence backend must store:
 
 - a start record persisted before the user workload begins; and
-- one terminal record containing a bounded result, structured failure, or
-  cancellation metadata.
+- one terminal record containing the result or a structured error.
 
 An illustrative managed-storage layout is:
 
@@ -461,15 +456,15 @@ The exact paths and filenames are private implementation details. Readers must
 not observe partially published terminal state.
 
 The start record identifies an accepted invocation. The terminal record stores
-its final status and bounded result or error. Their exact schemas are
-implementation details.
+its result or structured error. Their exact schemas are implementation
+details.
 
 For an app handler, a replayable response can contain the status code, content
-type, and bounded response body or an artifact reference. It stores the
-normalized response that the client observes, not the original Python object.
-A Rollout result can remain a JSON response, while a custom application
-response may use another content type. A command result can instead contain
-exit status, bounded stdout and stderr, and artifact references.
+type, response body, or an artifact reference. It stores the normalized
+response that the client observes, not the original Python object. A Rollout
+result can remain a JSON response, while a custom application response may use
+another content type. A command result can instead contain exit status, stdout,
+stderr, and artifact references.
 
 The complete input payload should not be persisted by default. Rollout payloads
 may contain model credentials, and Sandbox commands may contain sensitive
@@ -560,7 +555,7 @@ operations before they reach the user handler:
 ```text
 InvokeAgentRuntime
   -> RIP envelope
-  -> start / get / cancel dispatch
+  -> start / get dispatch
   -> registered application handler for start only
 ```
 
@@ -570,7 +565,7 @@ publication completes. Foreground execution waits for that task on the initial
 connection; background execution returns `in_progress` after the task is
 registered. Both modes continue to use the upstream sync/async handler
 dispatch. Appendix A describes the initial in-process registry, persistence
-ordering, and cancellation limits.
+ordering, and recovery behavior.
 
 ### Sandbox process adapter
 
@@ -589,8 +584,7 @@ InvokeAgentRuntime or InvokeAgentRuntimeCommand
 Foreground and background are client delivery choices over the same managed
 process. Foreground waits on the initial connection where practical;
 background returns a handle. In both cases the manager claims the invocation
-ID, tracks the process, persists bounded terminal output, and maps cancellation
-to process-group termination.
+ID, tracks the process, and persists terminal output.
 
 An initial ART prototype could extend `agentcore-sandboxd` with the process
 manager and call it through `InvokeAgentRuntime`. Another option is for
@@ -611,7 +605,7 @@ Its scope changes as follows:
 | --- | --- | --- |
 | Runtime app wrapper and entrypoint dispatch | Rollout SDK (`AgentCoreRLApp` + `@app.rollout_entrypoint`) | RIP app adapter (`AgentCoreRuntimeApp` + `@app.entrypoint`) |
 | Foreground/background execution | Background-only Rollout SDK behavior | RIP |
-| Invocation identity, status, result, retry, and cancellation | Implicit across `runtimeSessionId`, S3 key, and `RolloutFuture` | RIP |
+| Invocation identity, status, result, and retry | Implicit across `runtimeSessionId`, S3 key, and `RolloutFuture` | RIP |
 | Invocation persistence and retrieval | Rollout SDK S3 implementation | RIP storage and retrieval adapters |
 | Runtime quota handling | `RolloutClient` | Shared RIP client machinery |
 | Default session cleanup policy | `RolloutFuture` always stops after retrieval or timeout | Rollout-specific configurable policy over RIP |
@@ -680,7 +674,7 @@ RIP applies specifically to command execution lifecycle. It does not absorb:
 The native AgentCore interactive shell remains a separate Sandbox surface for
 persistent terminal sessions. RIP applies when one command needs its own
 identity, foreground or detached delivery, structured status, durable result,
-retry semantics, and cancellation target.
+and retry semantics.
 
 ### Concrete Sandbox flows
 
@@ -696,9 +690,9 @@ result = sandbox.exec("pytest -q", timeout=900, background=False)
 
 The process adapter starts one managed execution and the client waits for it on
 the initial connection. RIP still claims a distinct invocation identity,
-tracks the command as live, and persists its bounded terminal status and
-output. If the connection drops, the client can recover through the same
-invocation handle rather than rerun the command.
+tracks the command as live, and persists its terminal status and output. If the
+connection drops, the client can recover through the same invocation handle
+rather than rerun the command.
 
 Background execution uses the same method:
 
@@ -710,8 +704,8 @@ result = handle.result(timeout=1200)
 ```
 
 The returned handle identifies the command independently from its Runtime
-session. It can expose status, result, reattachment, and cancellation without
-turning Sandbox termination into command cancellation.
+session. It can expose status, result, and reattachment independently from
+Sandbox termination.
 
 ### Benefits to Sandbox users
 
@@ -731,7 +725,7 @@ workloads.
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| RIP | Invocation identity, foreground/background delivery, durable lifecycle state and bounded terminal result, retry semantics, wait/cancel, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
+| RIP | Invocation identity, foreground/background delivery, durable lifecycle state and terminal result, retry semantics, waiting, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
 | Rollout SDK | Rollout payload and model configuration, batch submission, grouping, result policy, and session policy | Generic app task management, trajectory capture, conversation storage |
 | Sandbox SDK | Sandbox sessions, command/shell/file UX, structured process results, Sandbox-specific handles | Agent payloads, rewards, trajectory capture |
 | Rollout Gateway | Token-level trajectory capture and trace construction | Runtime invocation lifecycle and result delivery |
@@ -758,7 +752,7 @@ exposing a new public `Retriever` abstraction.
 
 ### Phase 1: specify and validate the protocol
 
-- Define versioned `start`, `get`, and `cancel` envelopes.
+- Define versioned `start` and `get` envelopes.
 - Define invocation identity, repeated-start behavior, and the minimum state
   model.
 - Define the persistent start and terminal records.
@@ -774,7 +768,7 @@ exposing a new public `Retriever` abstraction.
 - Add foreground/background modes to the client machinery.
 - Add managed session storage as the default invocation-state backend.
 - Preserve S3 as an optional backend and direct retrieval path.
-- Separate wait timeout, invocation cancellation, and session cleanup.
+- Separate wait timeout from session cleanup.
 - Refactor `RolloutClient` and `RolloutFuture` into rollout-facing wrappers
   over RIP.
 - Keep rollout payload fields and trainer-facing batching outside the generic
@@ -785,9 +779,8 @@ exposing a new public `Retriever` abstraction.
 - Define one Sandbox process manager and process-group lifecycle for
   foreground and detached commands.
 - Preserve foreground streaming while persisting command status, exit code,
-  and bounded output for recovery.
-- Add Sandbox-specific detached handles, polling, reattachment, and
-  cancellation.
+  and output for recovery.
+- Add Sandbox-specific detached handles, polling, and reattachment.
 - Prototype invocation-path dispatch through `agentcore-sandboxd`, while
   treating the exact transport and daemon shape as replaceable.
 - Keep native Interactive Shell as a separate Sandbox surface.
@@ -839,8 +832,7 @@ The logical operations do not need to become new public methods:
 | --- | --- |
 | `client.invoke(...)` | `start` |
 | `handle.status()`, `done()`, or `result()` | `get` |
-| `handle.cancel()` | `cancel` |
-| `StopRuntimeSession` or `sandbox.terminate()` | Session lifecycle, outside RIP invocation cancellation |
+| `StopRuntimeSession` or `sandbox.terminate()` | Session lifecycle outside RIP |
 
 The client generates the invocation ID before submission and retains an
 internal handle containing at least:
@@ -869,19 +861,18 @@ while leaving the rest of the application payload unchanged:
 }
 ```
 
-`get` and `cancel` use the same envelope without application input. The wrapper
-removes the reserved field before calling the registered handler. The exact
-namespace is private and must not reuse `_rollout`.
+`get` uses the same envelope without application input. The wrapper removes
+the reserved field before calling the registered handler. The exact namespace
+is private and must not reuse `_rollout`.
 
 ### Shared implementation components
 
 Both execution adapters can share three internal concepts:
 
 - an invocation store that reads and publishes persistent records;
-- a process-local registry that retains live tasks, cancellation signals, or
-  process handles; and
-- an adapter that starts and cancels the workload through the appropriate
-  Runtime mechanism.
+- a process-local registry that retains live tasks or process handles; and
+- an adapter that starts the workload through the appropriate Runtime
+  mechanism.
 
 The initial single-owner implementation can serialize `start` handling for
 each invocation ID:
@@ -905,7 +896,7 @@ an implementation detail:
   result.json
 ```
 
-The store is authoritative for invocation identity and terminal outcome across
+The store is authoritative for invocation identity and terminal result across
 process replacement. The live registry controls work in the current process
 and establishes whether a start record still has a live execution owner.
 
@@ -940,7 +931,7 @@ For the initial single-owner app adapter, the wrapper intercepts `get` before
 the user handler and resolves status in this order:
 
 ```text
-terminal record exists       -> completed / failed / cancelled
+terminal record exists       -> completed; return its result or error
 live registry contains ID    -> in_progress
 start record exists only     -> interrupted
 no record exists             -> not_found
@@ -955,33 +946,17 @@ The client initially performs this operation through another
 `InvokeAgentRuntime` call using the same Runtime session ID. This path must be
 validated after the original execution environment has become idle.
 
-### App-handler `cancel`
-
-For a live asynchronous handler, the adapter can retain its task, set a
-cooperative cancellation signal, and request task cancellation. A synchronous
-handler running in a Python worker thread cannot be safely force-stopped.
-
-Cancellation should therefore be modeled as a request:
-
-- return the existing state when the invocation is already terminal;
-- return `cancellation_requested` while cooperative shutdown is pending; and
-- publish `cancelled` only after execution actually stops.
-
-The application may need access to a cancellation signal through invocation
-context for handlers that perform long synchronous or external operations.
-Cancellation never calls `StopRuntimeSession`.
-
 ### Sandbox command operations
 
-Foreground and detached execution both require a controllable in-container
-process owner for durable lifecycle semantics. One illustrative ART
-implementation extends `agentcore-sandboxd` so its invocation path dispatches
-`start`, `get`, and `cancel` to a process manager:
+Foreground and detached execution both require an in-container process owner
+for durable lifecycle semantics. One illustrative ART implementation extends
+`agentcore-sandboxd` so its invocation path dispatches `start` and `get` to a
+process manager:
 
 ```text
 InvokeAgentRuntime
   -> agentcore-sandboxd
-       -> start / get / cancel
+       -> start / get
        -> invocation store
        -> live process registry
        -> child process group
@@ -992,10 +967,9 @@ This diagram is not a fixed wire contract.
 candidate. Regardless of which API reaches the manager, the owner needs to:
 
 - serialize starts for the same invocation ID and persist its start record;
-- start the workload in a controllable process group;
-- persist bounded stdout, stderr, exit status, and timeout state;
-- return status without rerunning the command; and
-- terminate the process group on cancellation.
+- start and track the workload process;
+- persist stdout, stderr, exit status, and timeout state; and
+- return status without rerunning the command.
 
 Simply launching `nohup <command> &` through `InvokeAgentRuntimeCommand` is not
 a sufficient design until live testing proves that descendants survive the
@@ -1019,9 +993,9 @@ lifecycle, but none is a protocol dependency.
 | Model | Execution identity | Disconnect behavior | Later retrieval | Retry behavior |
 | --- | --- | --- | --- | --- |
 | `InvokeAgentRuntimeCommand` | Initial command request and stream | Provides structured one-shot output while the stream is available | No separate durable command handle is exposed to the current Sandbox SDK | Retrying is a new command |
-| AgentCore Interactive Shell | Runtime session ID plus shell ID | The named PTY can continue and reconnect | Replays bounded terminal output, but does not define a durable result for each command entered in the shell | Reusing a shell ID reconnects the terminal; it does not identify a command retry |
+| AgentCore Interactive Shell | Runtime session ID plus shell ID | The named PTY can continue and reconnect | Replays terminal output, but does not define a durable result for each command entered in the shell | Reusing a shell ID reconnects the terminal; it does not identify a command retry |
 | E2B `envd` | Process ID or tag | The process is owned independently from the request stream | A client can reconnect to a live process; the inspected implementation retains terminal status briefly but does not replay missed output | Starting again creates another process |
-| RIP Sandbox process adapter | Invocation ID | The managed process continues independently from the initial wait | Durable status and bounded terminal result are retrieved by invocation ID | Reusing an invocation ID addresses the existing execution |
+| RIP Sandbox process adapter | Invocation ID | The managed process continues independently from the initial wait | Durable status and terminal result are retrieved by invocation ID | Reusing an invocation ID addresses the existing execution |
 
 The AgentCore
 [interactive-shell documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-command-shell.html)
@@ -1041,8 +1015,8 @@ can disconnect without killing the process and reconnect by process ID.
 The corresponding `envd` implementation lives in the
 [E2B infrastructure repository](https://github.com/e2b-dev/infra). Its
 [`Start`](https://github.com/e2b-dev/infra/blob/main/packages/envd/internal/services/process/start.go)
-implementation deliberately owns the process independently from request
-cancellation. Its current
+implementation deliberately owns the process independently from the request
+lifetime. Its current
 [process service](https://github.com/e2b-dev/infra/blob/main/packages/envd/internal/services/process/service.go)
 keeps live process state in memory and briefly retains terminal status, while
 missed output is not replayed. This makes it a useful precedent for process
