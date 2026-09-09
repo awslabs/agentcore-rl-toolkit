@@ -425,8 +425,9 @@ Since distillation is explicitly unsupported, `_update_actor` preserves verl's
 entropy, epoch, seed, temperature, metric-reduction, and worker-call behavior while setting
 the two distillation booleans to false. verl 0.9.0 does not expose a hook for constructing
 update `extra_info`, so this small override is the unavoidable compatibility surface. The
-repository pins `verl==0.9.0`, and integration tests detect signature or metadata
-drift when that pin changes.
+repository pins `verl==0.9.0`. When that pin changes, the copied metadata path must
+be compared manually with upstream `_update_actor` before running the contract
+tests.
 
 No worker, engine, dispatcher, TransferQueue, advantage, or loss implementation is
 replaced.
@@ -449,51 +450,14 @@ TransferQueue, worker engines, advantage computation, or loss implementation.
 
 ## Validation
 
-### Testing principle
+Automated coverage lives in:
 
-Tests exercise observable behavior through as much real verl code as possible.
-A fake worker-group and TransferQueue pipeline would only verify that mocks
-received the same metadata the trainer wrote.
-
-The implementation does not modify TransferQueue, DP dispatch, or the body of
-`_balance_batch`, so the tests mock only expensive external boundaries:
-
-- a counting worker method at the boundary where a real GPU optimizer would run;
-- a recording actor worker-group call for the trainer metadata seam;
-- no fake TransferQueue.
-
-### Primary regression test: real verl worker iteration
-
-The regression test calls the installed verl `TrainingWorker.train_mini_batch`
-implementation with real `TensorDict` data and its real DataLoader iterator. A
-minimal worker harness records calls at the optimizer boundary; all split
-calculation and iteration remain in the installed verl implementation.
-
-| Worker metadata | Local rows | Expected `train_batch()` calls per epoch |
-|---|---:|---:|
-| `num_mini_batch=1` | 256 | 1 |
-| `num_mini_batch=1` | 768 | 1 |
-| `num_mini_batch=3` | 300 | 3 |
-| `num_mini_batch=3` | 900 | 3 |
-
-A control using fixed `mini_batch_size` demonstrates the previous behavior:
-increasing local rows increases `train_batch()` calls. The stub stops where a
-real engine would perform the forward, backward, and optimizer operations.
-
-### Trainer contract tests
-
-The trainer tests verify:
-
-- `_get_required_batch_multiple(dp_size)` returns
-  `dp_size * configured_num_mini_batches`;
-- a recording `actor_rollout_wg.update_actor` call observes `num_mini_batch=M`
-  and no `mini_batch_size`;
-- `global_batch_size` remains `ppo_mini_batch_size * rollout.n`;
-- entropy, epochs, seed, shuffle, temperature, metric-prefix behavior, and the
-  distillation flags match the supported verl path;
-- critic, distillation, unsupported loss aggregation, and non-integral
-  source-prompt mini-batch ratios fail before training;
-- a fresh process using `VERL_USE_EXTERNAL_MODULES` resolves `agentcore_sync`.
+- [`test_training_worker_batching.py`](../tests/backends/verl/test_training_worker_batching.py),
+  which exercises the installed verl worker's mini-batch iteration across
+  different row counts and epochs;
+- [`test_trainer_batching.py`](../tests/backends/verl/test_trainer_batching.py),
+  which covers trainer registration, configuration constraints, batching
+  metadata, and metrics.
 
 ### End-to-end validation
 

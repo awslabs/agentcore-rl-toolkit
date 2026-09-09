@@ -57,6 +57,10 @@ def test_num_mini_batch_keeps_optimizer_steps_stable(rows, num_mini_batch, expec
     assert _run_worker(rows=rows, num_mini_batch=num_mini_batch) == expected_calls
 
 
+def test_num_mini_batch_repeats_optimizer_steps_per_epoch():
+    assert _run_worker(rows=300, num_mini_batch=3, epochs=2) == 6
+
+
 def test_fixed_mini_batch_size_scales_optimizer_steps_with_expanded_rows():
     assert _run_worker(rows=256, mini_batch_size=256) == 1
     assert _run_worker(rows=768, mini_batch_size=256) == 3
