@@ -117,6 +117,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
         gateway_adapters: list[str] | None = None,
         max_turns_per_sid: int | None = None,
         fork_threshold_tokens: int | None = None,
+        history_mode: str = "tree",
+        linear_on_nonlinear: str = "reset",
         reward_mode: str = "built_in",
         **kwargs,  # swallows the YAML entry's `name`, verl's `tools`, and future kwargs
     ):
@@ -163,6 +165,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
             adapters=gateway_adapters,
             max_turns_per_sid=max_turns_per_sid,
             fork_threshold_tokens=fork_threshold_tokens,
+            history_mode=history_mode,
+            linear_on_nonlinear=linear_on_nonlinear,
         )
         # Default exp_id must be identical across all AgentLoopWorker processes of
         # one run, so derive it from verl's run identity instead of inventing one.
