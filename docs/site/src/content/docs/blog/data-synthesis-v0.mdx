@@ -1,0 +1,311 @@
+---
+title: Growing verifiable training data for customer-service agents from the environment alone
+description: A data synthesis recipe that takes only an agent's environment — its tools, its state, its policy document — and grows a curriculum of verifiable RL training tasks from it. No seed tasks, no production traces, no human annotation.
+---
+
+import { Image } from 'astro:assets';
+import fig_cost_vs_performance from '../../../assets/blog/data-synthesis-v0/fig_cost_vs_performance.png';
+import fig_system_workflow from '../../../assets/blog/data-synthesis-v0/fig_system_workflow.png';
+import fig_action_difficulty_depth from '../../../assets/blog/data-synthesis-v0/fig_action_difficulty_depth.png';
+import fig_rl_buckets_telecom from '../../../assets/blog/data-synthesis-v0/fig_rl_buckets_telecom.png';
+
+
+_By Ping Qing, Panpan Xu, Luke Huan_
+_September 10, 2026_
+
+{/* ~10 min read */}
+
+:::note[TL;DR]
+We built a data synthesis recipe that takes nothing but an agent's environment
+(its tools, its state, its policy document) and grows a curriculum of verifiable
+training tasks from it for reinforcement learning. No seed tasks, no production
+traces, no human annotation. We used this recipe to RL-train Qwen3-8B and
+Qwen3-30B-A3B on the three τ²-Bench customer-service domains and CAR-bench. The
+trained 8B and 30B models match or exceed frontier models including Claude
+Opus 4.5 and Claude Sonnet 4.5.
+:::
+
+
+<figure class="art-figure">
+  <Image src={fig_cost_vs_performance} alt="Figure 1 — Cost vs. Performance on the three τ²-Bench domains and CAR-bench." />
+  <figcaption>Figure 1 — Cost vs. Performance on the three τ²-Bench domains and CAR-bench.</figcaption>
+</figure>
+
+## Why synthesize data at all
+
+Everyone customizing an agent for their own domain runs into the same wall. You
+have a working environment: a set of tools, a database behind them, and a policy
+document that says what the agent may and may not do. What you don't have is
+training data. Production traces, if they exist, are skewed toward routine
+requests and carry no reliable label. Hand-written tasks don't scale past a few
+hundred.
+
+We wanted a recipe with two properties:
+
+- **Coverage and difficulty.** Tasks should span the space the environment
+  actually induces, including the unglamorous ones: requests the agent must
+  refuse, requests that need clarification, requests that involve multiple
+  actions across many states over a long horizon, and requests that demand
+  complex reasoning.
+- **Verifiability.** Every task ships with a reference outcome that is checked
+  against the environment, not against an LLM's opinion.
+
+## The recipe
+
+The pipeline has three stages. Each is driven by an agent, but no LLM output is
+trusted until the environment confirms it.
+
+<figure class="art-figure">
+  <Image
+    src={fig_system_workflow}
+    alt="System workflow."
+  />
+  <figcaption>
+    Figure 2 — Agentic Data Synthesis Workflow.
+  </figcaption>
+</figure>
+
+**Stage 1: Build a world model of the environment.** An explorer agent reads the
+tool code, the state schema, the seeded database, and the policy document, and
+compiles them into a structured description of what each action needs, what it
+changes, and how it can fail. This turns an opaque environment into something
+the rest of the pipeline can reason over. For large environments that don't fit
+in one context window, the compilation runs in parallel per tool and is stitched
+together afterwards.
+
+**Stage 2: Evolve scenarios from easy to hard.** We start from every atomic
+action and grow. Each generation takes existing scenarios and applies
+_complexity kernels_ to produce harder descendants: more actions chained
+together, more entities involved, and more of the interaction-level and
+reasoning-level difficulty a real user brings, such as pushing back on policy,
+asking for something conditional, or under-specifying a request. A global tracker
+watches what has already been covered and steers each generation toward what
+hasn't, including outcomes where the correct behavior is to say no. After a few
+generations you have a curriculum whose difficulty is a dial you control.
+
+
+
+
+<figure class="art-figure">
+  <Image
+    src={fig_action_difficulty_depth}
+    alt="Correlations between Task Difficulty versus Number of Write Actions and Evolution Depth."
+  />
+  <figcaption>
+    Figure 3 — Correlations between Task Difficulty versus Number of Write Actions and Evolution Depth.
+  </figcaption>
+</figure>
+
+
+**Stage 3: Ground and verify.** A task initializer turns each scenario into a
+concrete task: a user goal plus a reference tied to specific values in the
+environment state. Then the task has to earn its place through layers of
+verification. We replay the reference against a fresh copy of the environment to
+confirm it is executable and lands on the predicted state; failures come back
+with a diagnosis that is used to repair the task in place; an independent agent
+attempts to solve the task by interacting with the user simulator, and its
+solution is scored by an evaluator against the policy; and tasks that are
+inconsistent with the independent agent's solutions and cannot be repaired are
+re-initialized from scratch rather than discarded. Only tasks that survive all
+three layers enter the dataset. Shallow, verified tasks become golden
+trajectories for SFT; deeper, harder tasks become verifiable references for RL.
+
+## Bring your own environment
+
+The recipe never needs to know what your domain is. It talks to the environment
+through six functions:
+
+| Function | What it does |
+|---|---|
+| `get_metadata()` | Describe policy, tools, and state schema. Called once to build the world model. |
+| `init()` | Start a fresh episode at a scenario's initial state. |
+| `run()` | Orchestrate the interaction between user simulator and task agent to return a multi-turn trajectory. |
+| `state()` | Return the current internal state. |
+| `query_data()` | Return entities matching a predicate. Used to ground references in real values. |
+| `reward()` | Score a finished trajectory based on pre-defined evaluation criteria. |
+
+Implement these against your own tools and database, and the pipeline runs
+unchanged. It can run in-process on a single machine, or with the environment
+deployed on Amazon Bedrock AgentCore Runtime in your own account, where each
+rollout gets an isolated microVM and only derived signals cross the boundary back
+to the synthesis agent.
+
+
+## Experiment setup
+
+- **Students:** Qwen3-8B and Qwen3-30B-A3B-Thinking-2507.
+- **Synthesis backbone:** a frontier model (Claude Opus 4.5) for all LLM roles in
+  the pipeline (explorer, evolver, initializer, user simulator, verifier).
+- **Data:** roughly 600 verified tasks per domain, split between SFT trajectories
+  and RL references by evolution depth.
+- **RL:** GRPO with DAPO-style refinements, 16 rollouts per task against the live
+  environment. Full parameter training, learning rate 1e-6, batch size 8.
+- **Evaluation:** τ²-Bench airline, retail, and telecom on the
+  [label-corrected release](https://taubench.com/blog/tau3-task-fixes.html), and
+  CAR-bench, with Claude Opus 4.5 as the user simulator, mean over five runs.
+
+## Results
+
+**Table 1.** Model performance on τ²-Bench and CAR-bench. The first three columns
+are the τ²-Bench domains; the last is CAR-bench (base split).
+
+| Model | Airline | Retail | Telecom | CAR-bench |
+|---|:--:|:--:|:--:|:--:|
+| _Frontier models_ | | | | |
+| Claude Opus 4.5, zero-shot | 0.89 | 0.90 | 0.94 | 0.86 |
+| Claude Sonnet 4.5, zero-shot | 0.82 | 0.90 | 0.70 | 0.69 |
+| _Student models_ | | | | |
+| Qwen3-30B-A3B, zero-shot | 0.62 | 0.78 | 0.38 | 0.52 |
+| Qwen3-30B-A3B, ours (SFT) | 0.76 | 0.84 | 0.90 | 0.79 |
+| **Qwen3-30B-A3B, ours (RL)** | **0.80** | **0.87** | **0.96** | **0.83** |
+
+**Table 2.** Model size scaling on τ²-Bench and CAR-bench.
+
+| Model | Airline | Retail | Telecom | CAR-bench |
+|---|:--:|:--:|:--:|:--:|
+| Qwen3-8B, zero-shot | 0.37 | 0.40 | 0.40 | 0.40 |
+| **Qwen3-8B, ours (SFT)** | **0.70** | **0.83** | **0.91** | **0.75** |
+| Qwen3-30B-A3B, zero-shot | 0.63 | 0.77 | 0.38 | 0.52 |
+| **Qwen3-30B-A3B, ours (SFT)** | **0.76** | **0.84** | **0.90** | **0.79** |
+
+Telecom is the striking one. The base model succeeds on barely a third of tasks;
+after training on synthesized data it succeeds on 96%, above both frontier
+models. Retail closes most of the gap to Opus 4.5. Airline, the most policy-dense
+domain, closes most of the gap as well.
+
+**What fine-tuning actually changed.** We ran each of the 114 telecom evaluation
+tasks five times and bucketed it as always-succeed, always-fail, or flipping.
+Before fine-tuning, the model succeeds on all five runs for only 19.3% of tasks,
+flips on 49.1%, and never succeeds on 31.6%. After, always-succeed rises to
+89.5%, flipping falls to 10.5%, and the always-fail bucket empties entirely
+(0.0%). Small models are unstable on long multi-step tool use; seeing many
+rollout variants of each verified task hardens them.
+
+<figure class="art-figure">
+  <Image
+    src={fig_rl_buckets_telecom}
+    alt="Per-task consistency across 5 runs on τ²-Bench telecom for zero-shot, SFT, and RL: always-succeed rises 19.3% → 75.4% → 89.5%, flipping falls 49.1% → 23.7% → 10.5%, and always-fail falls 31.6% → 0.9% → 0.0%."
+  />
+  <figcaption>
+    Figure 4 — Per-task consistency across five runs on τ²-Bench telecom
+    (114 tasks), before and after fine-tuning (the intermediate SFT stage is
+    shown for reference). Fine-tuning empties the always-fail bucket and turns
+    most flipping tasks into reliable successes.
+  </figcaption>
+</figure>
+
+
+## Case study
+
+A telecom customer can't send picture messages. The account has three lines. Two
+things are wrong at once: the customer's line has run past its data cap, and the
+messaging app is missing a storage permission. The reference solution requires the
+agent to find the right line, refuel exactly the amount the customer agrees to,
+and then keep going until the app permission is fixed. The zero-shot model failed
+this task in all five runs; the RL-trained model passed it in all five.
+
+**Zero-shot model (failed, transferred to a human after 30 turns)**
+
+```text
+User:  I haven't been able to send picture messages for a few hours. I'm John Smith, 555-123-2002.
+Agent: → look up customer by phone            ✓ customer found, 3 lines on the account
+Agent: → fetch details for the FIRST line      ✗ wrong line (its number ends in -2001, the user said -2002)
+Agent: → fetch data usage for that same line   ✗ sees 3.2 GB of 5 GB used
+Agent: (thinking) "Wait, the user said 2002 but the line shows 2001. Maybe a typo…
+        They're under the limit, so refueling isn't needed."
+Agent: Please check whether Data Saver is on.
+User:  It's off.
+Agent: Please check your network mode.
+User:  4G/5G preferred.
+Agent: Please check Wi-Fi Calling.
+User:  Off. This is getting frustrating, I need this for work.
+Agent: Please check your APN settings.
+User:  The MMS URL is there. Does that look right?
+Agent: → transfer to human agent
+        "All standard troubleshooting steps completed without resolution."
+```
+
+The model noticed the mismatch in its own reasoning and talked itself out of it.
+From that point every downstream check was run against the wrong line, so the real
+cause was invisible. It also never reached the app-permission step in the policy,
+and it escalated a case the policy expects the agent to resolve.
+
+**RL-trained model (passed, 50 turns)**
+
+```text
+User:  I haven't been able to send picture messages for a few hours. I'm John Smith, 555-123-2002.
+Agent: → look up customer by phone            ✓ 3 lines on the account
+Agent: Could you check your status bar and run a speed test?
+User:  Good 5G signal, data enabled… but the speed test says "No Connection."
+Agent: Are you traveling right now?
+User:  No, I'm at home in the US.
+Agent: → fetch details for ALL THREE lines     ✓ matches -2002 to the second line: 15.1 GB used
+Agent: → fetch that line's plan                ✓ 15 GB cap, refuel price $2/GB
+Agent: You've gone over your 15 GB limit. Would you like to refuel data or change plans?
+User:  Refuel 2 GB please. Don't change my plan.
+Agent: → refuel 2 GB on the correct line       ✓ "2 GB for $4.00"
+Agent: Please run the speed test again.
+User:  220 Mbps, excellent. But picture messages still won't send.
+Agent: Let's keep going. Is Wi-Fi Calling on?
+User:  Off.
+Agent: Check the messaging app's permissions.
+User:  It has SMS and Phone, but no Storage.
+Agent: Please grant Storage permission and try again.
+User:  It works!
+```
+
+Three things changed. The trained model resolved the customer's phone number to
+the correct line instead of grabbing the first one. It surfaced the data cap,
+quoted the price, and refueled exactly what the customer approved. And it treated
+"the speed test passes now" as a checkpoint rather than a finish line, continuing
+down the policy's MMS path until the second fault was found. None of this is
+exotic. It is the discipline of following a long protocol without skipping steps,
+which is exactly what a curriculum of verified multi-fault tasks teaches through
+RL training.
+
+## What's next
+
+1. **From no traces to some traces.** The same machinery can distill complexity
+   patterns from production traces and generate more of what actually shows up in
+   traffic.
+2. **A guided data agent.** An interactive assistant that helps a team turn their
+   policy document and traces into reward references and reward functions, and
+   iterates on those functions against adversarial rollouts.
+3. **Beyond customer service.** Read-only data agents over databases and corpora
+   are the next environment class.
+
+## Acknowledgements
+
+- All RL training and rollout orchestration in this work ran on
+[agentcore-rl-toolkit](https://github.com/awslabs/agentcore-rl-toolkit), which
+gave us isolated per-rollout environments on Bedrock AgentCore Runtime — see
+[Training multi-step agents on AgentCore Runtime with reinforcement learning](/agentcore-rl-toolkit/blog/training-multi-step-agents-rl/)
+for the system it builds on. 
+- We thank the τ²-Bench and CAR-bench authors for releasing the
+benchmark.
+
+## References
+
+1. Yao, S., Shinn, N., Razavi, P., Narasimhan, K. (2025). *τ-bench: A Benchmark
+   for Tool-Agent-User Interaction in Real-World Domains.* ICLR 2025.
+   [Poster](https://iclr.cc/virtual/2025/poster/28170) ·
+   [arXiv:2406.12045](https://arxiv.org/abs/2406.12045) ·
+   [sierra-research/tau-bench](https://github.com/sierra-research/tau-bench)
+2. Barres, V., Dong, H., Ray, S., Si, X., Narasimhan, K. (2025).
+   *τ²-Bench: Evaluating Conversational Agents in a Dual-Control Environment.*
+   [arXiv:2506.07982](https://arxiv.org/abs/2506.07982) ·
+   [sierra-research/tau2-bench](https://github.com/sierra-research/tau2-bench)
+3. τ-Bench task-quality fixes (the label-corrected release used here).
+   [taubench.com/blog/tau3-task-fixes.html](https://taubench.com/blog/tau3-task-fixes.html)
+4. Kirmayr, J., Stappen, L., André, E. (2026). *CAR-bench: Evaluating the
+   Consistency and Limit-Awareness of LLM Agents under Real-World Uncertainty.*
+   ACL 2026 (Volume 1: Long Papers), pp. 40599–40618.
+   [ACL Anthology](https://aclanthology.org/2026.acl-long.1886/) ·
+   [CAR-bench/car-bench](https://github.com/CAR-bench/car-bench)
+5. Shao, Z., et al. (2024). *DeepSeekMath: Pushing the Limits of Mathematical
+   Reasoning in Open Language Models* (introduces GRPO).
+   [arXiv:2402.03300](https://arxiv.org/abs/2402.03300)
+6. Yu, Q., et al. (2025). *DAPO: An Open-Source LLM Reinforcement Learning System
+   at Scale.* [arXiv:2503.14476](https://arxiv.org/abs/2503.14476)
+7. Qwen Team (2025). *Qwen3 Technical Report.*
+   [arXiv:2505.09388](https://arxiv.org/abs/2505.09388)

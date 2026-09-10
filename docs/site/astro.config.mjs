@@ -74,6 +74,10 @@ export default defineConfig({
 							label: 'Training multi-step agents with RL',
 							slug: 'blog/training-multi-step-agents-rl',
 						},
+												{
+							label: 'Growing verifiable training data',
+							slug: 'blog/data-synthesis-v0',
+						},
 					],
 				},
 				{

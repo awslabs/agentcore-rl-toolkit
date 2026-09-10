@@ -1,3 +1,28 @@
+/* Raster/vector figures loaded from public/ (charts, plots, exported diagrams).
+   Same visual treatment as .art-diagram, but for <img> instead of inline <svg>. */
+.art-figure {
+  margin: 1.5rem 0 2rem;
+}
+.art-figure img {
+  width: 100%;
+  height: auto;
+  max-width: 900px;
+  display: block;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 50%, transparent);
+  border: 1px solid var(--sl-color-gray-5);
+}
+.art-figure figcaption {
+  color: var(--sl-color-gray-2);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  margin-top: 0.75rem;
+  max-width: 760px;
+}
+.art-figure figcaption code {
+  font-size: inherit;
+}
+
 /* Architecture diagrams drawn as inline SVG.
    Monochrome palette: grays + one accent (Starlight's --sl-color-accent,
    same color as the hero CTA button). All styling lives here (not in an
