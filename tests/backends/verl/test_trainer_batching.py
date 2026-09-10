@@ -57,7 +57,6 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
             "actor_rollout_ref.rollout.n=4",
         )
     )
-    trainer._get_required_batch_multiple(dp_size=2)
     trainer.actor_rollout_wg = _ActorWorkerGroup()
     batch = SimpleNamespace(
         extra_info={},
@@ -86,9 +85,6 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
     assert metrics["batching/real_rows"] == 3
     assert metrics["batching/total_rows"] == 4
     assert metrics["batching/padding_rows"] == 1
-    assert metrics["batching/num_mini_batches"] == 2
-    assert metrics["batching/required_multiple"] == 4
-    assert metrics["batching/configured_optimizer_steps"] == 4
     assert metrics["training/rollout_failure/missing_sessions"] == 6
 
 

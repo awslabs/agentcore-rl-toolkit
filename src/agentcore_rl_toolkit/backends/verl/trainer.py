@@ -46,11 +46,9 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
         if self.parameter_sync_step != 1:
             raise ValueError("agentcore_sync requires parameter_sync_step=1")
         self._num_actor_mini_batches = _num_mini_batches(self.config)
-        self._required_batch_multiple = self._num_actor_mini_batches
 
     def _get_required_batch_multiple(self, dp_size: int) -> int:
-        self._required_batch_multiple = dp_size * self._num_actor_mini_batches
-        return self._required_batch_multiple
+        return dp_size * self._num_actor_mini_batches
 
     def _update_actor(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
         """Mirror verl's actor-update path, using a fixed mini-batch count."""
@@ -100,11 +98,6 @@ class AgentCorePPOTrainerSync(PPOTrainerSync):
                 "batching/real_rows": total_rows - padding_rows,
                 "batching/total_rows": total_rows,
                 "batching/padding_rows": padding_rows,
-                "batching/num_mini_batches": self._num_actor_mini_batches,
-                "batching/required_multiple": self._required_batch_multiple,
-                "batching/configured_optimizer_steps": (
-                    self._num_actor_mini_batches * self.config.actor_rollout_ref.actor.ppo_epochs
-                ),
                 "training/rollout_failure/missing_sessions": expected_sessions - len(actual_sessions),
             }
         )

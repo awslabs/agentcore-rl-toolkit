@@ -473,7 +473,7 @@ Automated coverage lives in:
   different row counts and epochs;
 - [`test_trainer_batching.py`](../tests/backends/verl/test_trainer_batching.py),
   which covers trainer registration, configuration constraints, batching
-  metadata, and metrics.
+  metadata, and dynamic metrics.
 
 ### End-to-end validation
 
@@ -482,9 +482,7 @@ with two real rows padded to the required multiple of eight:
 
 - `batching/real_rows=2`;
 - `batching/total_rows=8`;
-- `batching/padding_rows=6`;
-- `batching/required_multiple=8`;
-- `batching/configured_optimizer_steps=1`.
+- `batching/padding_rows=6`.
 
 A second smoke test used `python -m verl.trainer.main_ppo` with
 `VERL_USE_EXTERNAL_MODULES`; `TaskRunnerV1` resolved `agentcore_sync` and
@@ -503,19 +501,10 @@ The `_update_actor(batch, metrics)` override adds:
 - `batching/real_rows`
 - `batching/total_rows`
 - `batching/padding_rows`
-- `batching/num_mini_batches`
-- `batching/required_multiple`
-- `batching/configured_optimizer_steps`
 - `training/rollout_failure/missing_sessions`
 
 The inherited trainer continues to publish the whole-batch `global_seqlen/*`
 metrics.
-
-`batching/configured_optimizer_steps` is the configured value
-`num_mini_batches * ppo_epochs`, not a runtime count of optimizer calls. V1's
-worker does not return `total_num_iterations`, so this metric is not proof that
-the expected number of updates ran. The real-worker regression test verifies
-the update count.
 
 ## Compatibility
 

@@ -171,10 +171,7 @@ edit the YAML or use `${oc.env:...}` interpolation.
 ## Trainer observability
 
 `agentcore_sync` logs `batching/real_rows`, `batching/total_rows`,
-`batching/padding_rows`, `batching/num_mini_batches`,
-`batching/required_multiple`, and `batching/configured_optimizer_steps`.
-The final metric is the configured `num_mini_batches * ppo_epochs`, not a runtime
-counter of completed optimizer calls.
+`batching/padding_rows`, and `training/rollout_failure/missing_sessions`.
 
 ## Token budgets
 
