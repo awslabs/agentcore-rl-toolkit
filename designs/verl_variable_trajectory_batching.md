@@ -1,5 +1,12 @@
 # Stable optimizer-step batching for variable-row verl rollouts
 
+| Field | Value |
+| --- | --- |
+| Status | Accepted |
+| Implementation | Shipped |
+| Date | 2026-09-10 |
+| Pull request | [#131](https://github.com/awslabs/agentcore-rl-toolkit/pull/131) |
+
 ## Summary
 
 Agentic rollouts can emit a variable number of training rows: a nominal rollout may

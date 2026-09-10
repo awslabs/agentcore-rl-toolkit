@@ -31,7 +31,7 @@ normalization or weighting. With `M=1`, all emitted rows are optimized
 together. With `M > 1`, rows from one rollout may cross optimizer steps,
 although the configured step count and additive weighting within each step
 remain stable. See the
-[variable-row batching design](../../../../roadmaps/verl_variable_trajectory_batching.md)
+[variable-row batching design](../../../../designs/verl_variable_trajectory_batching.md)
 for the derivation.
 
 ## How it works
