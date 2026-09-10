@@ -36,7 +36,7 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 logging.getLogger("backoff").setLevel(logging.ERROR)
 
 
-def build_llm(model: str, sampling_params: dict[str, Any], inference_url: str, session_id: str):
+def build_llm(model: str, sampling_params: dict[str, Any], inference_url: str, session_id: str, timeout: int):
     llm = dict(
         model=f'openai/{model.split("/")[-1]}',
         base_url=inference_url,
@@ -44,7 +44,7 @@ def build_llm(model: str, sampling_params: dict[str, Any], inference_url: str, s
         temperature=sampling_params["temperature"],
         top_p=sampling_params["top_p"],
         num_retries=0,
-        timeout=120,
+        timeout=timeout,
     )
     return llm
 
@@ -199,7 +199,13 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         task.update(self.loop_config.task_kwargs)
         task["sampling_params"] = sampling_params
         inference_url = f"{self._gateway.base_url}/v1"
-        task["llm"] = build_llm(self.model, task["sampling_params"], inference_url, self.session_id)
+        task["llm"] = build_llm(
+            self.model,
+            task["sampling_params"],
+            inference_url,
+            self.session_id,
+            self.loop_config.rollout_session_bounds["agent_run_timeout"],
+        )
         return task
 
     def _group_key(self) -> str:

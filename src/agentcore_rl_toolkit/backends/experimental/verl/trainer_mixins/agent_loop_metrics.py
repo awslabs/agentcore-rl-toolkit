@@ -9,15 +9,13 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import transfer_queue as tq
+from transfer_queue import KVBatchMeta
 
 from .base import TrainerMixinBase
-
-if TYPE_CHECKING:
-    from transfer_queue import KVBatchMeta
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))

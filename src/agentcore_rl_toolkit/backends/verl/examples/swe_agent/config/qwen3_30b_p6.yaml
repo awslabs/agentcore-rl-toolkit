@@ -1,6 +1,6 @@
 actor_rollout_ref:
   model:
-    path: /opt/dlami/nvme/models/Qwen3-Coder-30B-A3B-Instruct
+    path: ${oc.env:model_path_prefix}/Qwen3-Coder-30B-A3B-Instruct
 
   actor:
     # performance-tuning
@@ -34,5 +34,5 @@ actor_rollout_ref:
         moe_backend: triton
         max_model_len: ${data.max_response_length}
 
-        # there is capacity for ~3M tokens, which is around 70x44K
+        # there is capacity for ~5M tokens, which is around 113x44K
         max_num_seqs: 128
