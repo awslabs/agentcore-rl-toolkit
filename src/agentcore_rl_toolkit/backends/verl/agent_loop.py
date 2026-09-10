@@ -9,8 +9,7 @@ drain the gateway session into TraceRecords → reshape each into an
 ``AgentLoopOutput``.
 
 Registered as ``agentcore_agent`` — enable via verl's
-``rollout.agent.agent_loop_config_path`` under the stock
-``python -m verl.trainer.main_ppo`` entrypoint. Requires ``trainer.use_v1=true``:
+``rollout.agent.agent_loop_config_path``. Requires ``trainer.use_v1=true``:
 ``run`` returns ``list[AgentLoopOutput]`` (one per trajectory-tree leaf, e.g.
 sub-agent forks), which only the v1 TransferQueue path consumes.
 """

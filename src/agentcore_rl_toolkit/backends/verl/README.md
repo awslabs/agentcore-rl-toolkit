@@ -4,10 +4,35 @@ Train agents deployed on Bedrock AgentCore Runtime (ACR) with [verl](https://git
 using the in-repo [rollout gateway](../../rollout_gateway/) for token-level trajectory
 capture.
 
-The integration keeps verl stock: it plugs into
-`python -m verl.trainer.main_ppo` as a custom v1 agent loop, captures tokens with
-the in-repo gateway, and leaves verl's replay buffer, filtering, checkpointing,
-validation, and rollout-correction paths unchanged.
+The integration uses verl's public v1 agent-loop interface. verl's built-in
+`trainer.v1.trainer_mode=sync` works when every rollout is guaranteed to produce
+exactly one training row. Use `agentcore_sync` when a rollout may produce
+multiple training rows. The example training scripts register it by setting
+`VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer` before
+running `python -m verl.trainer.main_ppo`. verl imports the external module in
+the driver and inherited Ray actor environments before its process-local trainer
+lookup. Replay buffering, filtering, checkpointing, rollout correction, worker
+execution, and data-parallel balancing remain verl-owned.
+
+`agentcore_sync` is the variable-row trainer: it keeps the configured actor
+optimizer schedule stable when one rollout expands into a variable number of
+trajectory rows. If
+`M = data.train_batch_size / actor.ppo_mini_batch_size`, the trainer pads only to
+`actor_data_parallel_size * M` and sends `num_mini_batch=M` to the actor worker.
+Expanded row count can therefore change the number of rows in each mini-batch
+without silently creating additional optimizer steps.
+
+`agentcore_sync` supports v1 actor-only synchronous training with distillation
+disabled, `parameter_sync_step=1`, and
+`loss_agg_mode=seq-mean-token-sum`. Unsupported configurations fail at startup.
+The loss mode ensures that expanded rows add token-loss mass without replacing
+the configured pre-expansion denominator; other aggregation modes change that
+normalization or weighting. With `M=1`, all emitted rows are optimized
+together. With `M > 1`, rows from one rollout may cross optimizer steps,
+although the configured step count and additive weighting within each step
+remain stable. See the
+[variable-row batching design](../../../../roadmaps/verl_variable_trajectory_batching.md)
+for the derivation.
 
 ## How it works
 
@@ -37,6 +62,7 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
 - A session's trajectory tree can fork (sub-agents, context compaction); every leaf
   becomes its own training row (`run()` returns `list[AgentLoopOutput]`) — hence the
   hard `trainer.use_v1=true` requirement.
+
 The agent must forward the trainer-supplied key when it constructs its model client:
 
 ```python
@@ -54,8 +80,7 @@ endpoints.
 
 ## Install
 
-verl is pinned to uni-agent's blessed submodule commit `78bba31d` via
-`[tool.uv.sources]`. From a checkout of this repo:
+verl is pinned to version 0.9.0. From a checkout of this repo:
 
 ```bash
 uv sync --extra verl
@@ -143,12 +168,17 @@ Each recipe separates verl configuration in its shell script from
 Hydra overrides, but loop kwargs are loaded worker-side and are not CLI-addressable;
 edit the YAML or use `${oc.env:...}` interpolation.
 
+## Trainer observability
+
+`agentcore_sync` logs `batching/real_rows`, `batching/total_rows`,
+`batching/padding_rows`, and `training/rollout_failure/missing_sessions`.
+
 ## Token budgets
 
 The integration keeps four limits separate:
 
 - `rollout.max_model_len` is the inference engine's model-context capacity. It
-  must be set explicitly; stock verl validates it against the model's Hugging
+  must be set explicitly; verl validates it against the model's Hugging
   Face `max_position_embeddings`.
 - `prompt_length` is verl's fixed storage width for the leading context of each
   emitted training row; it does not cap the prompts the gateway sends to the
@@ -173,7 +203,7 @@ memory and transfer overhead. Set `prompt_length` high enough for the leading
 contexts expected in emitted rows (or to `max_model_len` to rule out overflow).
 If a leading context does exceed `prompt_length`, the adapter preserves its
 overflow at the front of the response region with loss mask and rollout logprob
-zero. Training remains correct, but verl's stock length metrics count those
+zero. Training remains correct, but verl's existing length metrics count those
 overflow tokens as part of the response region, so overflow should be a
 fallback rather than the normal configuration.
 
@@ -183,6 +213,9 @@ remain trainable. With asynchronous replay, verl's existing failed-group policy
 evicts and refills the entire prompt group, including successful sibling
 trajectories. Preserving partial failed groups in asynchronous training requires
 session-level or partial-group failure handling in verl's replay buffer.
+The `training/rollout_failure/missing_sessions` metric reports
+`data.train_batch_size * rollout.n` minus the number of materialized rollout
+sessions in each actor update.
 
 ## Troubleshooting
 
