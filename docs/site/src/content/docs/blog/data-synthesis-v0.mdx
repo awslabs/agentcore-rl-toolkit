@@ -134,7 +134,7 @@ to the synthesis agent.
 ## Experiment setup
 
 - **Students:** Qwen3-8B and Qwen3-30B-A3B-Thinking-2507.
-- **Synthesis backbone:** a frontier model (Claude Opus 4.5) for all LLM roles in
+- **Synthesis backbone:** a frontier model for all LLM roles in
   the pipeline (explorer, evolver, initializer, user simulator, verifier).
 - **Data:** roughly 600 verified tasks per domain, split between SFT trajectories
   and RL references by evolution depth.
@@ -142,7 +142,7 @@ to the synthesis agent.
   environment. Full parameter training, learning rate 1e-6, batch size 8.
 - **Evaluation:** τ²-Bench airline, retail, and telecom on the
   [label-corrected release](https://taubench.com/blog/tau3-task-fixes.html), and
-  CAR-bench, with Claude Opus 4.5 as the user simulator, mean over five runs.
+  CAR-bench, mean over five runs.
 
 ## Results
 
