@@ -25,6 +25,14 @@ without silently creating additional optimizer steps.
 `agentcore_sync` supports v1 actor-only synchronous training with distillation
 disabled, `parameter_sync_step=1`, and
 `loss_agg_mode=seq-mean-token-sum`. Unsupported configurations fail at startup.
+The loss mode ensures that expanded rows add token-loss mass without replacing
+the configured pre-expansion denominator; other aggregation modes change that
+normalization or weighting. With `M=1`, all emitted rows are optimized
+together. With `M > 1`, rows from one rollout may cross optimizer steps,
+although the configured step count and additive weighting within each step
+remain stable. See the
+[variable-row batching design](../../../../roadmaps/verl_variable_trajectory_batching.md)
+for the derivation.
 
 ## How it works
 

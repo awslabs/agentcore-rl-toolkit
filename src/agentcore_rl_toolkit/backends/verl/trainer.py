@@ -25,6 +25,9 @@ def _validate_config(config: DictConfig) -> None:
         raise ValueError("agentcore_sync supports only actor-only training")
     if is_distillation_enabled(config.get("distillation")):
         raise ValueError("agentcore_sync does not support distillation")
+    # Keep expanded rows additive: sum their token losses, but normalize by the
+    # configured pre-expansion mini-batch size rather than the expanded row or
+    # token count. See the variable-row batching contract in README.md.
     if config.actor_rollout_ref.actor.loss_agg_mode != "seq-mean-token-sum":
         raise ValueError("agentcore_sync requires loss_agg_mode=seq-mean-token-sum")
 

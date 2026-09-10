@@ -262,8 +262,15 @@ rank's whole chunk is balanced. That matches current V1 behavior and affects per
 not optimizer-step correctness. Restoring V0's `keep_minibatch=True` behavior is left to a
 generic verl change.
 
-This design does not group rows by UID or session ID. Rows from one rollout may occupy
-different optimizer partitions, which is acceptable for the current additive objective.
+**Limitation when `M > 1`.** Whole-batch balancing treats expanded rows independently
+and does not preserve rollout-session boundaries. With `M=1`, all rows are in the same
+optimizer partition and, with `seq-mean-token-sum`, their additive token losses are
+accumulated before the optimizer update. With `M > 1`, rows from the same rollout session
+may land in different optimizer partitions and therefore be evaluated at different
+parameter states. The trainer still guarantees the configured optimizer-step count and
+additive loss weighting within each step, but it is not equivalent to aggregating all rows
+from a session before one update. Exact equivalence for `M > 1` would require session-aware
+optimizer partitioning, which is outside this design.
 
 ### 5. Select `num_mini_batch`, not `mini_batch_size`
 
@@ -301,6 +308,15 @@ sum(real row token losses) / nominal_global_batch_size
 Collapsing several expanded-row chunks into one optimizer step therefore behaves like
 gradient accumulation of their additive losses before Adam, instead of silently averaging
 away branch rows. Padding rows have zero loss masks and add no gradient.
+
+The other verl aggregation modes change this normalization or weighting:
+
+- `token-mean` divides by the actual token count after row expansion, so adding a branch
+  also changes the weight of existing tokens;
+- `seq-mean-token-mean` first divides each row by its own token count, so branch length
+  changes its relative contribution;
+- `token-sum` omits the nominal `global_batch_size` denominator; and
+- `seq-mean-token-sum-norm` introduces an additional scale factor.
 
 This implementation changes optimizer-step scheduling, not objective weighting. It
 preserves the nominal `global_batch_size` denominator and therefore preserves the current
