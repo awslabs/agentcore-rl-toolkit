@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Unit tests for :func:`run_rollout_with_bounds` -- how a container rollout is
 sequenced (container slot, rate throttle, timed setup, rollout slot, timed run,
-teardown) and that every :class:`ContainerBounds` field is consulted -- plus
+teardown) and that every :class:`RolloutSessionBounds` field is consulted -- plus
 :meth:`RolloutDumpResponse.failure_reason`. Local implementations and a fake session:
 no Ray, no AWS, no container.
 """
@@ -15,8 +15,8 @@ from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssi
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore, PrioritySemaphore
 from agentcore_rl_toolkit.concurrency.rate_limiter import RateLimiter
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
-    ContainerBounds,
     RolloutSession,
+    RolloutSessionBounds,
     run_rollout_with_bounds,
 )
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
@@ -151,8 +151,8 @@ def bounds(
     setup_timeout: float = 30.0,
     run_timeout: float = 30.0,
     limiter: RecordingLimiter | None = None,
-) -> ContainerBounds:
-    return ContainerBounds(
+) -> RolloutSessionBounds:
+    return RolloutSessionBounds(
         container_semaphore=RecordingSemaphore(container_slots),
         rollout_semaphore=RecordingSemaphore(rollout_slots),
         container_priority_assigner=RecordingAssigner(),
@@ -253,7 +253,7 @@ class BoundedRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(b.container_semaphore.held, 0)
         self.assertEqual(b.rollout_semaphore.held, 0)
 
-    # -- every ContainerBounds field is actually consulted --
+    # -- every RolloutSessionBounds field is actually consulted --
 
     async def test_both_semaphores_cap_concurrency(self):
         # All six dwell in every phase, so they would overlap freely if uncapped.

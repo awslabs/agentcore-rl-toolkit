@@ -1,0 +1,14 @@
+actor_rollout_ref:
+  actor:
+    optim:
+      # LR for Lora is 10x higher than for FullFT
+      # See: https://thinkingmachines.ai/blog/lora/#reinforcement-learning
+      lr: 1e-5
+  model:
+    lora:
+      rank: 64
+      alpha: 128
+      lora_A_init_method: kaiming
+      merge: True
+  rollout:
+    load_format: auto
