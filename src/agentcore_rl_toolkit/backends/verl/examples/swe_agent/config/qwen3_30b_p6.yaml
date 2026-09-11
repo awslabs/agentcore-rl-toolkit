@@ -1,0 +1,38 @@
+actor_rollout_ref:
+  model:
+    path: ${oc.env:model_path_prefix}/Qwen3-Coder-30B-A3B-Instruct
+
+  actor:
+    # performance-tuning
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 65000
+
+    megatron:
+      pipeline_model_parallel_size: 1
+      tensor_model_parallel_size: 4
+      context_parallel_size: 1
+
+      override_transformer_config:
+        # requires either lora or 8 gpus
+        recompute_granularity: selective
+        recompute_modules: ["moe"]
+        recompute_num_layers: null
+
+        # this could improve stability
+        moe_router_dtype: fp32
+        moe_permute_fusion: True
+        apply_rope_fusion: True
+
+  rollout:
+    tensor_model_parallel_size: 4
+
+    engine_kwargs:
+      vllm:
+        reasoning_parser: qwen3
+        tool_call_parser: qwen3_coder
+        # vllm does not support this model with flashinfer backend on b200
+        moe_backend: triton
+        max_model_len: ${data.max_response_length}
+
+        # there is capacity for ~5M tokens, which is around 113x44K
+        max_num_seqs: 128

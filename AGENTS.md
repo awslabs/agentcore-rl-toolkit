@@ -33,6 +33,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
 | `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl backend: `AgentCoreAgentLoop` plugged into stock verl main_ppo via the rollout gateway (successor to `backends/verl`) |
 | `src/agentcore_rl_toolkit/backends/experimental/sagemaker/` | Experimental SageMaker Training Sessions backend: single-process GRPO loop (`train_grpo.py`) over the rollout gateway, no local GPUs |
+| `src/agentcore_rl_toolkit/backends/verl/` | verl backend: `AgentCoreAgentLoop` plugged into verl's standard main_ppo entrypoint via the rollout gateway |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
 | `sandboxd/` | Go health shim (`agentcore-sandboxd`) that makes arbitrary Docker images satisfy the ACR container contract |
 | `examples/strands_math_agent/` | GSM8K math agent example |
@@ -190,6 +191,9 @@ drains the tree into `list[TraceRecord]`.
   manually (`pip install sagemaker-train`) — not declared as an extra. Unlike the other
   sampling backends it imports `sagemaker.train.training_session` at module scope, so the
   module is only importable with the SDK present; nothing else in the gateway imports it.
+  `tinker-cookbook` manually — they are not declared as an extra. Both pull torch. (The
+  original reason no longer applies: they require Python ≥3.11, which was unsatisfiable
+  when this package's floor was ≥3.10. The floor is now ≥3.11.)
 
 The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBackend`
 protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so
@@ -199,54 +203,16 @@ importing the package never requires aiohttp. Tests live in `tests/rollout_gatew
 consumers are the **experimental verl backend** (`backends/experimental/verl/`) and the
 **experimental SageMaker backend** (`backends/experimental/sagemaker/`), both below; the
 remaining backends' dispatch/reward-join glue is not yet on the main branch — a prototype
+**Status.** The capture layer above is implemented and tested. Its first training-backend
+consumer is the **verl backend** (`backends/verl/`, see below);
+other backends' dispatch/reward-join glue is not yet on the main branch — a prototype
 dispatcher is parked on the `wip/online-rl-dispatch` branch.
 
-### Experimental verl backend (`backends/experimental/verl/`)
+### verl backend (`backends/verl/`)
 
-The successor to `backends/verl` (which stays untouched until this graduates). It plugs
-into **stock** `python -m verl.trainer.main_ppo` as a custom agent loop — no custom
-trainer, no custom entrypoint — so verl's native features (v1 trainer, replay buffer,
-DAPO filtering, checkpointing, validation, reward loop) work unchanged. Requires
-`trainer.use_v1=true`; verl is pinned to uni-agent's blessed commit `78bba31d` via
-`[tool.uv.sources]` (`uv sync --extra verl-experimental`).
-
-Key pieces (see `backends/experimental/verl/README.md` for the full design):
-- `sampling_backend.py` — `VerlSamplingBackend`: gateway `SamplingBackend` over verl's
-  token-in/token-out `LLMServerClient` (sticky routing by session id).
-- `gateway_host.py` — one `RolloutGateway` per AgentLoopWorker process, served from a
-  daemon thread on an auto-assigned port; ACR containers dial `http://<node_ip>:<port>/v1`
-  (OpenAI-SDK convention: the advertised base_url includes `/v1`).
-- `agent_loop.py` — `AgentCoreAgentLoop` (registered via the agent-loop YAML only —
-  deliberately NOT `@register`-decorated; the decorator would overwrite the YAML's
-  kwarg-carrying registry entry on first instantiation): per rollout, create a gateway
-  session (sid = uuid4 = ACR `runtimeSessionId`), invoke ACR via `RolloutClient`, await
-  the S3 result, drain the session into `TraceRecord`s, and emit one `AgentLoopOutput`
-  per trajectory-tree leaf. Rollout failures (timeout, ACR error, non-200) never raise —
-  they return an inert single-token row (`response_mask=[1]`, logprob 0, reward 0; an
-  all-zero mask is rejected by verl). Contract violations that would recur on every
-  rollout (missing `payload` column, non-numeric reward) do raise, by design.
-- `dataset.py` — `PayloadDataset`: rows carry the agent's exact ACR invoke payload in a
-  `payload` column; the chat-format `prompt` column verl's dataloader needs is
-  synthesized at load time from `payload["prompt"]` (keeps agents decoupled from
-  trainer/dataset conventions; sibling fields of `payload` are reserved for dispatch
-  metadata, e.g. a future `agent` routing field).
-- Rewards: the agent owns scoring — inline `{"rewards": ...}` → `rm_scores`, failures
-  and missing rewards score 0.0, a non-numeric reward raises (broken agent-side reward
-  code would otherwise flatten every GRPO group). Trainer-side scoring
-  (`reward_mode="separate"`) is rejected at startup: verl's reward managers require
-  `data_source`/`reward_model.ground_truth` columns the payload-first dataset contract
-  doesn't provide.
-- Agent-side contract: the app sets `api_key = payload["_rollout"].get("api_key") or
-  "EMPTY"` — the loop supplies the capture session key in the payload (it also equals
-  the ACR `runtimeSessionId`, so older images reading `context.session_id` still work)
-  and the gateway keys capture off the Bearer/api-key slot (`"EMPTY"` keeps local runs
-  and the legacy per-session-URL gateways working). Adopted by `strands_math_agent`
-  (validated end to end) and `strands_migration_agent`. `strands_appworld_agent`,
-  `strands_officebench_agent`, and `strands_taubench_agent` still hard-code `"EMPTY"`
-  and do not forward the trainer-supplied capture key.
-- Validated end to end: `examples/math_agent/fsdp_fft_sync_grpo.sh` (GRPO, Qwen3-4B
-  full-FT, TIS + KL trust region) reaches ~0.93 GSM8K val reward in one epoch against
-  a live ACR agent.
+The verl backend connects AgentCore rollouts to verl through `AgentCoreAgentLoop`
+and the rollout gateway. See `backends/verl/README.md` for its architecture, setup,
+contracts, limitations, and troubleshooting.
 
 ### Experimental SageMaker backend (`backends/experimental/sagemaker/`)
 
@@ -411,7 +377,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 - Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
 - Optional `sampling_params` (e.g., `max_completion_tokens`, `temperature`) can also be passed via `_rollout` for training-engine-controlled generation settings
 - Use standard `OpenAIModel` — no custom model wrappers needed. For evaluation, `base_url` can point directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` directly
-- `api_key` is set from `payload["_rollout"].get("api_key")` — the training engine passes the trajectory-capture session key in the `_rollout` config (gateways like the experimental verl backend key token capture off the api-key slot). Fall back to `"EMPTY"` (the standard vLLM convention for unauthenticated servers) for local runs, evaluation endpoints, and gateways with per-session URLs, which ignore the api key
+- `api_key` is set from `payload["_rollout"].get("api_key")` — the training engine passes the trajectory-capture session key in the `_rollout` config (the verl backend keys token capture off the api-key slot). Fall back to `"EMPTY"` (the standard vLLM convention for unauthenticated servers) for local runs, evaluation endpoints, and gateways with per-session URLs, which ignore the api key
 - Model and agent are created per-invocation inside the entrypoint
 - This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
 - This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
@@ -575,11 +541,11 @@ uv sync --extra dev
 uv run pytest tests/rollout_gateway/
 ```
 
-The experimental verl backend tests (`tests/backends/experimental/verl/`) run against
+The verl backend tests (`tests/backends/verl/`) run against
 the installed verl distribution and skip when verl is absent (conftest-level
-`importorskip`). Run them from an env with the `verl-experimental` extra synced; in CI
-they run in `.github/workflows/experimental-verl-integration.yml`, which syncs the
-`verl-experimental-ci` extra (same pinned verl, but CPU torch and no vllm/flash-attn —
+`importorskip`). Run them from an env with the `verl` extra synced; in CI
+they run in `.github/workflows/verl-integration.yml`, which syncs the
+`verl-ci` dependency group (same pinned verl, but CPU torch and no vllm/flash-attn —
 the LLM server client is the faked seam, so no inference engine is needed).
 
 ---
@@ -606,6 +572,7 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - GitHub pull request descriptions must not hard-wrap prose at a fixed column width. Write each Markdown paragraph as one physical line, regardless of length, and let GitHub handle visual wrapping.
 - In pull request descriptions, insert newlines only for Markdown structure: paragraph boundaries, headings, list items, blockquotes, tables, code blocks, and similar constructs.
 - This pull request formatting rule does not apply to git commit messages or repository documentation; follow their existing wrapping conventions.
+- When implementing or changing behavior covered by a document in `designs/`, update that document and its `Implementation` status in the same change.
 - Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)

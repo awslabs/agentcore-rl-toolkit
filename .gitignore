@@ -5,6 +5,7 @@
 # Python cache
 __pycache__/
 .ruff_cache/
+.pytest_cache/
 
 # Build artifacts
 *.egg-info/
@@ -31,6 +32,7 @@ checkpoints/
 exp_*/
 wandb/
 *.parquet
+local/
 
 # Config files
 config.toml

@@ -5,9 +5,9 @@ import asyncio
 import json
 import logging
 import time
+import tomllib
 from pathlib import Path
 
-import tomllib
 from appworld.task import load_task_ids
 
 from agentcore_rl_toolkit import RolloutClient

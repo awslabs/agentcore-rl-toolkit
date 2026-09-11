@@ -1,0 +1,22 @@
+[project]
+name = "swe-agent-server"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["pydantic", "requests", "backoff", "aiohttp", "awscli"]
+
+[project.optional-dependencies]
+# NOTE: the web server the harness runs on is deliberately not declared here.
+# swe_agent_server.app is a BedrockAgentCoreApp and image/entrypoint.sh serves it with
+# uvicorn; both come from bedrock-agentcore, which the image installs along with the
+# toolkit (see the Dockerfile). Naming them here would be a second copy of the
+# toolkit's requirements to keep in step -- the same reason bedrock-agentcore itself is
+# not listed.
+server = ["openhands-sdk==1.37.1", "openhands-tools==1.37.1", "aws-opentelemetry-distro"]
+strands = ["strands-agents[litellm]==1.50.2", "strands-agents-tools"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.txt", "*.md", "*.jinja", "*.j2"]

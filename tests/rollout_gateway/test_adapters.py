@@ -22,6 +22,7 @@ class FakeRenderer:
 
     def __init__(self):
         self.vocab: dict[str, int] = {}
+        self.render_kwargs: list[dict | None] = []
 
     def _id(self, tok: str) -> int:
         return self.vocab.setdefault(tok, len(self.vocab) + 1)
@@ -29,7 +30,8 @@ class FakeRenderer:
     def _encode(self, text: str) -> list[int]:
         return [self._id(t) for t in text.split()]
 
-    def render(self, messages, *, tools=None, add_generation_prompt=True):
+    def render(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None):
+        self.render_kwargs.append(chat_template_kwargs)
         ids: list[int] = []
         for m in messages:
             ids += self._encode(f"{m['role']}:")
@@ -138,5 +140,32 @@ async def test_bearer_sid_isolates_sessions():
         assert len(recs_critic) == 1
         # distinct trees -> distinct token sequences
         assert recs_solver[0].token_ids != recs_critic[0].token_ids
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_template_kwargs_reach_renderer():
+    renderer = FakeRenderer()
+    backend = FakeBackend(renderer, replies=["four", "four"])
+    adapter = OpenAIAdapter(backend=backend, renderer=renderer, tokenizer=None)
+
+    server = TestServer(adapter.app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        headers = {"Authorization": "Bearer ep1:solver"}
+        msgs = [{"role": "user", "content": "two plus two"}]
+        resp = await client.post("/v1/chat/completions", json={"model": "x", "messages": msgs}, headers=headers)
+        assert resp.status == 200
+        body = {"model": "x", "messages": msgs, "chat_template_kwargs": {"enable_thinking": False}}
+        resp = await client.post("/v1/chat/completions", json=body, headers=headers)
+        assert resp.status == 200
+        assert renderer.render_kwargs == [None, {"enable_thinking": False}]
+
+        body["chat_template_kwargs"] = "no"
+        resp = await client.post("/v1/chat/completions", json=body, headers=headers)
+        assert resp.status == 400
+        assert len(renderer.render_kwargs) == 2  # rejected before render
     finally:
         await client.close()

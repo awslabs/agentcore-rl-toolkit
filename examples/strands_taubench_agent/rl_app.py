@@ -92,10 +92,11 @@ def _setup_rollout(payload: dict) -> RolloutContext:
 
     task = payload["_task"]
     domain = task["domain"]
+    api_key = payload["_rollout"].get("api_key") or "EMPTY"
 
     # Assistant model (RL-trained, served via vLLM)
     assistant_model = OpenAIModel(
-        client_args={"api_key": "EMPTY", "base_url": base_url},
+        client_args={"api_key": api_key, "base_url": base_url},
         model_id=model_id,
         params=params,
     )
