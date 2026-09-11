@@ -6,7 +6,7 @@ calls. Owning both directions in one place makes loss-masking well-defined and
 eliminates cross-backend retokenization drift. It is also required for sample-only
 inference backends (e.g. Tinker) that cannot render themselves.
 
-Two implementations behind one :class:`Renderer` protocol:
+Rendering implementations:
 
 * :class:`HfTemplateRenderer` (default, lightweight) — renders with the HF tokenizer's
   ``apply_chat_template``. Derendering picks the strongest available path: when the
@@ -28,6 +28,7 @@ Two implementations behind one :class:`Renderer` protocol:
 """
 
 import dataclasses
+import hashlib
 import logging
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
@@ -41,6 +42,10 @@ from .response_schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Exact Qwen3-Coder template whose between-turn suffix is independent of history.
+# A shared response-parser schema is not sufficient to establish this contract.
+_QWEN_CODER_TEMPLATE = "5a38bfa05833266240066aedc497decc9b00cc0d3e3b8cceea98cf530196ab06"
 
 # The two derender stages, as injectable callables:
 #   ReasoningParser: raw_output -> (reasoning, body_text)
@@ -66,14 +71,16 @@ class ParsedOutput:
 class Renderer(Protocol):
     """The gateway's tokenization seam.
 
-    ``render``             : canonical chat messages (+ tools) -> prompt ``token_ids``;
+    ``await render``       : canonical chat messages (+ tools) -> prompt ``token_ids``;
                              ``chat_template_kwargs`` are per-request template variables
                              (e.g. ``enable_thinking``) from the client's request body
     ``get_stop_sequences`` : stop strings / token ids for sampling
     ``parse``              : sampled response ``token_ids`` -> :class:`ParsedOutput`
+
+    Renderers may also expose ``render_delta`` for incremental linear healing.
     """
 
-    def render(
+    async def render(
         self,
         messages: list[dict],
         *,
@@ -169,7 +176,59 @@ class HfTemplateRenderer:
             if schema_name is not None:
                 self._schema = RESPONSE_SCHEMAS[schema_name]
 
-    def render(
+        self._close_ids: list[int] | None = None
+
+    def _render_text(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None) -> str:
+        return self.tokenizer.apply_chat_template(
+            self._rekey_reasoning(messages),
+            tools=tools,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            return_dict=False,
+            **({"chat_template": self._chat_template} if self._chat_template else {}),
+            **{**self._chat_template_kwargs, **(chat_template_kwargs or {})},
+        )
+
+    async def _encode(
+        self, text: str, *, padding=False, truncation=False, max_length=None, return_tensors=None, **kwargs
+    ) -> list[int]:
+        """Encode rendered text with HF options and native async tokenization.
+
+        HF currently has no async equivalent of ``apply_chat_template``. The
+        setup below mirrors the encoding configuration normally handled by its
+        synchronous tokenizer wrapper, then awaits the native ``async_encode``
+        call. Template rendering itself remains synchronous in ``_render_text``.
+        """
+        if return_tensors is not None or kwargs.get("return_overflowing_tokens", False):
+            raise ValueError("The gateway requires a single list[int], not tensor or overflow batches")
+        padding_strategy, truncation_strategy, max_length, _ = self.tokenizer._get_padding_truncation_strategies(
+            padding=padding, truncation=truncation, max_length=max_length, **kwargs
+        )
+        self.tokenizer.set_truncation_and_padding(
+            padding_strategy=padding_strategy,
+            truncation_strategy=truncation_strategy,
+            max_length=max_length,
+            stride=kwargs.get("stride", 0),
+            pad_to_multiple_of=kwargs.get("pad_to_multiple_of"),
+            padding_side=kwargs.get("padding_side"),
+        )
+        backend = self.tokenizer.backend_tokenizer
+        split_special_tokens = kwargs.get("split_special_tokens")
+        backend.encode_special_tokens = (
+            self.tokenizer.split_special_tokens if split_special_tokens is None else split_special_tokens
+        )
+        # tokenizers 0.22.2 snapshots its Rust configuration when async_encode is
+        # called, before returning the future. Do not await between configuring
+        # the backend and this call; other requests can then use their own settings.
+        encoding = await backend.async_encode(
+            text,
+            pair=kwargs.get("text_pair") or None,
+            is_pretokenized=kwargs.get("is_split_into_words", False),
+            add_special_tokens=kwargs.get("add_special_tokens", False),
+        )
+        return encoding.ids
+
+    async def render(
         self,
         messages: list[dict],
         *,
@@ -177,19 +236,61 @@ class HfTemplateRenderer:
         add_generation_prompt: bool = True,
         chat_template_kwargs: dict | None = None,
     ) -> list[int]:
-        # return_dict=False: we want only the token ids. The dict form (the
-        # transformers>=5 default) bundles an attention mask, but that is a padding
-        # artifact the training backend builds itself when it batches rows.
-        ids = self.tokenizer.apply_chat_template(
-            self._rekey_reasoning(messages),
+        """Render with HF, then apply its encoding options using native async."""
+        kwargs = {**self._chat_template_kwargs, **(chat_template_kwargs or {})}
+        text = self._render_text(
+            messages,
             tools=tools,
-            tokenize=True,
             add_generation_prompt=add_generation_prompt,
-            return_dict=False,
-            **({"chat_template": self._chat_template} if self._chat_template else {}),
-            **{**self._chat_template_kwargs, **(chat_template_kwargs or {})},
+            chat_template_kwargs=kwargs,
         )
-        return list(ids)
+        tokenizer_kwargs = kwargs.get("tokenizer_kwargs")
+        return await self._encode(
+            text,
+            padding=kwargs.get("padding", False),
+            truncation=kwargs.get("truncation", False),
+            max_length=kwargs.get("max_length"),
+            return_tensors=kwargs.get("return_tensors"),
+            add_special_tokens=False,
+            **(tokenizer_kwargs if tokenizer_kwargs is not None else {}),
+        )
+
+    async def render_delta(
+        self, last_assistant, new_messages, *, tools=None, chat_template_kwargs=None
+    ) -> tuple[list[int], list[int]] | None:
+        """Return (assistant closer, new tail), or None for the full-healer fallback."""
+        template = self._chat_template or self.tokenizer.chat_template
+        kwargs = {**self._chat_template_kwargs, **(chat_template_kwargs or {})}
+        # Only use templates verified to preserve the new tail when full history
+        # is replaced by the dummy history below. The hardcoded "<|im_end|>\n"
+        # assistant closer is template-specific, not universal. Other templates
+        # may use different closers or depend on earlier messages; fall back to
+        # full-history healing unless both assumptions have been verified.
+        if (
+            not isinstance(template, str)
+            or hashlib.sha256(template.encode()).hexdigest() != _QWEN_CODER_TEMPLATE
+            or kwargs.keys() - {"enable_thinking"}
+            or last_assistant.get("role") != "assistant"
+        ):
+            return None
+        # The verified template only needs the previous role/tool-call boundary.
+        # Render all consecutive tool results together to preserve their grouping.
+        dummy = [
+            {"role": "system", "content": "dummy system"},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": " ",
+                "tool_calls": last_assistant.get("tool_calls") or [],
+            },
+        ]
+        before = self._render_text(dummy, tools=tools, add_generation_prompt=False, chat_template_kwargs=kwargs)
+        after = self._render_text(dummy + new_messages, tools=tools, chat_template_kwargs=kwargs)
+        if not after.startswith(before):
+            return None
+        if self._close_ids is None:
+            self._close_ids = await self._encode("<|im_end|>\n")
+        return self._close_ids, await self._encode(after[len(before) :])
 
     def _rekey_reasoning(self, messages: list[dict]) -> list[dict]:
         """Move assistant ``reasoning_content`` to the key this template reads.

@@ -26,6 +26,8 @@ import pytest
 verl = pytest.importorskip("verl", reason="requires the verl extra")
 
 from omegaconf import OmegaConf  # noqa: E402
+from tokenizers import Tokenizer, models, pre_tokenizers  # noqa: E402
+from transformers import PreTrainedTokenizerFast  # noqa: E402
 from verl.experimental.agent_loop.agent_loop import DictConfigWrap  # noqa: E402
 from verl.workers.rollout.replica import TokenOutput  # noqa: E402
 
@@ -83,15 +85,19 @@ class FakeLLMServerClient:
         return TokenOutput(token_ids=[101, 102], log_probs=[-0.5, -0.6], stop_reason="completed")
 
 
-class FakeTokenizer:
+class FakeTokenizer(PreTrainedTokenizerFast):
     """Minimal HF-tokenizer stand-in whose renders prefix-extend across turns
     (like a real chat template): an assistant message re-renders as the
     generation prompt (99) + the exact ids the fake backend generated
     (101, 102), so replayed conversations take the CLEAN merge path."""
 
-    eos_token = "</s>"
-    eos_token_id = 0
-    pad_token_id = 0
+    def __init__(self):
+        # Keep deterministic IDs while exercising HF configuration and native
+        # async encoding through the same interface as the production tokenizer.
+        vocab = {f"token{i}": i for i in range(103)}
+        backend = Tokenizer(models.WordLevel(vocab, unk_token="token0"))
+        backend.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+        super().__init__(tokenizer_object=backend, eos_token="token0", pad_token="token0")
 
     def apply_chat_template(self, messages, *, tools=None, tokenize=True, add_generation_prompt=True, **kw):
         ids = []
@@ -102,13 +108,10 @@ class FakeTokenizer:
                 ids += [10 + i, 20 + i]
         if add_generation_prompt:
             ids.append(99)
-        return ids
+        return ids if tokenize else " ".join(f"token{i}" for i in ids)
 
     def decode(self, ids, skip_special_tokens=False):
         return "hello world"
-
-    def convert_tokens_to_ids(self, token):
-        return None
 
 
 @pytest.fixture(autouse=True)
