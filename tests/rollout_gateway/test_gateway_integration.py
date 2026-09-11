@@ -1,5 +1,6 @@
 """Integration tests for ``RolloutGateway`` — the assembled serving unit."""
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 
@@ -34,7 +35,7 @@ class FakeRenderer:
         inv = {v: k for k, v in self.vocab.items()}
         return " ".join(inv.get(i, "?") for i in ids)
 
-    def render(self, messages, *, tools=None, add_generation_prompt=True):
+    async def render(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None):
         ids: list[int] = []
         for m in messages:
             ids += self._encode(f"{m['role']}:")
@@ -107,6 +108,40 @@ async def serve(gateway: RolloutGateway):
 
 def bearer(sid: str) -> dict:
     return {"Authorization": f"Bearer {sid}"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history_mode", ["tree", "linear"])
+async def test_close_during_async_render_does_not_generate(history_mode):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class BlockingRenderer(FakeRenderer):
+        async def render(self, messages, **kwargs):
+            entered.set()
+            await release.wait()
+            return [1]
+
+    renderer = BlockingRenderer()
+    backend = FakeBackend(renderer, ["should not be generated"])
+    gateway = RolloutGateway(backend=backend, renderer=renderer, history_mode=history_mode)
+    gateway.create_session("closing")
+    async with serve(gateway) as client:
+        request = asyncio.ensure_future(
+            client.post(
+                "/v1/chat/completions",
+                json={"model": "x", "messages": [{"role": "user", "content": "q"}]},
+                headers=bearer("closing"),
+            )
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        finishing = asyncio.create_task(gateway.finish_session("closing"))
+        await asyncio.sleep(0)  # shutdown marks the session closed before draining
+        assert "closing" in gateway.adapters[0].closed
+        release.set()
+        response = await asyncio.wait_for(request, 1)
+        assert response.status == 503
+        assert await asyncio.wait_for(finishing, 1) == []
+        assert backend.calls == []
 
 
 # ---------------------------------------------------------------------------

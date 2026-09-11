@@ -368,15 +368,19 @@ class BaseAdapter:
             if self.healer is not None:
                 # linear mode: splice canonical served ids over the drifted re-render
                 # before generation (the healer does the render internally).
-                prompt_ids = self.healer.heal(sid, translated, tools_schema)
+                prompt_ids = await self.healer.heal(
+                    sid, translated, tools_schema, chat_template_kwargs=chat_template_kwargs
+                )
             else:
-                prompt_ids = self.renderer.render(
+                prompt_ids = await self.renderer.render(
                     translated,
                     tools=tools_schema,
                     add_generation_prompt=True,
-                    **({"chat_template_kwargs": chat_template_kwargs} if chat_template_kwargs else {}),
+                    chat_template_kwargs=chat_template_kwargs,
                 )
 
+            if sid in self.closed:
+                return web.Response(status=503, text="session closed")
             sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
             # context-budget clamp (backend-neutral): if the prompt already exceeds the
             # per-sid budget, short-circuit with an empty length-capped turn.
