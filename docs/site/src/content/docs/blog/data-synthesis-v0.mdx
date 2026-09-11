@@ -30,12 +30,12 @@ trained 8B and 30B models match or exceed frontier models.
   <figcaption>Figure 1 — Cost vs. Performance on the three τ²-Bench domains and CAR-bench.</figcaption>
 </figure>
 
-## Why synthesize data at all
+## Why synthesize tasks at all
 
 Everyone customizing an agent for their own domain runs into the same wall. You
 have a working environment: a set of tools, a database behind them, and a policy
 document that says what the agent may and may not do. What you don't have is
-training tasks - the agentic training data. Production traces, if they exist, are skewed toward routine
+training tasks - the training data for agentic models. Production traces, if they exist, are skewed toward routine
 requests and carry no reliable label. Hand-written tasks don't scale past a few
 hundred.
 
@@ -60,7 +60,7 @@ trusted until the environment confirms it.
     alt="System workflow."
   />
   <figcaption>
-    Figure 2 — Agentic Data Synthesis Workflow.
+    Figure 2 — Agentic Task Synthesis Workflow.
   </figcaption>
 </figure>
 
@@ -306,13 +306,13 @@ RL training.
 ## What's next
 
 1. **Open-source solution**. We will release the task synthesis recipe in the [agentcore-rl-toolkit](https://github.com/awslabs/agentcore-rl-toolkit) package soon.
-2. **From no traces to some training tasks.** The same machinery can extract complexity
+2. **Bootstrap from existing traces.** The same machinery can extract complexity
    patterns from production traces and generate more of what actually shows up in
    traffic.
-3. **A guided data agent.** An interactive assistant that helps a team turn their
+3. **A guided data agent.** An interactive agent that helps a team turn their
    policy document and traces into reward references and reward functions, and
    iterates on those functions against adversarial rollouts.
-4. **Beyond customer service.** Read-only data agents over databases and corpora
+4. **Beyond customer service.** Read-only QA agents over databases and corpora
    are the next environment class.
 
 ## Acknowledgements
