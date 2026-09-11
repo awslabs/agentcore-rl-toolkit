@@ -1,5 +1,12 @@
 # Dynamic Sandbox Environments on AgentCore
 
+| Field | Value |
+| --- | --- |
+| Status | Proposed |
+| Implementation | Not started |
+| Date | 2026-07-29 |
+| Pull request | [#89](https://github.com/awslabs/agentcore-rl-toolkit/pull/89) |
+
 ## Summary
 
 The sandbox SDK can support dynamic, Harbor-style task environments under a

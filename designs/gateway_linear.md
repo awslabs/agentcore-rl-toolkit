@@ -1,5 +1,12 @@
 # Linear-history mode for the rollout gateway (generate-time prefix healing)
 
+| Field | Value |
+| --- | --- |
+| Status | Accepted |
+| Implementation | Shipped |
+| Date | 2026-08-31 |
+| Pull request | [#119](https://github.com/awslabs/agentcore-rl-toolkit/pull/119) |
+
 ## Summary
 
 `history_mode="linear"` is an opt-in gateway mode for agents whose conversation is
@@ -14,7 +21,8 @@ no cosmetic forks.
 
 Default behavior (`history_mode="tree"`) is unchanged.
 
-**Status:** implemented (v1) in `src/agentcore_rl_toolkit/rollout_gateway/linear.py`
+The accepted v1 design is implemented in
+`src/agentcore_rl_toolkit/rollout_gateway/linear.py`
 (`LinearHealer`), wired through `RolloutGateway` and `BaseAdapter`. Unit-tested in
 `tests/rollout_gateway/test_linear_healer.py`; core template assumptions validated against
 the real Qwen3-Coder-30B tokenizer. Remaining follow-ups at the end.
