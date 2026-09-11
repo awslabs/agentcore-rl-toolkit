@@ -167,6 +167,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
             adapters=gateway_adapters,
             max_turns_per_sid=max_turns_per_sid,
             fork_threshold_tokens=fork_threshold_tokens,
+            chat_template_kwargs=dict(self.apply_chat_template_kwargs or {}),
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
         )
