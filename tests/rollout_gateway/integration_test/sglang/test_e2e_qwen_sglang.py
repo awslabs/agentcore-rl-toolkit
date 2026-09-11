@@ -154,7 +154,7 @@ async def test_single_turn_token_exact(server):
     assert len(backend.calls) == 1
     prompt_ids, output_ids = backend.calls[0]["prompt_ids"], backend.calls[0]["output_ids"]
     # the gateway rendered the prompt with the REAL Qwen chat template
-    assert prompt_ids == renderer.render(messages, tools=None, add_generation_prompt=True)
+    assert prompt_ids == await renderer.render(messages, tools=None, add_generation_prompt=True)
     assert backend.calls[0]["session_id"] == sid
 
     assert len(records) == 1
