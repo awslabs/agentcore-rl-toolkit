@@ -93,7 +93,7 @@ async def test_run_end_to_end_inline_reward():
     assert len(out.prompt_ids) > 0
     assert out.reward_score == 0.75
     assert out.extra_fields["acr_result"]["rewards"] == 0.75
-    assert out.extra_fields["reward_extra_info"] == {"reward": 0.75, "acr_failed": 0.0, "num_trace_records": 1.0}
+    assert out.extra_fields["reward_extra_info"] == {"acr_failed": 0.0, "num_trace_records": 1.0}
 
     # invoke wiring: sid is a 36-char uuid used as both ACR session id and Bearer sid
     call = invoke.calls[0]
@@ -359,37 +359,55 @@ async def test_invalid_max_tokens_per_turn_rejected(value):
 
 
 async def test_reward_extra_info_carries_scalar_metrics_over_defaults():
-    loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0, "reward": 0.0})
-    _wire_result(loop, {"status_code": 200, "rewards": 0.75, "metrics": {"f_beta": 0.6, "num_turns": 3, "note": "x"}})
+    loop = _make_loop(
+        FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0, "num_turns": 0.0, "reward": 0.0}
+    )
+    _wire_result(
+        loop,
+        {
+            "status_code": 200,
+            "rewards": 0.75,
+            "metrics": {"f_beta": 0.6, "num_turns": 3, "undeclared": 9, "note": "x"},
+        },
+    )
     outs = await loop.run(
         {"temperature": 1.0}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"q": 1}, uid="u"
     )
     rei = outs[-1].extra_fields["reward_extra_info"]
-    assert rei["f_beta"] == 0.6 and rei["num_turns"] == 3.0 and rei["reward"] == 0.75
+    assert rei["f_beta"] == 0.6 and rei["num_turns"] == 3.0
     assert rei["acr_failed"] == 0.0 and rei["num_trace_records"] == 1.0
-    assert "note" not in rei  # non-numeric metrics are dropped (verl aggregates these as floats)
+    assert "reward" not in rei  # verl derives its reward metric from rm_scores
+    assert "undeclared" not in rei and "note" not in rei
 
 
 async def test_failed_rollout_carries_reward_extra_info_defaults():
     loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0})
-    rei = loop._reward_extra_info(None, 0.0, 0, failed=True)
-    assert rei == {"f_beta": 0.0, "reward": 0.0, "acr_failed": 1.0, "num_trace_records": 0.0}
+    rei = loop._reward_extra_info(None, 0, failed=True)
+    assert rei == {"f_beta": 0.0, "acr_failed": 1.0, "num_trace_records": 0.0}
 
 
-async def test_failed_rollout_padded_with_keys_seen_on_successful_rollouts():
-    loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults={"reward": 0.0})
-    _wire_result(loop, {"status_code": 200, "rewards": 1.0, "metrics": {"submitted": 1.0, "num_turns": 4, "ok": True}})
-    outs = await loop.run(
-        {"temperature": 1.0}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"q": 1}, uid="u"
+async def test_reward_extra_info_keys_are_stable_across_loop_instances():
+    defaults = {"submitted": 0.0, "num_turns": 0.0, "ok": 0.0}
+    successful_loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults=defaults)
+    failed_loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults=defaults)
+
+    successful = successful_loop._reward_extra_info(
+        {"metrics": {"submitted": 1.0, "num_turns": 4, "ok": True}}, 1, failed=False
     )
-    assert outs[-1].extra_fields["reward_extra_info"]["ok"] == 1.0
-    rei = loop._reward_extra_info(None, 0.0, 0, failed=True)
-    assert rei == {
-        "reward": 0.0,
-        "acr_failed": 1.0,
-        "num_trace_records": 0.0,
+    failed = failed_loop._reward_extra_info(None, 0, failed=True)
+
+    assert successful == {
+        "submitted": 1.0,
+        "num_turns": 4.0,
+        "ok": 1.0,
+        "acr_failed": 0.0,
+        "num_trace_records": 1.0,
+    }
+    assert failed == {
         "submitted": 0.0,
         "num_turns": 0.0,
         "ok": 0.0,
+        "acr_failed": 1.0,
+        "num_trace_records": 0.0,
     }
-    assert set(rei) == set(outs[-1].extra_fields["reward_extra_info"])
+    assert set(successful) == set(failed)
