@@ -11,6 +11,7 @@ import fig_rl_buckets_telecom from '../../../assets/blog/data-synthesis-v0/fig_r
 
 
 _By Ping Qing, Panpan Xu, Luke Huan, Junjie Tang, Johannes Kirmayr, Lukas Stappen_
+
 _September 10, 2026_
 
 {/* ~10 min read */}
@@ -162,8 +163,8 @@ are the τ²-Bench domains; the last three are the CAR-bench splits.
   </thead>
   <tbody>
     <tr><td colspan="7"><em>Frontier models</em></td></tr>
-    <tr><td>Frontier model 1, zero-shot</td><td>0.89</td><td>0.90</td><td>0.94</td><td>0.86</td><td>0.69</td><td>0.62</td></tr>
-    <tr><td>Frontier model 2, zero-shot</td><td>0.82</td><td>0.90</td><td>0.70</td><td>0.69</td><td>0.37</td><td>0.61</td></tr>
+    <tr><td>Frontier model A, zero-shot</td><td>0.89</td><td>0.90</td><td>0.94</td><td>0.86</td><td>0.69</td><td>0.62</td></tr>
+    <tr><td>Frontier model B, zero-shot</td><td>0.82</td><td>0.90</td><td>0.70</td><td>0.69</td><td>0.37</td><td>0.61</td></tr>
     <tr><td colspan="7"><em>Student models</em></td></tr>
     <tr><td>Qwen3-30B-A3B, zero-shot</td><td>0.62</td><td>0.78</td><td>0.38</td><td>0.52</td><td>0.44</td><td>0.46</td></tr>
     <tr><td>Qwen3-30B-A3B, ours (SFT)</td><td>0.76</td><td>0.84</td><td>0.90</td><td>0.79</td><td>0.73</td><td>0.72</td></tr>
@@ -195,16 +196,16 @@ are the τ²-Bench domains; the last three are the CAR-bench splits.
 
 Telecom is the striking one. The base model succeeds on barely a third of tasks;
 after training on synthesized tasks it succeeds on 96%, above both frontier
-models. Retail closes most of the gap to frontier model 1 and 2. Airline, the most policy-dense
+models. Retail closes most of the gap to frontier model A and B. Airline, the most policy-dense
 domain, closes most of the gap as well.
 
 CAR-bench tells the same story on its base split and a sharper one on the two
 adversarial splits. On base tasks the RL-trained model reaches 0.83, just below
-frontier model 1 at 0.86 and well above frontier model 2 at 0.69. The disambiguation split,
+frontier model A at 0.86 and well above frontier model B at 0.69. The disambiguation split,
 where the request is underspecified and the agent must ask before acting, and
 the hallucination split, where the request cannot be fulfilled with the
 available tools and the agent must say so, are where frontier models struggle
-most: frontier model 1 scores 0.69 and 0.62, frontier model 2 scores 0.37 and 0.61. The
+most: frontier model A scores 0.69 and 0.62, frontier model B scores 0.37 and 0.61. The
 RL-trained student reaches 0.74 and 0.90, above both. These are exactly the
 behaviors the synthesis pipeline is designed to cover. Requests that need
 clarification and requests the agent must refuse are first-class scenario types
