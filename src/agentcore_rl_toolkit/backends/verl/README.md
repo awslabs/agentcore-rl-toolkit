@@ -153,6 +153,11 @@ computation.
   agent-side contract error. verl contains the exception to the affected prompt
   group, so training continues without rows from that group.
 
+To aggregate numeric fields from the agent result's `metrics` dict, declare each
+field and its missing-value default under `reward_extra_info_defaults` in
+`agentcore_agent.yaml`. Only declared fields are forwarded, so every rollout has
+the same keys. `reward` is omitted because verl derives it from `rm_scores`.
+
 **Trainer-side rewards (`reward_mode="separate"`) are not supported yet** and are
 rejected at startup because verl's v1 reward managers require dataset columns that
 the payload-first contract does not provide.
