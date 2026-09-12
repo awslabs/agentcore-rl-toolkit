@@ -1,0 +1,52 @@
+# GRPO training — rollout gateway + SageMaker Training Sessions
+
+# --- AWS resources (required) ---
+role_arn: "arn:aws:iam::<account-id>:role/<your-sagemaker-role>"
+s3_output_path: "s3://<your-s3-bucket>/output/" # S3 to store model checkpoints
+model_package_group_arn: "arn:aws:sagemaker:<region>:<account-id>:model-package-group/<your-group>"
+s3_bucket: "<your-rollout-s3-bucket>" # S3 to store AgentCore rollout data
+base_model_arn: "arn:aws:sagemaker:<region>:aws:hub-content/SageMakerPublicHub/Model/<model-name>"
+agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<your-agent-id>"
+
+region: "us-east-1"
+exp_id: "my-experiment"
+
+# --- LoRA ---
+lora_rank: 32
+lora_alpha: 64
+resume_from_model_package: ""
+
+# --- Training ---
+batch_size: 32
+responses_per_prompt: 4
+learning_rate: 1.0e-5
+max_context_tokens: 32768
+max_new_tokens: 8192
+temperature: 1.0
+epochs: 1
+loss: ppo          # ppo | importance_sampling | cispo
+
+# --- Dataset ---
+dataset_path: "/path/to/train.parquet"
+max_prompts: 0     # 0 = use all
+
+# --- Evaluation ---
+eval_dataset_path: "/path/to/test.parquet"
+eval_every: 10     # 0 = only at end
+eval_max_prompts: 0
+eval_temperature: 0.0
+
+# --- Gateway ---
+gateway_port: 0    # 0 = OS-assigned
+
+# --- Checkpointing ---
+save_every: -1     # -1 = only at end
+save_weights_at_end: false
+
+# --- Rollout ---
+max_rollout_time: 1800.0
+acr_tps_limit: 5
+
+# --- Logging ---
+wandb_project: ""
+wandb_run_name: ""  # defaults to the SageMaker training session name
