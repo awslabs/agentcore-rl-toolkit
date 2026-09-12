@@ -9,7 +9,10 @@ This doc describes how to train an AgentCore Runtime-deployed agent with
 [verl](/agentcore-rl-toolkit/guides/verl-backend-setup/) backends, there is
 **no GPU cluster required for the training**: SageMaker hosts the policy weights,
 the sampler, and the optimizer behind an SDK, and the RL loop itself runs as a
-plain Python process on your laptop or a small EC2 box.
+plain Python process on a small EC2 box.
+
+The host does need to be network-reachable *from* your ACR runtime, so a laptop
+does not work with this setup — see [Networking](#networking) before you deploy.
 
 The loop is implemented in-repo at
 [`src/agentcore_rl_toolkit/backends/experimental/sagemaker/`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/experimental/sagemaker)
@@ -25,7 +28,7 @@ and is driven by a single YAML config:
 
 Token capture uses the same in-repo
 [rollout gateway](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/rollout_gateway)
-as the experimental verl backend. The SageMaker-specific seam is
+as the verl backend. The SageMaker-specific seam is
 `SageMakerSdkBackend`
 ([`rollout_gateway/sampling_backends/sagemaker_sdk.py`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/rollout_gateway/sampling_backends/sagemaker_sdk.py)),
 a `token_ids -> token_ids + logprobs` sampling backend over the SageMaker
@@ -46,6 +49,44 @@ a `token_ids -> token_ids + logprobs` sampling backend over the SageMaker
 - SageMaker resources: an execution **role ARN**, an S3 **output path** for
   checkpoints, a **model package group ARN** for saved states, and the **hub
   content ARN** of the base model you want to fine-tune.
+- An EC2 instance in a VPC to run the loop on, with the ACR runtime deployed into
+  the same VPC. See [Networking](#networking).
+
+## Networking
+
+The training loop hosts the rollout gateway itself. `train_grpo.py` starts a
+[`ThreadedGatewayServer`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/rollout_gateway/server.py)
+bound to the host's primary private IP, then passes the resulting
+`http://<private-ip>:<port>/v1` to the agent as `base_url` in the `_rollout`
+payload. Every model call the agent makes is therefore an **inbound connection
+from the ACR runtime to your host** — the reverse of the direction people usually
+expect. Rollout results come back out-of-band through S3, but sampling does not.
+
+That gives three requirements:
+
+1. **The ACR runtime must be in VPC mode, in a VPC that routes to the loop host.**
+   ACR deploys to the public internet by default, which cannot reach a private IP.
+   Deploy into the host's own VPC (`agentcore configure ... --vpc --subnets
+   <subnet-id> --security-groups <sg-id>`); see the
+   [math agent README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md)
+   for the full flow.
+2. **The host's security group must allow inbound TCP on the gateway port** from
+   the runtime's subnets or security group.
+3. **Pin the port.** `gateway_port` defaults to `0`, which binds an OS-assigned
+   ephemeral port — fine for a wide-open security group, but it makes a narrow
+   inbound rule impossible, since the port changes every run. Set `gateway_port`
+   to a fixed value and open exactly that port.
+
+**A laptop will not work.** It has no address the ACR runtime can dial, so every
+sampling call fails and each rollout ends up scored `0.0` (`run_one_rollout()`
+logs the failure and returns a zero reward rather than raising, so this shows up
+as a run that trains on nothing rather than as a crash). Run the loop on an EC2
+instance in the VPC instead. The "no GPUs" claim is about the instance's size, not
+its location — a small CPU box is plenty.
+
+The gateway serves plain HTTP with no TLS, and the api-key slot carries the
+per-rollout session id rather than a secret, so keep it on private subnets and
+scope the security group tightly.
 
 ## Installation
 
@@ -123,7 +164,8 @@ eval_max_prompts: 0
 eval_temperature: 0.0
 
 # --- Gateway ---
-gateway_port: 0              # 0 = OS-assigned
+gateway_port: 0              # 0 = OS-assigned; pin it to open a narrow inbound
+                             # security-group rule (see Networking)
 
 # --- Checkpointing ---
 save_every: -1               # -1 = only at the end

@@ -20,7 +20,11 @@ def trace_record_to_datum(record: TraceRecord, advantage: float) -> dict | None:
 
     weights = [0.0] * (prompt_length - 1) + [float(m) for m in record.loss_mask]
     logprobs = [0.0] * (prompt_length - 1) + list(record.logprobs)
-    advantages = [0.0] * (prompt_length - 1) + [float(advantage)] * response_length
+    # Advantages carry the loss mask too, not just ``weights``: masked positions
+    # (tool results, user turns, REALIGN-overwritten drift) also carry a stored
+    # logprob of 0.0, so a surrogate that ignored ``weights`` would score them
+    # against a fabricated old policy. A no-op where ``weights`` is honored.
+    advantages = [0.0] * (prompt_length - 1) + [float(m) * float(advantage) for m in record.loss_mask]
 
     return {
         "modelInput": {"chunks": [{"tokens": input_tokens, "type": "encoded_text"}]},

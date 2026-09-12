@@ -31,7 +31,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
-| `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl backend: `AgentCoreAgentLoop` plugged into stock verl main_ppo via the rollout gateway (successor to `backends/verl`) |
+| `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl extras that have not graduated into `backends/verl/`: `RolloutSessionAgentLoop` (sandbox-session rollouts, used by the SWE agent example), its task runner, and trainer mixins |
 | `src/agentcore_rl_toolkit/backends/experimental/sagemaker/` | Experimental SageMaker Training Sessions backend: single-process GRPO loop (`train_grpo.py`) over the rollout gateway, no local GPUs |
 | `src/agentcore_rl_toolkit/backends/verl/` | verl backend: `AgentCoreAgentLoop` plugged into verl's standard main_ppo entrypoint via the rollout gateway |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
@@ -179,34 +179,28 @@ drains the tree into `list[TraceRecord]`.
   would silently miss every other; opt into it explicitly with
   `tool_parser=parse_tool_uses`); the gateway itself never imports an inference
   engine. Injecting a `reasoning_parser` / `tool_parser` callable into
-  `HfTemplateRenderer` disables schema detection and takes full control. The slime backend injects parsers built from
-  SGLang's own detectors (`backends/slime/integration/sglang_parsing.py`, composing
-  `FunctionCallParser` + `ReasoningParser`) wired from slime's
-  `--sglang-tool-call-parser` / `--sglang-reasoning-parser` args (names must match the
-  served model); sglang is always importable there because the trainer serves SGLang.
+  `HfTemplateRenderer` disables schema detection and takes full control — the intended
+  hook for a backend that wants to reuse its own engine's detectors (e.g. SGLang's
+  `FunctionCallParser` + `ReasoningParser`, importable wherever the trainer serves
+  SGLang).
 - For the Tinker backend (`TinkerSdkBackend` + `TinkerRenderer`), install `tinker` and
-  `tinker-cookbook` manually — they require Python ≥3.11, so they are not declared as an
-  extra (this package supports ≥3.10). Both pull torch.
+  `tinker-cookbook` manually — they are not declared as an extra. Both pull torch. (The
+  original reason no longer applies: they require Python ≥3.11, which was unsatisfiable
+  when this package's floor was ≥3.10. The floor is now ≥3.11.)
 - For the SageMaker backend (`SageMakerSdkBackend`), install the Training Sessions SDK
   manually (`pip install sagemaker-train`) — not declared as an extra. Unlike the other
   sampling backends it imports `sagemaker.train.training_session` at module scope, so the
   module is only importable with the SDK present; nothing else in the gateway imports it.
-  `tinker-cookbook` manually — they are not declared as an extra. Both pull torch. (The
-  original reason no longer applies: they require Python ≥3.11, which was unsatisfiable
-  when this package's floor was ≥3.10. The floor is now ≥3.11.)
 
 The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBackend`
 protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so
 importing the package never requires aiohttp. Tests live in `tests/rollout_gateway/`.
 
 **Status.** The capture layer above is implemented and tested. Its training-backend
-consumers are the **experimental verl backend** (`backends/experimental/verl/`) and the
-**experimental SageMaker backend** (`backends/experimental/sagemaker/`), both below; the
-remaining backends' dispatch/reward-join glue is not yet on the main branch — a prototype
-**Status.** The capture layer above is implemented and tested. Its first training-backend
-consumer is the **verl backend** (`backends/verl/`, see below);
-other backends' dispatch/reward-join glue is not yet on the main branch — a prototype
-dispatcher is parked on the `wip/online-rl-dispatch` branch.
+consumers are the **verl backend** (`backends/verl/`) and the **experimental SageMaker
+backend** (`backends/experimental/sagemaker/`), both below; the remaining backends'
+dispatch/reward-join glue is not yet on the main branch — a prototype dispatcher is
+parked on the `wip/online-rl-dispatch` branch.
 
 ### verl backend (`backends/verl/`)
 
@@ -253,7 +247,13 @@ Key pieces:
 - `datum.py` — `trace_record_to_datum()`: `TraceRecord` + advantage → a SageMaker datum
   (shifted `input`/`target_tokens`, with `weights` / `logprobs` / `advantages` left-padded
   over the prompt span). Returns `None` for an empty or all-zero loss mask; a step with no
-  valid datums is skipped rather than submitted.
+  valid datums is skipped rather than submitted. The loss mask is applied to `advantages`
+  as well as `weights`: masked positions inside the response span (tool results, user
+  turns, REALIGN-overwritten drift) carry a stored logprob of `0.0`, so a service-side
+  surrogate that consulted only `advantages` would score them against a fabricated old
+  policy. Whether all four `lossFn` values honor `weights` is not observable from the
+  client SDK (it ships `lossFnName` + datums and does no loss math), so the datum is made
+  self-consistent instead of relying on that.
 - `config.py` / `config.yaml.example` — typed dataclass + template; `load_config` silently
   drops unknown YAML keys. Local `config.yaml` is gitignored (holds ARNs).
 - `prepare_datasets/prepare_gsm8k.py` — GSM8K → Parquet. Same payload-first dataset
@@ -265,6 +265,16 @@ Current limits: GRPO only (`SageMakerSdkBackend`, `run_one_rollout()`,
 `trace_record_to_datum()`, and the gateway assembly are reusable for another algorithm),
 LoRA only, rewards agent-side only, and one gateway in one process — it scales by ACR
 concurrency, not by local hardware.
+
+"No GPU cluster" is not "runs anywhere": `train_grpo.py` binds the gateway to
+`local_ip()` and hands the agent `http://<private-ip>:<gateway_port>/v1`, so every
+sampling call is an *inbound* connection from the ACR runtime to the loop host. The
+host must be an EC2 instance in a VPC, the runtime must be deployed into that VPC
+(`--vpc --subnets --security-groups`), and the security group must allow inbound TCP on
+`gateway_port` (default `0` = ephemeral, so pin it to write a narrow rule). A laptop
+cannot work; failures surface as rollouts scored `0.0`, not as a crash, because
+`run_one_rollout()` logs and returns a zero reward. Documented under "Networking" in
+`docs/site/src/content/docs/guides/sagemaker-backend-setup.md`.
 
 **Vendored from upstream projects (baselines).** Several files are adapted from
 [slime](https://github.com/THUDM/slime) and [trl](https://github.com/huggingface/trl)
