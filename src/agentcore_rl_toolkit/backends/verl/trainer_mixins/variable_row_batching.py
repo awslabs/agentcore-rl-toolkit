@@ -133,12 +133,17 @@ class VariableRowBatchingMixin(TrainerMixinBase):
         expected_sessions = (
             self.config.data.train_batch_size // self.parameter_sync_step * self.config.actor_rollout_ref.rollout.n
         )
+        # These are per-trigger counts, and a step can hold several triggers
+        # (separate-async with parameter_sync_step > 1). verl reduces a step's metrics by
+        # name: a key containing "sum" or "total" is summed, anything else is
+        # sample-weighted-averaged. Name every counter "total_*" so all four aggregate the
+        # same way and stay comparable across modes.
         metrics.update(
             {
-                "batching/real_rows": total_rows - padding_rows,
+                "batching/total_real_rows": total_rows - padding_rows,
                 "batching/total_rows": total_rows,
-                "batching/padding_rows": padding_rows,
-                "training/rollout_failure/missing_sessions": expected_sessions - len(actual_sessions),
+                "batching/total_padding_rows": padding_rows,
+                "training/rollout_failure/total_missing_sessions": expected_sessions - len(actual_sessions),
             }
         )
         return batch

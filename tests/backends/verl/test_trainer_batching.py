@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 from hydra import compose, initialize_config_module
+from verl.trainer.ppo.v1 import get_trainer_cls
+from verl.trainer.ppo.v1.utils import MetricsAggregator
 
 from agentcore_rl_toolkit.backends.verl import trainer as trainer_module
 from agentcore_rl_toolkit.backends.verl.trainer import AgentCorePPOTrainerSync
@@ -42,8 +44,6 @@ def _make_config(*overrides, config_name="ppo_trainer"):
 def _trainer(mode, *overrides):
     """Build the trainer registered under `mode`, with that mode's mandatory config."""
     _, mode_overrides = TRAINER_MODES[mode]
-    from verl.trainer.ppo.v1 import get_trainer_cls
-
     return get_trainer_cls(mode)(_make_config(f"trainer.v1.trainer_mode={mode}", *mode_overrides, *overrides))
 
 
@@ -141,10 +141,10 @@ def test_update_actor_sends_count_not_fixed_mini_batch_size_and_records_metrics(
     assert batch.extra_info["global_batch_size"] == 4
     assert batch.extra_info["epochs"] == 2
     assert metrics["perf/mfu/actor"] == 0.5
-    assert metrics["batching/real_rows"] == 3
+    assert metrics["batching/total_real_rows"] == 3
     assert metrics["batching/total_rows"] == 4
-    assert metrics["batching/padding_rows"] == 1
-    assert metrics["training/rollout_failure/missing_sessions"] == 6
+    assert metrics["batching/total_padding_rows"] == 1
+    assert metrics["training/rollout_failure/total_missing_sessions"] == 6
 
 
 @pytest.mark.parametrize("mode", list(TRAINER_MODES))
@@ -170,10 +170,36 @@ def test_every_mode_sends_partition_count_and_records_batching_metrics(mode):
     assert batch.extra_info["num_mini_batch"] == 1
     assert "mini_batch_size" not in batch.extra_info
     assert batch.extra_info["global_batch_size"] == 64
-    assert metrics["batching/real_rows"] == 2
-    assert metrics["batching/padding_rows"] == 1
+    assert metrics["batching/total_real_rows"] == 2
+    assert metrics["batching/total_padding_rows"] == 1
     # 16 prompts * n=4 nominal rollouts expected, one distinct session seen.
-    assert metrics["training/rollout_failure/missing_sessions"] == 63
+    assert metrics["training/rollout_failure/total_missing_sessions"] == 63
+
+
+def test_batching_counters_are_summed_across_sync_triggers():
+    """A step can hold several triggers; verl reduces by metric name, and only names
+    containing "sum"/"total" are summed instead of sample-weighted-averaged."""
+    trainer = AgentCorePPOTrainerSync(_make_config("actor_rollout_ref.rollout.n=1"))
+    trainer.actor_rollout_wg = _ActorWorkerGroup()
+    aggregator = MetricsAggregator()
+    for trigger in range(2):
+        metrics = {}
+        trainer._update_actor(
+            SimpleNamespace(
+                extra_info={},
+                keys=[f"uid{trigger}_0_0", "pad_0_0"],
+                tags=[{"is_padding": False}, {"is_padding": True}],
+            ),
+            metrics,
+        )
+        aggregator.add_step_metrics(metrics, sample_count=2)
+
+    aggregated = aggregator.get_aggregated_metrics()
+
+    assert aggregated["batching/total_real_rows"] == 2
+    assert aggregated["batching/total_rows"] == 4
+    assert aggregated["batching/total_padding_rows"] == 2
+    assert aggregated["training/rollout_failure/total_missing_sessions"] == 126
 
 
 @pytest.mark.parametrize("mode", list(TRAINER_MODES))

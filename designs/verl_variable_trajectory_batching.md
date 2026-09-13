@@ -531,16 +531,18 @@ Automated coverage lives in:
 - [`test_trainer_batching.py`](../tests/backends/verl/test_trainer_batching.py),
   which covers trainer registration, registry-alias normalization, configuration
   constraints, batching metadata, and dynamic metrics, for all three `agentcore_*`
-  modes (including a separate-async case where `parameter_sync_step > 1`).
+  modes (including a separate-async case where `parameter_sync_step > 1`), plus the
+  reduction of the batching counters through verl's own `MetricsAggregator` across
+  multiple triggers.
 
 ### End-to-end validation
 
 An eight-GPU Qwen3-4B FSDP smoke test completed one ACR rollout and actor update
 with two real rows padded to the required multiple of eight:
 
-- `batching/real_rows=2`;
+- `batching/total_real_rows=2`;
 - `batching/total_rows=8`;
-- `batching/padding_rows=6`.
+- `batching/total_padding_rows=6`.
 
 A second smoke test used `python -m verl.trainer.main_ppo` with
 `VERL_USE_EXTERNAL_MODULES`; `TaskRunnerV1` resolved `agentcore_sync` and
@@ -556,10 +558,16 @@ Full end-to-end validation then completed:
 
 The `_update_actor(batch, metrics)` override adds:
 
-- `batching/real_rows`
+- `batching/total_real_rows`
 - `batching/total_rows`
-- `batching/padding_rows`
-- `training/rollout_failure/missing_sessions`
+- `batching/total_padding_rows`
+- `training/rollout_failure/total_missing_sessions`
+
+All four are per-trigger counts. verl's `MetricsAggregator` reduces a step's metrics
+by name — a name containing `sum` or `total` is summed, anything else is
+sample-weighted-averaged — so the `total_*` naming is what keeps the four counters
+consistent when a step spans several `sample -> update` triggers (separate-async with
+`parameter_sync_step > 1`).
 
 The inherited trainer continues to publish the whole-batch `global_seqlen/*`
 metrics.

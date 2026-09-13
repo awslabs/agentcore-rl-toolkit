@@ -217,10 +217,13 @@ edit the YAML or use `${oc.env:...}` interpolation.
 
 ## Trainer observability
 
-Every `agentcore_*` mode logs, per actor update, `batching/real_rows`,
-`batching/total_rows`, `batching/padding_rows`, and
-`training/rollout_failure/missing_sessions` (nominal rollouts for the trigger minus
-the distinct sessions actually seen). The metric mixins add
+Every `agentcore_*` mode logs, per actor update, `batching/total_real_rows`,
+`batching/total_rows`, `batching/total_padding_rows`, and
+`training/rollout_failure/total_missing_sessions` (nominal rollouts for the trigger
+minus the distinct sessions actually seen). These are per-trigger counts, and verl
+reduces a step's metrics by name: the `total_*` naming is what makes all four sum
+across the triggers of a step (separate-async with `parameter_sync_step > 1`) rather
+than being sample-weighted-averaged. The metric mixins add
 `agent_loop/<name>/{mean,min,max,sum}` for every metric an agent loop reports
 through `AgentLoopOutput.extra_fields`, plus `critic/advantages/zero_mean` and
 `critic/advantages/zero_pass_mean` for collapsed GRPO groups.
@@ -265,9 +268,9 @@ remain trainable. With asynchronous replay, verl's existing failed-group policy
 evicts and refills the entire prompt group, including successful sibling
 trajectories. Preserving partial failed groups in asynchronous training requires
 session-level or partial-group failure handling in verl's replay buffer.
-The `training/rollout_failure/missing_sessions` metric reports
-`data.train_batch_size * rollout.n` minus the number of materialized rollout
-sessions in each actor update.
+The `training/rollout_failure/total_missing_sessions` metric reports
+`data.train_batch_size / parameter_sync_step * rollout.n` minus the number of
+materialized rollout sessions in each actor update, summed over a step's updates.
 
 ## Troubleshooting
 
