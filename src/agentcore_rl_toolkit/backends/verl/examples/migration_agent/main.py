@@ -1,3 +1,11 @@
+"""Driver for the MigrationBench recipe.
+
+It cannot be ``python -m verl.trainer.main_ppo``: ``RolloutSessionAgentLoop``'s run-wide
+semaphores, priority assigners and rate limiter are named Ray actors that only
+``TaskRunnerWithRolloutSessionResources`` creates, and the loop reads
+``trainer.experiment_start_at``, which only the driver can stamp.
+"""
+
 import datetime as dt
 
 import hydra
@@ -17,13 +25,10 @@ def main(config):
     auto_set_device(config)
 
     with open_dict(config):
+        # this run's provenance, and the timestamp every S3 dump and session record is
+        # grouped under -- so it has to be stamped once, here, not per worker
         config.ec2_instance_type = get_current_instance_type()
         config.trainer.experiment_start_at = dt.datetime.now().isoformat()
-
-        if 'separate_async' in config.trainer.v1.trainer_mode:
-            config.data.train_batch_size = (
-                config.trainer.v1.separate_async.parameter_sync_step * config.actor_rollout_ref.actor.ppo_mini_batch_size
-            )
 
     validate_config(
         config=config,

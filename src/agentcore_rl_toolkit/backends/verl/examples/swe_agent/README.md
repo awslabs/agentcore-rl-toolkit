@@ -175,7 +175,7 @@ worker, so these are cluster-wide numbers, not per-worker ones:
 `ec2_monitor_poll_interval` (60s) controls the single poller that stamps each session's
 EC2 instance id into the session table; one poller per run rather than a call per
 session, which would exhaust the EC2 API's rate limit at this scale. It is skipped
-unless the backend is `agentcore` and `dynamodb_table` is set.
+unless the backend is `agentcore_http` and `dynamodb_table` is set.
 
 ## Watching a run
 

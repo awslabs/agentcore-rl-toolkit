@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Unit tests for :class:`AgentCoreSession`'s data-plane client: one client per session
+"""Unit tests for :class:`AgentCoreHttpSession`'s data-plane client: one client per session
 (start, setup, every status poll, the dump, the delete), not one per call, and a client
 per call for anyone calling the helpers standalone. Fake aioboto3 session, no AWS.
 """
@@ -14,7 +14,7 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
     invoke_agentcore_session,
 )
 from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
-from agentcore_rl_toolkit.rollout_session.agentcore_session import AgentCoreSession
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
 from agentcore_rl_toolkit.rollout_session.wire import (
     InvocationRequest,
     InvocationResponse,
@@ -153,8 +153,8 @@ def no_sleep():
     return mock.patch("asyncio.sleep", _sleep)
 
 
-def session(session_id: str = "s1") -> AgentCoreSession:
-    return AgentCoreSession(
+def session(session_id: str = "s1") -> AgentCoreHttpSession:
+    return AgentCoreHttpSession(
         session_id,
         session_state=PersistentDict({"session_id": session_id}, persister=NullPersister()),
         runtime_arn=RUNTIME_ARN,
@@ -162,7 +162,7 @@ def session(session_id: str = "s1") -> AgentCoreSession:
     )
 
 
-async def run_rollout(s: AgentCoreSession) -> RolloutDumpResponse:
+async def run_rollout(s: AgentCoreHttpSession) -> RolloutDumpResponse:
     """One whole rollout: the lifecycle ``run_rollout_with_bounds`` drives."""
     async with s:
         await s.setup({"index": 1})

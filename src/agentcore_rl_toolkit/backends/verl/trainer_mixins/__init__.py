@@ -2,10 +2,12 @@
 
 from .advantage_metrics import AdvantageZeroMetricsMixin
 from .agent_loop_metrics import AgentLoopMetricsMixin
+from .rollout_failure_isolation import RolloutFailureIsolationMixin
 from .variable_row_batching import VariableRowBatchingMixin
 
 __all__ = [
     "AdvantageZeroMetricsMixin",
     "AgentLoopMetricsMixin",
+    "RolloutFailureIsolationMixin",
     "VariableRowBatchingMixin",
 ]

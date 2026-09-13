@@ -1,0 +1,9 @@
+actor_rollout_ref:
+  actor:
+    megatron:
+      override_transformer_config:
+        # full recompute at every layer: the cheapest activation memory for these 131k
+        # contexts, at the cost of a second forward pass
+        recompute_granularity: full
+        recompute_method: uniform
+        recompute_num_layers: 1

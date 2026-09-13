@@ -47,6 +47,6 @@ rollout_session_agent_loop:
 
   # `backend` picks the implementation; only that backend's keys have to be set
   rollout_session_backend:
-    backend: agentcore
+    backend: agentcore_http
     agentcore_runtime_arn: "${oc.env:agentcore_runtime_arn}"
     capacity_provider_arn: "${oc.env:agentcore_capacity_provider_arn}"

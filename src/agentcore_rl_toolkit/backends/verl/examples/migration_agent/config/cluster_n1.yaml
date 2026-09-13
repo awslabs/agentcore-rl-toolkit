@@ -1,0 +1,6 @@
+# One node, 8 GPUs, trainer and rollout engine colocated on them (the `agentcore_sync` trainer
+# sleeps the engine while it trains). A separate rollout cluster would mean a decoupled
+# trainer mode instead -- see the swe_agent recipe's `cluster_trainer_rollout_n*` groups.
+trainer:
+  nnodes: 1
+  n_gpus_per_node: 8

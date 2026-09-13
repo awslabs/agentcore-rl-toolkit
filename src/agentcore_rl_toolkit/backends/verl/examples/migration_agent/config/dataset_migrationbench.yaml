@@ -1,0 +1,30 @@
+# The MigrationBench parquets `preprocess_migrationbench.py` writes, and the batch shape
+# they are consumed in.
+actor_rollout_ref:
+  actor:
+    # equal to data.train_batch_size below: one optimizer step per weight sync
+    ppo_mini_batch_size: 32
+  rollout:
+    # rollouts per task, i.e. the GRPO group size
+    n: 16
+
+data:
+  train_batch_size: 32
+
+  # Rows carry a `payload` column (the agent's exact invoke payload) and a `task_id`;
+  # PayloadDataset synthesizes the chat-format `prompt` column verl's dataloader and
+  # length filtering require, from `payload.prompt`.
+  custom_cls:
+    path: pkg://agentcore_rl_toolkit.backends.verl.dataset
+    name: PayloadDataset
+
+  train_files: ${oc.env:dataset_path_prefix}/migrationbench_agent_train.parquet
+  val_files: ${oc.env:dataset_path_prefix}/migrationbench_agent_test.parquet
+
+  # `max_response_length` is verl's storage width for the whole multi-turn trajectory and
+  # the gateway's cumulative token budget, not a per-turn generation limit -- so it gets
+  # the full model context. `max_prompt_length` is a separate padded region holding each
+  # row's leading context (the agent's system prompt plus its first user message);
+  # remove-padding keeps those nominal widths off the valid model sequence.
+  max_prompt_length: 8192
+  max_response_length: 64000

@@ -18,7 +18,27 @@ from agentcore_rl_toolkit.aws_tools.persistent_dict import (
 from agentcore_rl_toolkit.concurrency.priority_assigner import PriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import PrioritySemaphore
 from agentcore_rl_toolkit.concurrency.rate_limiter import RateLimiter
+from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
+
+
+def require_task_id(task: dict) -> str:
+    """The dataset's own id for this task, or a loud error.
+
+    Every row must carry ``task_id``: it is what rollouts are grouped by, what lands in
+    the session record, and what an eval of the same dataset stamps too -- so a training
+    rollout and an eval of one task meet on it. There is deliberately no fallback to the
+    row index; an index silently regroups rollouts by position, which shuffles between
+    runs, and the resulting advantages are wrong rather than absent.
+    """
+    task_id = task.get("task_id")
+    if task_id is None or (isinstance(task_id, str) and not task_id.strip()):
+        raise RolloutContractError(
+            f"The task has no usable `task_id` (got {task_id!r}). Every dataset row must "
+            "carry one -- the dataset's own name for the task (for SWE datasets, the "
+            "instance slug). A dataset built before this contract has to be rebuilt."
+        )
+    return str(task_id)
 
 
 @runtime_checkable

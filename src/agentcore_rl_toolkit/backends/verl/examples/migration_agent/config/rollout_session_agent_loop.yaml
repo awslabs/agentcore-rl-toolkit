@@ -1,0 +1,73 @@
+actor_rollout_ref:
+  rollout:
+    agent:
+      default_agent_loop: rollout_session_agent_loop
+
+rollout_session_agent_loop:
+  _target_: agentcore_rl_toolkit.backends.experimental.verl.config.RolloutSessionAgentLoopConfig
+
+  # region of every AWS resource below (agent runtime, output bucket)
+  aws_region: "${oc.env:AWS_REGION}"
+
+  # No session table for this recipe: the per-rollout record lives only in the S3 dump
+  # below. Set it to a DynamoDB table name to get a live, queryable item per rollout.
+  dynamodb_table: null
+
+  # One location for both the loop's own per-rollout dumps
+  # (`<experiment_start_at>/<session_id>`) and, through the backend below, the agent's
+  # result objects (`<experiment_name>/<task_id>/<session_id>.json`).
+  rollout_output_s3: "${oc.env:rollout_output_s3}"
+
+  # The runtime this recipe invokes is not EC2-backed and there is no session table to
+  # stamp instance ids into, so the monitor has nothing to do.
+  ec2_monitor_poll_interval: 0
+
+  # the container's payload is the dataset row's `payload` column, verbatim
+  task_kwargs: {}
+
+  # passed as-is to the rollout gateway (get_or_start_gateway)
+  rollout_gateway:
+    adapters: ["openai"]
+    max_turns_per_sid: 1000
+    # one record per trajectory reaches the trainer, so linearize history
+    history_mode: "linear"
+    fork_threshold_tokens: 0
+
+  # gateway defaults for turns the agent did not specify; verl's own
+  # temperature/top_p/top_k override the same keys. Replaces the retired
+  # `max_tokens_per_turn` knob of `agentcore_agent.yaml`.
+  rollout_gateway_sampling_params:
+    max_new_tokens: 8192
+
+  rollout_session_bounds:
+    # concurrent trajectories; at most rollout dp x max_num_seqs, or the prefix KV-cache
+    # hit rate drops
+    rollout_concurrency: 128
+    # concurrent AgentCore sessions: capacity and cost control
+    container_concurrency: 256
+
+    # AgentCore session creation allows 25 TPS with no burst, and this backend spends
+    # roughly two calls per rollout (invoke + stop), so leave headroom
+    session_create_rate: 5
+
+    # This backend's `setup` provisions nothing -- one invoke both creates the session and
+    # starts the rollout -- so this timeout bounds nothing and cold start is charged to
+    # `agent_run_timeout` below. Kept equal so it can never become the binding limit.
+    container_setup_timeout: 1800
+    # covers container cold start, the S3 repo fetch, the Maven environment setup and the
+    # agent run together; it is what the retired `max_rollout_time` knob used to cap
+    agent_run_timeout: 1800
+
+  # `backend` picks the implementation; only that backend's keys have to be set
+  rollout_session_backend:
+    # the agent's production contract: one fire-and-forget ACR invoke of an
+    # `AgentCoreRLApp`, whose result dict is polled out of S3 -- same image and same
+    # payload as a batch evaluation of it
+    backend: agentcore_s3
+    agentcore_runtime_arn: "${oc.env:agentcore_runtime_arn}"
+    # results land beside this loop's dumps, under `<rollout_output_s3>/<experiment_name>`
+    rollout_output_s3: "${rollout_session_agent_loop.rollout_output_s3}"
+    experiment_name: "${trainer.experiment_name}"
+    # sized toward rollout_concurrency: the process-wide client's boto3 pools are what
+    # invoke bursts queue on
+    max_pool_connections: 128

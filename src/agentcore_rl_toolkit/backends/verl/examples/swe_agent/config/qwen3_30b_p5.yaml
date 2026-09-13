@@ -25,6 +25,7 @@ actor_rollout_ref:
 
   rollout:
     tensor_model_parallel_size: 4
+    max_model_len: ${data.max_response_length}
 
     engine_kwargs:
       vllm:

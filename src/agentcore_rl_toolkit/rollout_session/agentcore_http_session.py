@@ -1,4 +1,12 @@
-"""A rollout session that runs the agent in a Bedrock AgentCore runtime session."""
+"""A rollout session that drives the agent over the four-POST HTTP protocol.
+
+The agent runs as an HTTP server in a Bedrock AgentCore runtime session, and this session
+talks to it directly in :mod:`.wire`'s protocol -- setup, status polls, start, dump -- so
+completion and the trajectory arrive on an invoke response. The sibling
+:mod:`.agentcore_s3_session` reaches the same runtime with one fire-and-forget invoke and
+polls S3 for the result instead; both are registered in :mod:`.factory` (``agentcore_http``
+and ``agentcore_s3``).
+"""
 
 import json
 import logging
@@ -36,7 +44,7 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 logging.getLogger("backoff").setLevel(logging.ERROR)
 
 
-class AgentCoreSession(RolloutSession):
+class AgentCoreHttpSession(RolloutSession):
     """A rollout session backed by an HTTP server in a Bedrock AgentCore runtime session.
 
     Entering the session opens one ``bedrock-agentcore`` client and every call it makes
@@ -62,7 +70,7 @@ class AgentCoreSession(RolloutSession):
         self._client: Any | None = None
         self._scope: AsyncExitStack | None = None
 
-    async def __aenter__(self) -> "AgentCoreSession":
+    async def __aenter__(self) -> "AgentCoreHttpSession":
         # One client serves the runtime invokes and the capacity-provider delete, so both
         # arns must name the same region -- they always do: the provider hosts the
         # runtime's sessions.

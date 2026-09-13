@@ -1,0 +1,53 @@
+# Qwen3-Coder-30B-A3B on one P6-B200 node: the model, its Megatron parallelism, and the
+# colocated vLLM engine. Training uses TP=2/EP=2/CP=2 while rollout uses TP=4
+# independently, which gives the most KV cache per GPU for these long agent contexts.
+actor_rollout_ref:
+  model:
+    path: ${oc.env:model_path_prefix}/Qwen3-Coder-30B-A3B-Instruct
+    use_remove_padding: true
+
+  actor:
+    use_dynamic_bsz: true
+    # max_response_length / context_parallel_size
+    ppo_max_token_len_per_gpu: 65536
+
+    megatron:
+      pipeline_model_parallel_size: 1
+      tensor_model_parallel_size: 2
+      expert_model_parallel_size: 2
+      context_parallel_size: 2
+      sequence_parallel: true
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 65536
+
+    megatron:
+      # the reference policy is only read once per batch, so keep it off the GPU otherwise
+      param_offload: true
+      pipeline_model_parallel_size: 1
+      tensor_model_parallel_size: 2
+      expert_model_parallel_size: 2
+      context_parallel_size: 2
+      sequence_parallel: true
+
+  rollout:
+    tensor_model_parallel_size: 4
+    max_model_len: ${data.max_response_length}
+    max_num_batched_tokens: 16384
+    gpu_memory_utilization: 0.70
+    log_prob_micro_batch_size_per_gpu: 1
+
+    engine_kwargs:
+      vllm:
+        # vLLM's default FlashInfer MoE kernel fails for this model on B200 (Blackwell)
+        moe_backend: triton
+        # matched to rollout_session_bounds.rollout_concurrency: more in-flight sequences
+        # than the engine admits only costs prefix-cache hit rate
+        max_num_seqs: 128
+
+# Tool-call and reasoning parsing happen in the rollout gateway's renderer, auto-detected
+# from the model's chat template (rollout_gateway/response_schemas.py maps Qwen3-Coder to
+# the qwen3_5 XML schema). Engine-level parser flags have no effect on that
+# token-in/token-out path and are deliberately not set.
