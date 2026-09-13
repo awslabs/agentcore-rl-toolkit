@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Accepted |
 | Implementation | Shipped |
-| Date | 2026-09-10 |
+| Date | 2026-09-10, extended to the async trainer modes 2026-09-13 |
 | Pull request | [#131](https://github.com/awslabs/agentcore-rl-toolkit/pull/131) |
 
 ## Summary
@@ -29,21 +29,30 @@ while still training every emitted row:
 
 ```
 num_actor_mini_batches
-    = data.train_batch_size / actor.ppo_mini_batch_size
+    = data.train_batch_size / parameter_sync_step / actor.ppo_mini_batch_size
 
-actor optimizer steps
+actor optimizer steps per sample->update trigger
     = num_actor_mini_batches * actor.ppo_epochs
 ```
 
+`parameter_sync_step` is how many decoupled `sample -> update` triggers verl's
+`PPOTrainer.step` spends one weight sync on. It is 1 for the synchronous and colocate-async
+trainers, so the divisor drops out there; the separate-async trainer requires
+`train_batch_size == parameter_sync_step * ppo_mini_batch_size`, so its count is always 1.
+Deriving the count per trigger rather than per step is what makes the mechanism
+trainer-mode agnostic.
+
 The worker already exposes the right interface: `TrainingWorker.train_mini_batch` accepts
-`num_mini_batch` as an alternative to a fixed `mini_batch_size`. The custom trainer uses
+`num_mini_batch` as an alternative to a fixed `mini_batch_size`. The mixin uses
 that interface, pads only enough for the configured number of actor optimizer partitions
 and actor data-parallel ranks, and otherwise preserves V1's whole-batch DP balancing.
 
-The integration uses verl's public trainer registry and subclasses `PPOTrainerSync`.
-The recipes set verl's official `VERL_USE_EXTERNAL_MODULES` variable before invoking
-`python -m verl.trainer.main_ppo`, so both the driver and inherited Ray task-runner
-actor import the registration module before their process-local trainer lookup.
+The integration uses verl's public trainer registry. The overrides live in a mixin layered
+onto each of verl's three v1 trainers, registered as `agentcore_sync`,
+`agentcore_colocate_async`, and `agentcore_separate_async`. The recipes set verl's official
+`VERL_USE_EXTERNAL_MODULES` variable before invoking `python -m verl.trainer.main_ppo`, so
+both the driver and inherited Ray task-runner actor import the registration module before
+their process-local trainer lookup.
 
 ## Goals
 
@@ -73,7 +82,6 @@ actor import the registration module before their process-local trainer lookup.
 - Changing dynamic micro-batching. `use_dynamic_bsz` decides how one optimizer partition is
   split into forward/backward micro-batches; it does not decide how many optimizer steps
   occur.
-- Supporting async trainer modes. The AgentCore example scripts use `PPOTrainerSync`.
 - Supporting a critic. The AgentCore example scripts use actor-only GRPO.
 - Supporting on-policy distillation.
 - Restoring legacy V0's per-mini-batch DP token balancing. V0 implements
@@ -120,7 +128,7 @@ The relevant verl 0.9.0 path is:
 Legacy V0 has a `keep_minibatch=True` path that balances each configured mini-batch across
 DP separately. V1's `_balance_batch` signature still contains `keep_minibatch`, but its
 implementation does not branch on it: V1 always balances the whole padded batch into
-`dp_size` contiguous rank chunks. The custom trainer does not change that behavior.
+`dp_size` contiguous rank chunks. The mixin does not change that behavior.
 
 For the MigrationBench recipe:
 
@@ -145,10 +153,10 @@ though a one-step, DP=2 update only requires an even row count: 514.
 For the actor, define:
 
 ```
-M = data.train_batch_size / actor.ppo_mini_batch_size
+M = data.train_batch_size / parameter_sync_step / actor.ppo_mini_batch_size
 ```
 
-The configuration must make `M` an integer. For each `_step_once` in the sync trainer:
+The configuration must make `M` an integer. For each `_step_once`, in any trainer mode:
 
 1. the actor performs exactly `M * actor.ppo_epochs` optimizer steps;
 2. all real expanded rows are consumed once per PPO epoch;
@@ -169,13 +177,20 @@ post-rollout row count:
 ```python
 def configured_num_mini_batches(
     train_batch_size: int,
+    parameter_sync_step: int,
     ppo_mini_batch_size: int,
 ) -> int:
-    if train_batch_size % ppo_mini_batch_size:
+    if train_batch_size % parameter_sync_step:
         raise ValueError(
-            "data.train_batch_size must be divisible by ppo_mini_batch_size"
+            "data.train_batch_size must be divisible by parameter_sync_step"
         )
-    return train_batch_size // ppo_mini_batch_size
+    sample_batch_size = train_batch_size // parameter_sync_step
+    if sample_batch_size % ppo_mini_batch_size:
+        raise ValueError(
+            "data.train_batch_size / parameter_sync_step must be divisible by "
+            "ppo_mini_batch_size"
+        )
+    return sample_batch_size // ppo_mini_batch_size
 ```
 
 `rollout.n` intentionally does not appear in this count. It still defines the nominal row
@@ -190,19 +205,19 @@ result is `M * ppo_epochs` steps.
 The generic actor/critic case requires coordinating two potentially different DP sizes and
 two mini-batch schedules. It is outside this trainer's supported contract.
 
-The custom trainer calls verl's `need_critic(config)` during construction and rejects
+The mixin calls verl's `need_critic(config)` during construction and rejects
 the configuration if it returns true:
 
 ```python
 if need_critic(config):
-    raise ValueError("agentcore_sync supports only actor-only training")
+    raise ValueError(f"{name} supports only actor-only training")
 ```
 
 This makes the scheduling model unambiguous:
 
 ```
 D = actor data-parallel size
-M = data.train_batch_size / actor.ppo_mini_batch_size
+M = data.train_batch_size / parameter_sync_step / actor.ppo_mini_batch_size
 G = D * M
 ```
 
@@ -246,7 +261,7 @@ variable step count.
 
 ### 4. Preserve V1's existing whole-batch DP balancing
 
-The subclass changes `_get_required_batch_multiple(dp_size)` to return `D * M`, then calls
+The mixin changes `_get_required_batch_multiple(dp_size)` to return `D * M`, then calls
 the inherited V1 `_balance_batch` unchanged. The inherited implementation:
 
 1. pad the expanded batch to a multiple of `D * M`;
@@ -281,7 +296,7 @@ optimizer partitioning, which is outside this design.
 
 ### 5. Select `num_mini_batch`, not `mini_batch_size`
 
-For actor updates, the custom trainer passes:
+For actor updates, the mixin passes:
 
 ```python
 nominal_global_batch_size = (
@@ -334,33 +349,32 @@ change.
 
 ### 6. Fail fast outside the validated contract
 
-`AgentCorePPOTrainerSync.__init__` validates the supported surface before
+`VariableRowBatchingMixin.__init__` validates the supported surface before
 initializing the base trainer:
 
 ```python
-def validate_agentcore_sync_config(config) -> None:
+def _validate_config(config, name) -> None:
     if not config.trainer.use_v1:
-        raise ValueError("agentcore_sync requires trainer.use_v1=true")
+        raise ValueError(f"{name} requires trainer.use_v1=true")
     if need_critic(config):
-        raise ValueError("agentcore_sync supports only actor-only training")
+        raise ValueError(f"{name} supports only actor-only training")
     if is_distillation_enabled(config.get("distillation")):
-        raise ValueError("agentcore_sync does not support distillation")
+        raise ValueError(f"{name} does not support distillation")
     if config.actor_rollout_ref.actor.loss_agg_mode != "seq-mean-token-sum":
-        raise ValueError("agentcore_sync requires loss_agg_mode=seq-mean-token-sum")
-
-    train_batch_size = config.data.train_batch_size
-    ppo_mini_batch_size = config.actor_rollout_ref.actor.ppo_mini_batch_size
-    if train_batch_size % ppo_mini_batch_size:
-        raise ValueError(
-            "data.train_batch_size must be divisible by actor.ppo_mini_batch_size"
-        )
+        raise ValueError(f"{name} requires loss_agg_mode=seq-mean-token-sum")
 ```
 
-After the custom registry alias is normalized to `"sync"` semantics, the trainer
-also requires `parameter_sync_step == 1`. The schedule is defined per synchronous
-`_step_once`; multi-trigger asynchronous schedules are outside this contract.
+Once the base trainer has resolved `parameter_sync_step`, `M` must also come out an
+integer, which is where the divisibility of `data.train_batch_size` is checked.
 
-These checks match the two end-to-end-tested AgentCore example scripts.
+Every trainer except `PPOTrainerSeparateAsync` additionally requires
+`parameter_sync_step == 1`: both the sync and colocate-async trainers sleep their rollout
+engines in `on_sample_end` for the whole training pass, so a second trigger would block
+forever on generation that can no longer happen. Only the separate-async trainer, whose
+standalone rollout servers keep serving through training, accepts any
+`parameter_sync_step`.
+
+These checks match the end-to-end-tested AgentCore example scripts.
 They do not reject unrelated actor features such as FSDP versus Megatron, LoRA, reference
 policy/KL, rollout correction, dynamic micro-batching, or `ppo_epochs >= 1`.
 
@@ -369,29 +383,61 @@ policy/KL, rollout correction, dynamic micro-batching, or `ppo_epochs >= 1`.
 ### Public interface to use: trainer registry
 
 verl's registry accepts any `PPOTrainer` subclass, but the concrete lifecycle contract is
-mode-specific. `AgentCorePPOTrainerSync` subclasses and registers `PPOTrainerSync`:
+mode-specific. The batching overrides therefore live in a mixin that is layered onto
+whichever v1 trainer a recipe needs, ahead of it in the bases. One registered name per verl
+v1 trainer lives in `backends/verl/trainer.py`, each also carrying this package's metric
+mixins, since every AgentCore recipe wants the same set:
 
 ```python
 from omegaconf import open_dict
 from verl.trainer.ppo.v1 import PPOTrainerSync, register_trainer
 
+from .trainer_mixins import (
+    AdvantageZeroMetricsMixin,
+    AgentLoopMetricsMixin,
+    VariableRowBatchingMixin,
+)
 
-@register_trainer("agentcore_sync")
-class AgentCorePPOTrainerSync(PPOTrainerSync):
+
+class _AgentCoreTrainerBase:
+    """An ``agentcore_*`` name is a registry alias; write verl's own mode back."""
+
+    _verl_trainer_mode: str
+
     def __init__(self, config):
-        # "agentcore_sync" is a registry selection alias. Internally this trainer
-        # must retain verl's sync replay-buffer and dataloader semantics.
         with open_dict(config):
-            config.trainer.v1.trainer_mode = "sync"
+            config.trainer.v1.trainer_mode = self._verl_trainer_mode
         super().__init__(config)
 
-    # Override only the batching/update seams described below.
+
+@register_trainer("agentcore_sync")
+class AgentCorePPOTrainerSync(
+    _AgentCoreTrainerBase,
+    AgentLoopMetricsMixin,
+    AdvantageZeroMetricsMixin,
+    VariableRowBatchingMixin,
+    PPOTrainerSync,
+):
+    _verl_trainer_mode = "sync"
+
+    # The mixins override only the batching/update/metric seams described below.
 ```
 
-The normalization to `"sync"` is necessary in verl 0.9.0 because the base trainer uses the
+`agentcore_colocate_async` and `agentcore_separate_async` are the same three lines over
+`PPOTrainerColocateAsync` and `PPOTrainerSeparateAsync`.
+
+The mode normalization is necessary in verl 0.9.0 because the base trainer compares the
 literal mode string to select `ReplayBuffer` versus `ReplayBufferAsync`, exact-refill
-behavior, and mode-specific config. The custom registry name is only a lookup key; runtime
-semantics remain synchronous.
+behavior, async prompt persistence, TransferQueue checkpointing, and the
+`trainer.v1.<mode>` node it reads `parameter_sync_step` from. A registry name that is not
+one of verl's own would silently pick the async branches, so each subclass declares the
+verl mode it actually is. That also removes the need for recipes to alias config nodes
+(e.g. an `art_separate_async: ${trainer.v1.separate_async}` entry) just so the base trainer
+can find its own settings.
+
+The recipes that drive `RolloutSessionAgentLoop` currently collapse a session to its single
+highest-loss-mass record, so the mechanism is numerically inert for them today; it is what
+keeps the optimizer schedule fixed once that loop emits every record.
 
 ### Trainer registration through verl external modules
 
@@ -433,7 +479,7 @@ The trainer registry expresses the ownership correctly and is easier to test.
 
 ### Trainer override surface
 
-The custom subclass overrides only:
+The mixin overrides only:
 
 - `_get_required_batch_multiple(dp_size)` — return
   `dp_size * actor_num_mini_batches`;
@@ -457,9 +503,13 @@ replaced.
 
 ## Implementation surface
 
-- `src/agentcore_rl_toolkit/backends/verl/trainer.py` contains
-  `AgentCorePPOTrainerSync`, configuration validation, the batching overrides,
-  metrics, and external-module registration.
+- `src/agentcore_rl_toolkit/backends/verl/trainer_mixins/variable_row_batching.py` contains
+  `VariableRowBatchingMixin`: configuration validation, the batching overrides, and the
+  batching metrics. Its siblings in that package are the metric mixins.
+- `src/agentcore_rl_toolkit/backends/verl/trainer.py` is the one definition file: it
+  registers `agentcore_sync`, `agentcore_colocate_async`, and `agentcore_separate_async`,
+  each layering the three mixins onto the corresponding verl v1 trainer, and is the module
+  recipes name in `VERL_USE_EXTERNAL_MODULES`.
 - `tests/backends/verl/test_training_worker_batching.py` exercises the installed
   verl worker's real mini-batch iterator.
 - `tests/backends/verl/test_trainer_batching.py` covers trainer metadata,
@@ -479,8 +529,9 @@ Automated coverage lives in:
   which exercises the installed verl worker's mini-batch iteration across
   different row counts and epochs;
 - [`test_trainer_batching.py`](../tests/backends/verl/test_trainer_batching.py),
-  which covers trainer registration, configuration constraints, batching
-  metadata, and dynamic metrics.
+  which covers trainer registration, registry-alias normalization, configuration
+  constraints, batching metadata, and dynamic metrics, for all three `agentcore_*`
+  modes (including a separate-async case where `parameter_sync_step > 1`).
 
 ### End-to-end validation
 
@@ -515,11 +566,14 @@ metrics.
 
 ## Compatibility
 
-- The behavior is enabled by selecting
-  `trainer.v1.trainer_mode=agentcore_sync` through
+- The behavior is enabled by selecting one of the `agentcore_*` trainer modes through
   `VERL_USE_EXTERNAL_MODULES`; verl's built-in trainer modes are unchanged.
-- The supported contract is actor-only synchronous training with distillation
-  disabled, `parameter_sync_step=1`, and
-  `loss_agg_mode=seq-mean-token-sum`.
+- The supported contract is actor-only training with distillation disabled and
+  `loss_agg_mode=seq-mean-token-sum`, in any of verl's three v1 trainer modes.
+  `parameter_sync_step` must be 1 in every mode but separate-async.
+- Layering the mixin onto the previously unvalidated async modes narrows what they accept: a
+  critic, distillation, or any other `loss_agg_mode` (e.g. Dr. GRPO's
+  `seq-mean-token-sum-norm`) now fails at startup rather than training under a
+  denominator the fixed partition count does not preserve.
 - The implementation targets `verl==0.9.0`. A version bump must run the trainer
   contract tests, especially the copied `_update_actor` metadata path.

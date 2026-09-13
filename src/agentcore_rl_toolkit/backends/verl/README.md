@@ -4,33 +4,75 @@ Train agents deployed on Bedrock AgentCore Runtime (ACR) with [verl](https://git
 using the in-repo [rollout gateway](../../rollout_gateway/) for token-level trajectory
 capture.
 
-The integration uses verl's public v1 agent-loop interface. verl's built-in
-`trainer.v1.trainer_mode=sync` works when every rollout is guaranteed to produce
-exactly one training row. Use `agentcore_sync` when a rollout may produce
-multiple training rows. The example training scripts register it by setting
-`VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer` before
-running `python -m verl.trainer.main_ppo`. verl imports the external module in
-the driver and inherited Ray actor environments before its process-local trainer
-lookup. Replay buffering, filtering, checkpointing, rollout correction, worker
-execution, and data-parallel balancing remain verl-owned.
+The integration uses verl's public v1 agent-loop interface. Replay buffering,
+filtering, checkpointing, rollout correction, worker execution, and data-parallel
+balancing remain verl-owned.
 
-`agentcore_sync` is the variable-row trainer: it keeps the configured actor
-optimizer schedule stable when one rollout expands into a variable number of
-trajectory rows. If
-`M = data.train_batch_size / actor.ppo_mini_batch_size`, the trainer pads only to
-`actor_data_parallel_size * M` and sends `num_mini_batch=M` to the actor worker.
-Expanded row count can therefore change the number of rows in each mini-batch
-without silently creating additional optimizer steps.
+## Trainer modes
 
-`agentcore_sync` supports v1 actor-only synchronous training with distillation
-disabled, `parameter_sync_step=1`, and
-`loss_agg_mode=seq-mean-token-sum`. Unsupported configurations fail at startup.
-The loss mode ensures that expanded rows add token-loss mass without replacing
-the configured pre-expansion denominator; other aggregation modes change that
-normalization or weighting. With `M=1`, all emitted rows are optimized
-together. With `M > 1`, rows from one rollout may cross optimizer steps,
-although the configured step count and additive weighting within each step
-remain stable. See the
+verl's built-in `trainer.v1.trainer_mode` values work when every rollout is
+guaranteed to produce exactly one training row. `trainer.py` registers one
+`agentcore_*` name per verl v1 backend for the case where a rollout may produce
+several rows, and for AgentCore-specific observability:
+
+| `trainer.v1.trainer_mode` | wraps verl's |
+|---|---|
+| `agentcore_sync` | `sync` |
+| `agentcore_colocate_async` | `colocate_async` |
+| `agentcore_separate_async` | `separate_async` |
+
+Each is that verl trainer plus three mixins from
+[`trainer_mixins/`](trainer_mixins/) — `VariableRowBatchingMixin` (below),
+`AgentLoopMetricsMixin` (agent-reported metrics as tracker series and
+`reward_extra_info`), and `AdvantageZeroMetricsMixin` (collapsed-GRPO-group
+accounting). An `agentcore_*` name is only a registry key: the trainer writes
+verl's own mode string back into `trainer.v1.trainer_mode` before the base
+trainer initializes, because `PPOTrainer` compares that string literally to pick
+the replay buffer, refill semantics, and the `trainer.v1.<mode>` config node it
+reads `parameter_sync_step` from.
+
+Register the modes by naming the module in `VERL_USE_EXTERNAL_MODULES` before
+running `python -m verl.trainer.main_ppo`:
+
+```bash
+export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
+```
+
+verl imports the external module in the driver and inherited Ray actor
+environments before its process-local trainer lookup. On a cluster started with
+`ray start`, the variable must already be in each node's environment — verl does
+not forward it.
+
+### Variable-row batching
+
+`VariableRowBatchingMixin` keeps the configured actor optimizer schedule stable
+when one rollout expands into a variable number of trajectory rows. verl's `step`
+splits a training batch into `parameter_sync_step` `sample -> update` triggers, so
+with
+
+```
+M = data.train_batch_size / parameter_sync_step / actor.ppo_mini_batch_size
+```
+
+the trainer pads only to `actor_data_parallel_size * M` and sends
+`num_mini_batch=M` to the actor worker instead of verl's fixed
+`mini_batch_size`. The expanded row count can therefore change the number of rows
+in each mini-batch without silently creating additional optimizer steps. `M`
+reduces to `train_batch_size / ppo_mini_batch_size` for `agentcore_sync` and
+`agentcore_colocate_async` (both held to `parameter_sync_step=1`) and to `1` for
+`agentcore_separate_async`, which verl requires to satisfy
+`train_batch_size == parameter_sync_step * ppo_mini_batch_size`.
+
+Every `agentcore_*` mode requires v1 actor-only training with distillation
+disabled and `loss_agg_mode=seq-mean-token-sum`; the colocated modes additionally
+require `parameter_sync_step=1`, since they sleep their rollout engines for the
+whole training pass and a second trigger would wait forever. Unsupported
+configurations fail at startup. The loss mode ensures that expanded rows add
+token-loss mass without replacing the configured pre-expansion denominator; other
+aggregation modes change that normalization or weighting. With `M=1`, all emitted
+rows are optimized together. With `M > 1`, rows from one rollout may cross
+optimizer steps, although the configured step count and additive weighting within
+each step remain stable. See the
 [variable-row batching design](../../../../designs/verl_variable_trajectory_batching.md)
 for the derivation.
 
@@ -175,8 +217,13 @@ edit the YAML or use `${oc.env:...}` interpolation.
 
 ## Trainer observability
 
-`agentcore_sync` logs `batching/real_rows`, `batching/total_rows`,
-`batching/padding_rows`, and `training/rollout_failure/missing_sessions`.
+Every `agentcore_*` mode logs, per actor update, `batching/real_rows`,
+`batching/total_rows`, `batching/padding_rows`, and
+`training/rollout_failure/missing_sessions` (nominal rollouts for the trigger minus
+the distinct sessions actually seen). The metric mixins add
+`agent_loop/<name>/{mean,min,max,sum}` for every metric an agent loop reports
+through `AgentLoopOutput.extra_fields`, plus `critic/advantages/zero_mean` and
+`critic/advantages/zero_pass_mean` for collapsed GRPO groups.
 
 ## Token budgets
 

@@ -1,104 +1,85 @@
-"""verl v1 sync trainer for variable-row AgentCore rollouts."""
+"""verl's three v1 PPO backends plus this package's mixins, one registered name each.
+
+Every AgentCore recipe wants the same three mixins -- its agent loop reports metrics
+through ``AgentLoopOutput.extra_fields``, produces GRPO groups that can collapse, and may
+emit a variable number of training rows per rollout -- so the registrations live here
+rather than in one recipe. Name this module in ``VERL_USE_EXTERNAL_MODULES`` to make the
+``agentcore_*`` trainer modes available, in the driver and on every node.
+
+Must stay importable by any verl worker: no driver-only imports at module scope.
+"""
 
 from omegaconf import DictConfig, open_dict
-from tensordict import TensorDict
-from transfer_queue import KVBatchMeta
-from verl.trainer.distillation import is_distillation_enabled
-from verl.trainer.ppo.utils import need_critic
-from verl.trainer.ppo.v1 import PPOTrainerSync, register_trainer
-from verl.utils.metric import reduce_metrics
-from verl.utils.py_functional import rename_dict
+from verl.trainer.ppo.v1 import (
+    PPOTrainerColocateAsync,
+    PPOTrainerSeparateAsync,
+    PPOTrainerSync,
+    register_trainer,
+)
+
+from .trainer_mixins import (
+    AdvantageZeroMetricsMixin,
+    AgentLoopMetricsMixin,
+    VariableRowBatchingMixin,
+)
+
+__all__ = [
+    "AgentCorePPOTrainerColocateAsync",
+    "AgentCorePPOTrainerSeparateAsync",
+    "AgentCorePPOTrainerSync",
+]
 
 
-def _num_mini_batches(config: DictConfig) -> int:
-    train_batch_size = config.data.train_batch_size
-    ppo_mini_batch_size = config.actor_rollout_ref.actor.ppo_mini_batch_size
-    if train_batch_size % ppo_mini_batch_size:
-        raise ValueError("data.train_batch_size must be divisible by actor.ppo_mini_batch_size")
-    return train_batch_size // ppo_mini_batch_size
+class _AgentCoreTrainerBase:
+    """Normalizes the registry alias back to the verl trainer mode it wraps.
 
+    An ``agentcore_*`` name is only a lookup key for ``register_trainer``, but
+    ``PPOTrainer`` compares ``trainer.v1.trainer_mode`` *literally* to pick ``ReplayBuffer``
+    over ``ReplayBufferAsync``, exact-refill behavior, async prompt persistence, TransferQueue
+    checkpointing, and the ``trainer.v1.<mode>`` config node ``parameter_sync_step`` is read
+    from. So each subclass declares which verl mode it actually is and writes it back before
+    the base trainer initializes.
+    """
 
-def _validate_config(config: DictConfig) -> None:
-    if not config.trainer.use_v1:
-        raise ValueError("agentcore_sync requires trainer.use_v1=true")
-    if need_critic(config):
-        raise ValueError("agentcore_sync supports only actor-only training")
-    if is_distillation_enabled(config.get("distillation")):
-        raise ValueError("agentcore_sync does not support distillation")
-    # Keep expanded rows additive: sum their token losses, but normalize by the
-    # configured pre-expansion mini-batch size rather than the expanded row or
-    # token count. See the variable-row batching contract in README.md.
-    if config.actor_rollout_ref.actor.loss_agg_mode != "seq-mean-token-sum":
-        raise ValueError("agentcore_sync requires loss_agg_mode=seq-mean-token-sum")
-
-    _num_mini_batches(config)
-
-
-@register_trainer("agentcore_sync")
-class AgentCorePPOTrainerSync(PPOTrainerSync):
-    """Sync trainer whose optimizer-step count is stable under row expansion."""
+    # Set by each concrete trainer below.
+    _verl_trainer_mode: str
 
     def __init__(self, config: DictConfig):
-        _validate_config(config)
         with open_dict(config):
-            config.trainer.v1.trainer_mode = "sync"
+            config.trainer.v1.trainer_mode = self._verl_trainer_mode
         super().__init__(config)
-        if self.parameter_sync_step != 1:
-            raise ValueError("agentcore_sync requires parameter_sync_step=1")
-        self._num_actor_mini_batches = _num_mini_batches(self.config)
 
-    def _get_required_batch_multiple(self, dp_size: int) -> int:
-        return dp_size * self._num_actor_mini_batches
 
-    def _update_actor(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
-        """Mirror verl's actor-update path, using a fixed mini-batch count."""
+# One registered name per verl backend. VariableRowBatchingMixin comes last of the mixins so
+# it stays closest to the trainer whose batching seams it overrides.
+@register_trainer("agentcore_sync")
+class AgentCorePPOTrainerSync(
+    _AgentCoreTrainerBase,
+    AgentLoopMetricsMixin,
+    AdvantageZeroMetricsMixin,
+    VariableRowBatchingMixin,
+    PPOTrainerSync,
+):
+    _verl_trainer_mode = "sync"
 
-        # Keep aligned with PPOTrainer._update_actor in verl 0.9.0.
-        global_batch_size = (
-            self.config.actor_rollout_ref.actor.ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
-        )
-        calculate_entropy = self.config.actor_rollout_ref.actor.calculate_entropy or (
-            self.config.actor_rollout_ref.actor.entropy_coeff != 0.0
-        )
-        extra_info = {
-            "calculate_entropy": calculate_entropy,
-            "distillation_use_topk": False,
-            "distillation_only": False,
-            "global_batch_size": global_batch_size,
-            "epochs": self.config.actor_rollout_ref.actor.ppo_epochs,
-            "seed": self.config.actor_rollout_ref.actor.data_loader_seed,
-            "dataloader_kwargs": {"shuffle": self.config.actor_rollout_ref.actor.shuffle},
-            "temperature": self.config.actor_rollout_ref.rollout.temperature,
-        }
 
-        # AgentCore change: fix the number of optimizer partitions instead of
-        # fixing their row size, so rollout row expansion does not add steps.
-        extra_info["num_mini_batch"] = self._num_actor_mini_batches
-        batch.extra_info.update(extra_info)
+@register_trainer("agentcore_colocate_async")
+class AgentCorePPOTrainerColocateAsync(
+    _AgentCoreTrainerBase,
+    AgentLoopMetricsMixin,
+    AdvantageZeroMetricsMixin,
+    VariableRowBatchingMixin,
+    PPOTrainerColocateAsync,
+):
+    _verl_trainer_mode = "colocate_async"
 
-        # Keep aligned with verl's worker call and metric handling.
-        output: TensorDict = self.actor_rollout_wg.update_actor(batch)
-        output = rename_dict(output["metrics"], "actor/")
-        output["perf/mfu/actor"] = output.pop("actor/mfu")
-        metrics.update(reduce_metrics(output))
 
-        # AgentCore-specific update metrics.
-        total_rows = len(batch.tags)
-        padding_rows = sum(tag.get("is_padding", False) for tag in batch.tags)
-        # ReplayBuffer keys are {uid}_{session_id}_{trajectory_index}; multiple
-        # trajectory rows from one rollout session count once.
-        actual_sessions = {
-            tuple(key.rsplit("_", 2)[:2])
-            for key, tag in zip(batch.keys, batch.tags, strict=True)
-            if not tag.get("is_padding", False)
-        }
-        expected_sessions = self.config.data.train_batch_size * self.config.actor_rollout_ref.rollout.n
-        metrics.update(
-            {
-                "batching/real_rows": total_rows - padding_rows,
-                "batching/total_rows": total_rows,
-                "batching/padding_rows": padding_rows,
-                "training/rollout_failure/missing_sessions": expected_sessions - len(actual_sessions),
-            }
-        )
-        return batch
+@register_trainer("agentcore_separate_async")
+class AgentCorePPOTrainerSeparateAsync(
+    _AgentCoreTrainerBase,
+    AgentLoopMetricsMixin,
+    AdvantageZeroMetricsMixin,
+    VariableRowBatchingMixin,
+    PPOTrainerSeparateAsync,
+):
+    _verl_trainer_mode = "separate_async"
