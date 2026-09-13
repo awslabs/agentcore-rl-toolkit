@@ -145,11 +145,10 @@ async def test_bearer_sid_isolates_sessions():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("history_mode", ["tree", "linear"])
-async def test_chat_template_kwargs_reach_renderer(history_mode):
+async def test_chat_template_kwargs_reach_renderer():
     renderer = FakeRenderer()
     backend = FakeBackend(renderer, replies=["four", "four"])
-    adapter = OpenAIAdapter(backend=backend, renderer=renderer, tokenizer=None, history_mode=history_mode)
+    adapter = OpenAIAdapter(backend=backend, renderer=renderer, tokenizer=None)
 
     server = TestServer(adapter.app)
     client = TestClient(server)

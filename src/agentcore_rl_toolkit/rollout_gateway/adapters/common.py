@@ -368,15 +368,13 @@ class BaseAdapter:
             if self.healer is not None:
                 # linear mode: splice canonical served ids over the drifted re-render
                 # before generation (the healer does the render internally).
-                prompt_ids = await self.healer.heal(
-                    sid, translated, tools_schema, chat_template_kwargs=chat_template_kwargs
-                )
+                prompt_ids = await self.healer.heal(sid, translated, tools_schema)
             else:
                 prompt_ids = await self.renderer.render(
                     translated,
                     tools=tools_schema,
                     add_generation_prompt=True,
-                    chat_template_kwargs=chat_template_kwargs,
+                    **({"chat_template_kwargs": chat_template_kwargs} if chat_template_kwargs else {}),
                 )
 
             if sid in self.closed:

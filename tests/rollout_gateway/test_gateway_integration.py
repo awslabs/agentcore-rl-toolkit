@@ -35,7 +35,7 @@ class FakeRenderer:
         inv = {v: k for k, v in self.vocab.items()}
         return " ".join(inv.get(i, "?") for i in ids)
 
-    async def render(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None):
+    async def render(self, messages, *, tools=None, add_generation_prompt=True):
         ids: list[int] = []
         for m in messages:
             ids += self._encode(f"{m['role']}:")

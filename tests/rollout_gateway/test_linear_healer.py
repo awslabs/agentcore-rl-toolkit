@@ -64,7 +64,7 @@ class FakeRenderer:
             return ids
         raise AssertionError(f"unexpected role {role!r}")
 
-    async def render(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None) -> list[int]:
+    async def render(self, messages, *, tools=None, add_generation_prompt=True) -> list[int]:
         out: list[int] = []
         for m in messages:
             out += self._block(m)
