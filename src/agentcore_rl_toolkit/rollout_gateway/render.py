@@ -28,7 +28,6 @@ Rendering implementations:
 """
 
 import dataclasses
-import hashlib
 import logging
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
@@ -42,10 +41,6 @@ from .response_schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Exact Qwen3-Coder template whose between-turn suffix is independent of history.
-# A shared response-parser schema is not sufficient to establish this contract.
-_QWEN_CODER_TEMPLATE = "5a38bfa05833266240066aedc497decc9b00cc0d3e3b8cceea98cf530196ab06"
 
 # The two derender stages, as injectable callables:
 #   ReasoningParser: raw_output -> (reasoning, body_text)
@@ -76,8 +71,6 @@ class Renderer(Protocol):
                              (e.g. ``enable_thinking``) from the client's request body
     ``get_stop_sequences`` : stop strings / token ids for sampling
     ``parse``              : sampled response ``token_ids`` -> :class:`ParsedOutput`
-
-    Renderers may also expose ``render_delta`` for incremental linear healing.
     """
 
     async def render(
@@ -176,8 +169,6 @@ class HfTemplateRenderer:
             if schema_name is not None:
                 self._schema = RESPONSE_SCHEMAS[schema_name]
 
-        self._close_ids: list[int] | None = None
-
     def _render_text(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None) -> str:
         return self.tokenizer.apply_chat_template(
             self._rekey_reasoning(messages),
@@ -254,43 +245,6 @@ class HfTemplateRenderer:
             add_special_tokens=False,
             **(tokenizer_kwargs if tokenizer_kwargs is not None else {}),
         )
-
-    async def render_delta(
-        self, last_assistant, new_messages, *, tools=None, chat_template_kwargs=None
-    ) -> tuple[list[int], list[int]] | None:
-        """Return (assistant closer, new tail), or None for the full-healer fallback."""
-        template = self._chat_template or self.tokenizer.chat_template
-        kwargs = {**self._chat_template_kwargs, **(chat_template_kwargs or {})}
-        # Only use templates verified to preserve the new tail when full history
-        # is replaced by the dummy history below. The hardcoded "<|im_end|>\n"
-        # assistant closer is template-specific, not universal. Other templates
-        # may use different closers or depend on earlier messages; fall back to
-        # full-history healing unless both assumptions have been verified.
-        if (
-            not isinstance(template, str)
-            or hashlib.sha256(template.encode()).hexdigest() != _QWEN_CODER_TEMPLATE
-            or kwargs.keys() - {"enable_thinking"}
-            or last_assistant.get("role") != "assistant"
-        ):
-            return None
-        # The verified template only needs the previous role/tool-call boundary.
-        # Render all consecutive tool results together to preserve their grouping.
-        dummy = [
-            {"role": "system", "content": "dummy system"},
-            {
-                "role": "assistant",
-                "content": "",
-                "reasoning_content": " ",
-                "tool_calls": last_assistant.get("tool_calls") or [],
-            },
-        ]
-        before = self._render_text(dummy, tools=tools, add_generation_prompt=False, chat_template_kwargs=kwargs)
-        after = self._render_text(dummy + new_messages, tools=tools, chat_template_kwargs=kwargs)
-        if not after.startswith(before):
-            return None
-        if self._close_ids is None:
-            self._close_ids = await self._encode("<|im_end|>\n")
-        return self._close_ids, await self._encode(after[len(before) :])
 
     def _rekey_reasoning(self, messages: list[dict]) -> list[dict]:
         """Move assistant ``reasoning_content`` to the key this template reads.

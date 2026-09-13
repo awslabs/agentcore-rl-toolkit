@@ -7,7 +7,6 @@ covered in test_response_schemas.py; this module covers the two-stage fallback.
 """
 
 import asyncio
-import hashlib
 import sys
 from unittest.mock import patch
 
@@ -302,43 +301,3 @@ async def test_async_render_preserves_hf_validation(fast_tokenizer, options):
     with pytest.raises(ValueError) as actual:
         await renderer.render(messages, chat_template_kwargs=options)
     assert str(actual.value) == str(expected.value)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("ending", ["", "<|im_end|>", "<|im_end|>\n", "<|endoftext|>"])
-async def test_incremental_tokens_equal_full_healing_and_preserve_sampled_prefix(fast_tokenizer, monkeypatch, ending):
-    from agentcore_rl_toolkit.rollout_gateway import render
-    from agentcore_rl_toolkit.rollout_gateway.linear import LinearHealer
-
-    # This tiny template has the same tested closer contract. Production admission
-    # is hash-gated; the actual Qwen template/BPE is also exercised in local replay.
-    monkeypatch.setattr(
-        render, "_QWEN_CODER_TEMPLATE", hashlib.sha256(fast_tokenizer.chat_template.encode()).hexdigest()
-    )
-    incremental = HfTemplateRenderer(fast_tokenizer)
-    full = HfTemplateRenderer(fast_tokenizer)
-    full.render_delta = None
-    prior = [{"role": "user", "content": "old context" * 100}]
-    last = {"role": "assistant", "content": "Client-replayed text"}
-    new = [{"role": "tool", "content": "中文 <extra>"}, {"role": "tool", "content": "second result"}]
-    seed = fast_tokenizer.apply_chat_template(prior, tokenize=True, add_generation_prompt=True, return_dict=False)
-    output = fast_tokenizer.encode("Raw  sampled tokens." + ending, add_special_tokens=False)
-    hs = [LinearHealer(r) for r in (incremental, full)]
-    for h in hs:
-        h.commit("s", fed_prompt_ids=seed, output_ids=output, messages=prior, response_message=last, tools=None)
-
-    # Normal append must not call full render on the incremental renderer.
-    async def no_full_render(*args, **kwargs):
-        raise AssertionError("re-encoded full history")
-
-    incremental.render = no_full_render
-    actual = await hs[0].heal("s", prior + [last] + new, None)
-    assert actual == await hs[1].heal("s", prior + [last] + new, None)
-    assert actual[: len(seed) + len(output)] == seed + output
-
-
-@pytest.mark.asyncio
-async def test_unknown_template_does_not_use_parser_schema_as_incremental_contract(fast_tokenizer):
-    renderer = HfTemplateRenderer(fast_tokenizer)
-    renderer._schema = {"same": "parser"}
-    assert await renderer.render_delta({"role": "assistant", "content": "x"}, []) is None

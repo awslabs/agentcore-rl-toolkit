@@ -24,11 +24,7 @@ Per turn the healer holds, per sid:
 * ``prev_messages`` / ``prev_tools`` — the message list (including the generated assistant)
   and tools schema last rendered, used to re-derive the drifted skeleton.
 
-Healing ``messages`` for the next turn (``await heal(...)``) first checks message
-and tools continuity. A renderer with a verified ``render_delta`` contract supplies
-the closer and encodes only the new observation suffix. The
-canonical served prefix is never re-encoded. Other templates use this full-render
-fallback, awaiting the renderer's ``render`` method:
+Healing ``messages`` for the next turn (``await heal(...)``):
 
 1. Linearity check at the **message level**: ``prev_messages`` must be a prefix of the
    incoming ``messages`` under dict equality (``==``, which is order-independent), and the
@@ -173,18 +169,6 @@ class LinearHealer:
             )
             return self._handle_nonlinear(sid, r_full)
 
-        render_delta = getattr(self.renderer, "render_delta", None)
-        delta = (
-            await render_delta(
-                st.prev_messages[-1], new, tools=st.prev_tools, chat_template_kwargs=chat_template_kwargs
-            )
-            if render_delta is not None
-            else None
-        )
-        if delta is not None:
-            close, tail = delta
-            return self._splice(sid, st, close, tail)
-
         # r_prev is the token-space render of the gateway's OWN stored history. r_ext extends
         # that same stored prefix by only the genuinely-new (non-assistant, drift-free)
         # messages, so r_ext starts with r_prev by construction (identical prefix list and
@@ -214,9 +198,6 @@ class LinearHealer:
             self._bump(sid, "close_unresolved")
             return self._handle_nonlinear(sid, r_ext)
 
-        return self._splice(sid, st, close, r_ext[len(r_prev) :])
-
-    def _splice(self, sid: str, st: _State, close: list[int], tail: list[int]) -> list[int]:
         # don't duplicate close tokens the model already emitted at the end of its served
         # output (e.g. a trailing stop token kept by no_stop_trim): drop the prefix of
         # `close` that the served prefix already ends with.
@@ -224,6 +205,8 @@ class LinearHealer:
 
         # tail is the token representation of the new messages in the incoming request
         # these are not assistant messages, so they are masked and drift-free
+        tail = r_ext[len(r_prev) :]  # new observation messages + generation prompt
+
         self._bump(sid, "healed_turns")
         self._bump(sid, "healed_prefix_tokens", len(st.served_prefix) + len(close))
 

@@ -130,12 +130,14 @@ dev = [
     { name = "pydantic" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "tokenizers" },
     { name = "transformers", version = "5.5.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-20-agentcore-rl-toolkit-rllm' or (extra == 'extra-20-agentcore-rl-toolkit-verl' and extra == 'group-20-agentcore-rl-toolkit-verl-ci') or (extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron')" },
     { name = "transformers", version = "5.12.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-20-agentcore-rl-toolkit-verl' or extra == 'group-20-agentcore-rl-toolkit-verl-ci' or extra == 'group-20-agentcore-rl-toolkit-verl-megatron' or extra != 'extra-20-agentcore-rl-toolkit-rllm'" },
 ]
 gateway = [
     { name = "aiohttp" },
     { name = "jmespath" },
+    { name = "tokenizers" },
     { name = "transformers", version = "5.5.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-20-agentcore-rl-toolkit-rllm' or (extra == 'extra-20-agentcore-rl-toolkit-verl' and extra == 'group-20-agentcore-rl-toolkit-verl-ci') or (extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron')" },
     { name = "transformers", version = "5.12.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-20-agentcore-rl-toolkit-verl' or extra == 'group-20-agentcore-rl-toolkit-verl-ci' or extra == 'group-20-agentcore-rl-toolkit-verl-megatron' or extra != 'extra-20-agentcore-rl-toolkit-rllm'" },
 ]
@@ -230,6 +232,8 @@ requires-dist = [
     { name = "ray", marker = "extra == 'verl'" },
     { name = "rllm", marker = "extra == 'rllm'", git = "https://github.com/rllm-org/rllm.git" },
     { name = "rllm-model-gateway", marker = "extra == 'slime'", specifier = ">=0.1.0" },
+    { name = "tokenizers", marker = "extra == 'dev'", specifier = ">=0.22.2" },
+    { name = "tokenizers", marker = "extra == 'gateway'", specifier = ">=0.22.2" },
     { name = "torch", marker = "extra == 'verl'", specifier = ">=2.10.0" },
     { name = "torchvision", marker = "extra == 'verl'", specifier = ">=0.23.0" },
     { name = "transferqueue", marker = "extra == 'verl'", specifier = "==0.1.8" },

@@ -39,6 +39,7 @@ dev = [
     # (>=5.0 matches the [gateway] extra: tokenizer.parse_response).
     "aiohttp>=3.9",
     "transformers>=5.0",
+    "tokenizers>=0.22.2",  # native async_encode used by the gateway renderer
     # openai: real-SDK wire-contract test for the gateway (Bearer-slot session capture).
     "openai>=1.0",
     # Runtime deps of agentcore_rl_toolkit.{aws_tools,rollout_session} rather than
@@ -63,6 +64,7 @@ gateway = [
     # transitively present via boto3 already, declared because the gateway relies on it.
     "aiohttp>=3.9",
     "transformers>=5.0",
+    "tokenizers>=0.22.2",  # native async_encode
     "jmespath>=1.0",
 ]
 # NOTE: the Tinker backend (TinkerSdkBackend + TinkerRenderer) needs `tinker` and
