@@ -6,7 +6,7 @@ calls. Owning both directions in one place makes loss-masking well-defined and
 eliminates cross-backend retokenization drift. It is also required for sample-only
 inference backends (e.g. Tinker) that cannot render themselves.
 
-Rendering implementations:
+Two implementations behind one :class:`Renderer` protocol:
 
 * :class:`HfTemplateRenderer` (default, lightweight) — renders with the HF tokenizer's
   ``apply_chat_template``. Derendering picks the strongest available path: when the

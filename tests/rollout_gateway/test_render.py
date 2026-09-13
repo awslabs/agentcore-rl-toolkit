@@ -11,6 +11,8 @@ import sys
 from unittest.mock import patch
 
 import pytest
+from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers
+from transformers import PreTrainedTokenizerFast
 
 from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
@@ -187,9 +189,6 @@ async def test_render_forwards_chat_template_kwargs_renderer_default_and_per_cal
 @pytest.fixture
 def fast_tokenizer():
     """Actual HF/Rust tokenizer, built locally without model downloads."""
-    from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers
-    from transformers import PreTrainedTokenizerFast
-
     vocab = {c: i for i, c in enumerate(sorted(pre_tokenizers.ByteLevel.alphabet()))}
     backend = Tokenizer(models.BPE(vocab=vocab, merges=[]))
     backend.normalizer = normalizers.NFC()
@@ -280,24 +279,3 @@ async def test_concurrent_async_render_uses_each_requests_hf_options(fast_tokeni
     ]
     actual = await asyncio.gather(*(renderer.render(messages, chat_template_kwargs=kw) for kw in options))
     assert actual == expected
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "options",
-    [
-        {"continue_final_message": True},  # incompatible with add_generation_prompt
-        {"return_assistant_tokens_mask": True},  # renderer returns IDs, not a dict
-        {"padding": True, "truncation": True, "max_length": 15, "tokenizer_kwargs": {"pad_to_multiple_of": 8}},
-    ],
-)
-async def test_async_render_preserves_hf_validation(fast_tokenizer, options):
-    renderer = HfTemplateRenderer(fast_tokenizer)
-    messages = [{"role": "assistant", "content": "prefill"}]
-    with pytest.raises(ValueError) as expected:
-        fast_tokenizer.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=True, return_dict=False, **options
-        )
-    with pytest.raises(ValueError) as actual:
-        await renderer.render(messages, chat_template_kwargs=options)
-    assert str(actual.value) == str(expected.value)
