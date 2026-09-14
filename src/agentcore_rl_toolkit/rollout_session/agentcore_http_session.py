@@ -91,9 +91,16 @@ class AgentCoreHttpSession(RolloutSession):
             await self.shutdown()
             return
         try:
-            await scope.aclose()
+            # The body's exception is handed to the stack, never dropped by `aclose()`'s
+            # implicit `(None, None, None)`: contextlib rewrites a failing callback's
+            # `__context__` to whatever exception it was given, so closing blind makes a
+            # teardown error *erase* the error that ended the rollout.
+            suppressed = await scope.__aexit__(exc_type, exc, tb)
         finally:
             self._client = None
+        # Neither the client context nor `shutdown` suppresses, and a session that
+        # swallowed the rollout's exception would report success for a failed rollout.
+        assert not suppressed, "the session scope must never suppress the rollout's exception"
 
     async def setup(self, task: dict) -> None:
         await self.session_state.update(

@@ -60,7 +60,7 @@ from agentcore_rl_toolkit.aws_tools.s3_tools import upload_object
 from agentcore_rl_toolkit.backends.verl.gateway_host import GatewayHandle, get_or_start_gateway
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
-from agentcore_rl_toolkit.rollout_session.exception_utils import exception_to_string
+from agentcore_rl_toolkit.rollout_session.exception_utils import describe_with_root_cause, exception_to_string
 from agentcore_rl_toolkit.rollout_session.factory import make_session
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
     RolloutSession,
@@ -311,7 +311,9 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                         ) or "the rollout produced no trainable trajectory"
                         logger.error(f"Failed rollout {self.session_id} in container: {exception}")
                 except Exception as e:
-                    logger.error(f"Failed rollout {self.session_id} in trainer: {e}", exc_info=e)
+                    logger.error(
+                        f"Failed rollout {self.session_id} in trainer: {describe_with_root_cause(e)}", exc_info=e
+                    )
                     exception = exception_to_string(e)
                     failure = e
 
