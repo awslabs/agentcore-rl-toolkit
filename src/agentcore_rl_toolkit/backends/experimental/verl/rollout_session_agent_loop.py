@@ -240,10 +240,6 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         # the session shares this loop's session_id and meta dict
         self.rollout_session: RolloutSession = self._make_session()
 
-        # One instance per rollout: the session id, the gateway capture key, the session
-        # record and the `verl_loop` span are all per-rollout state.
-        self._ran = False
-
     def _make_session(self) -> RolloutSession:
         return make_session(
             self.session_id,
@@ -281,14 +277,6 @@ class RolloutSessionAgentLoop(AgentLoopBase):
     # accepts AgentLoopOutput | list[AgentLoopOutput] (one row per trajectory-tree leaf);
     # __init__ asserts trainer.use_v1 accordingly.
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> list[AgentLoopOutput]:  # type: ignore[override]
-        if self._ran:
-            raise RuntimeError(
-                f"RolloutSessionAgentLoop.run was called twice on {self.session_id}. One instance "
-                "runs one rollout: the session id, its gateway capture key and its session record "
-                "are per-rollout state, so a second run would append to the first one's trajectory."
-            )
-        self._ran = True
-
         # Built before any container or session state exists: a task-contract violation is a
         # config error that would hit every rollout, so it raises here rather than being
         # absorbed by whatever on_rollout_failure does with a failed rollout.

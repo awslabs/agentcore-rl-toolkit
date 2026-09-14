@@ -465,15 +465,6 @@ async def test_a_task_without_a_task_id_raises_before_anything_runs():
     assert session.events == []
 
 
-async def test_run_is_one_shot():
-    """One instance holds one rollout's session id, capture key and session record."""
-    loop = make_loop()
-    await run_loop(loop)
-
-    with pytest.raises(RuntimeError, match="called twice"):
-        await run_loop(loop)
-
-
 # -- row conversion ------------------------------------------------------------
 
 
