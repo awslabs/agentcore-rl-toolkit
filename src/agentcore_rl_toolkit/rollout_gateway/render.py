@@ -42,11 +42,24 @@ from .response_schemas import (
 
 logger = logging.getLogger(__name__)
 
+# Distinct assistant bodies for probing template closers, shared with the full healer.
+_PROBE_A = "linprobe body alpha 00000"
+_PROBE_B = "linprobe body omega 99999"
+
 # The two derender stages, as injectable callables:
 #   ReasoningParser: raw_output -> (reasoning, body_text)
 #   ToolParser     : (body_text, tools_schema) -> (text, tool_uses, ill_formed)
 ReasoningParserFn = Callable[[str], tuple[str, str]]
 ToolParserFn = Callable[[str, list[dict]], tuple[str, list[dict[str, Any]], bool]]
+
+
+def _common_suffix(a: str | list[int], b: str | list[int]) -> str | list[int]:
+    """The longest common suffix of two strings or token-ID lists."""
+    limit = min(len(a), len(b))
+    i = 0
+    while i < limit and a[-1 - i] == b[-1 - i]:
+        i += 1
+    return a[len(a) - i :]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -245,6 +258,41 @@ class HfTemplateRenderer:
             add_special_tokens=False,
             **(tokenizer_kwargs if tokenizer_kwargs is not None else {}),
         )
+
+    async def render_delta(
+        self,
+        prev_messages: list[dict],
+        new_messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+    ) -> tuple[list[int], list[int]] | None:
+        """Render real history to text, encoding only its closer and appended tail.
+
+        ``prev_messages`` ends with the stored assistant message. Keeping real
+        history lets templates use earlier messages when formatting the new tail.
+        """
+        before = self._render_text(prev_messages, tools=tools, add_generation_prompt=False)
+        after = self._render_text(prev_messages + new_messages, tools=tools, add_generation_prompt=True)
+        if not after.startswith(before):
+            return None
+
+        # Probe with text bodies so a tool-call wrapper is not mistaken for the
+        # assistant closer.
+        a, b = [
+            self._render_text(
+                prev_messages[:-1] + [{"role": "assistant", "content": body}],
+                tools=tools,
+                add_generation_prompt=False,
+            )
+            for body in (_PROBE_A, _PROBE_B)
+        ]
+        close = _common_suffix(a, b)
+        if not before.endswith(close):
+            return None
+
+        # Slice the tail in text first; BPE merges across the boundary can change
+        # the token prefix even when the text prefix is unchanged.
+        return await self._encode(close), await self._encode(after[len(before) :])
 
     def _rekey_reasoning(self, messages: list[dict]) -> list[dict]:
         """Move assistant ``reasoning_content`` to the key this template reads.

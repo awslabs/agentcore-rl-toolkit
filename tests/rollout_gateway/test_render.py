@@ -14,6 +14,7 @@ import pytest
 from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers
 from transformers import PreTrainedTokenizerFast
 
+from agentcore_rl_toolkit.rollout_gateway import BaseTrace, LinearHealer, TrajectoryManager, TurnRecord
 from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
 
@@ -279,3 +280,160 @@ async def test_concurrent_async_render_uses_each_requests_hf_options(fast_tokeni
     ]
     actual = await asyncio.gather(*(renderer.render(messages, chat_template_kwargs=kw) for kw in options))
     assert actual == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closer", ["<|im_end|>", "<extra>"])
+@pytest.mark.parametrize("tool_call", [False, True])
+async def test_delta_uses_real_history_and_only_encodes_new_text(fast_tokenizer, closer, tool_call):
+    tok = fast_tokenizer
+    # Message numbers make dummy history produce a different suffix. The closer
+    # is a template variable, so neither template identity nor im_end can be assumed.
+    tok.chat_template = (
+        "{{ tools | tojson }}\n"
+        "{% for m in messages %}{{ '<|im_start|>' + m.role + '#' + (loop.index|string) + '\\n' + m.content }}"
+        "{% if m.tool_calls is defined %}{{ '<tool_call>' }}{{ m.tool_calls | tojson }}{{ '</tool_call>' }}{% endif %}"
+        "{{ turn_end + '\\n' }}{% endfor %}"
+        "{% if add_generation_prompt %}"
+        "{{ '<|im_start|>assistant#' + ((messages|length + 1)|string) + '\\n' }}{% endif %}"
+    )
+    renderer = HfTemplateRenderer(tok, chat_template_kwargs={"turn_end": closer})
+    assistant = {"role": "assistant", "content": "Inspecting."}
+    if tool_call:
+        assistant["tool_calls"] = [{"type": "function", "function": {"name": "x", "arguments": {"b": 2, "a": 1}}}]
+    history = [
+        {"role": "system", "content": "Help."},
+        {"role": "user", "content": "OLD_HISTORY " * 1000},
+        assistant,
+    ]
+    new = [{"role": "tool", "content": "中文🙂 e\u0301\r\n"}, {"role": "tool", "content": "Second result."}]
+    kw = dict(tools=TOOLS, turn_end=closer, tokenize=True, return_dict=False)
+    old_ids = tok.apply_chat_template(history, add_generation_prompt=False, **kw)
+    full_ids = tok.apply_chat_template(history + new, add_generation_prompt=True, **kw)
+    with patch.object(renderer, "_encode", wraps=renderer._encode) as encode:
+        result = await renderer.render_delta(history, new, tools=TOOLS)
+    assert result is not None
+    close_ids, tail_ids = result
+    assert close_ids == tok.encode(closer + "\n", add_special_tokens=False)
+    assert tail_ids == full_ids[len(old_ids) :]
+    assert "tool#4" in tok.decode(tail_ids) and "assistant#6" in tok.decode(tail_ids)
+    # The expensive encoding stage must never see the stored long history.
+    assert encode.await_count > 0
+    assert all("OLD_HISTORY" not in call.args[0] for call in encode.call_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["", "<|im_end|>", "<|im_end|>\n"])
+async def test_delta_healing_preserves_multiturn_tokens_and_training_masks(fast_tokenizer, ending):
+    tok = fast_tokenizer
+    renderer = HfTemplateRenderer(tok)
+    full_renderer = HfTemplateRenderer(tok)
+    full_renderer.render_delta = None  # Exercise the existing full-history oracle.
+    healers = [LinearHealer(renderer), LinearHealer(full_renderer)]
+    managers = [TrajectoryManager(fork_threshold_tokens=1) for _ in healers]
+    history = [{"role": "user", "content": "Inspect the project."}]
+    generated_ids = []
+    with patch.object(renderer, "render_delta", wraps=renderer.render_delta) as delta:
+        for i in range(3):
+            prompts = [await h.heal("s", history, None) for h in healers]
+            assert prompts[0] == prompts[1]
+            # Sampled text deliberately differs from the parsed/replayed message.
+            output = tok.encode(f"Actually generated  {i}" + ending, add_special_tokens=False)
+            generated_ids.extend(output)
+            response = {"role": "assistant", "content": f"Canonical message {i}"}
+            for h, manager, prompt in zip(healers, managers, prompts, strict=True):
+                h.commit(
+                    "s",
+                    fed_prompt_ids=prompt,
+                    output_ids=output,
+                    messages=history,
+                    response_message=response,
+                    tools=None,
+                )
+                manager.record_turn(
+                    "s",
+                    turn=TurnRecord(
+                        prompt_ids=prompt,
+                        output_ids=output,
+                        output_log_probs=[-0.1 * (i + 1)] * len(output),
+                        finish_reason="stop",
+                    ),
+                    prompt_messages=history,
+                    response_message=response,
+                )
+            history = history + [response, {"role": "tool", "content": f"Tool result {i}"}]
+    assert delta.await_count == 2
+    rows = [m.get_trajectory("s", base_sample=BaseTrace(), reward=1) for m in managers]
+    assert rows[0] == rows[1]
+    assert len(rows[0]) == 1
+    record = rows[0][0]
+    response_ids = record.token_ids[-len(record.loss_mask) :]
+    assert [tid for tid, mask in zip(response_ids, record.loss_mask, strict=True) if mask] == generated_ids
+    assert all(h.counters["nonlinear"] == 0 for h in healers)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["prefix_changed", "closer_changed"])
+async def test_delta_declines_unsafe_template_and_preserves_fallback(fast_tokenizer, reason):
+    tok = fast_tokenizer
+    if reason == "prefix_changed":
+        tok.chat_template = "{{ messages | length }}\n" + tok.chat_template
+    else:
+        tok.chat_template = tok.chat_template.replace(
+            "'<|im_end|>\\n'", "('<extra>\\n' if m.tool_calls is defined else '<|im_end|>\\n')"
+        )
+    renderer = HfTemplateRenderer(tok)
+    oracle = HfTemplateRenderer(tok)
+    oracle.render_delta = None
+    prior = [{"role": "user", "content": "q"}]
+    last = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"type": "function", "function": {"name": "x", "arguments": {}}}],
+    }
+    new = [{"role": "tool", "content": "result"}]
+    assert await renderer.render_delta(prior + [last], new) is None
+    seed = await renderer.render(prior)
+    healers = [LinearHealer(r) for r in (renderer, oracle)]
+    results = []
+    for h in healers:
+        h.commit("s", fed_prompt_ids=seed, output_ids=[42], messages=prior, response_message=last, tools=None)
+        results.append(await h.heal("s", prior + [last] + new, None))
+    assert results[0] == results[1]
+    assert healers[0].counters == healers[1].counters
+    assert healers[0].counters["nonlinear"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delta_keeps_served_prefix_when_bpe_can_merge_across_boundary():
+    vocab = {c: i for i, c in enumerate(sorted(pre_tokenizers.ByteLevel.alphabet()))}
+    vocab["ĊĊ"] = len(vocab)  # ByteLevel's representation of two newlines.
+    backend = Tokenizer(models.BPE(vocab=vocab, merges=[("Ċ", "Ċ")]))
+    backend.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    backend.decoder = decoders.ByteLevel()
+    tok = PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        eos_token="<|im_end|>",
+        additional_special_tokens=["<|im_start|>"],
+        chat_template=(
+            "{% for m in messages %}{{ '\\n<|im_start|>' + m.role + '\\n' + m.content + '<|im_end|>\\n' }}"
+            "{% endfor %}{% if add_generation_prompt %}{{ '\\n<|im_start|>assistant\\n' }}{% endif %}"
+        ),
+    )
+    r = HfTemplateRenderer(tok)
+    h = LinearHealer(r)
+    prior = [{"role": "user", "content": "q"}]
+    last = {"role": "assistant", "content": "answer"}
+    new = [{"role": "tool", "content": "result"}]
+    seed = await h.heal("s", prior, None)
+    output = tok.encode("answer<|im_end|>", add_special_tokens=False)
+    h.commit("s", fed_prompt_ids=seed, output_ids=output, messages=prior, response_message=last, tools=None)
+    actual = await h.heal("s", prior + [last] + new, None)
+    full = await r.render(prior + [last] + new)
+    # Separate newline tokens decode identically to the full encoder's merged
+    # newline token. This alone must not discard the actual generated prefix.
+    assert actual != full
+    assert tok.decode(actual) == tok.decode(full)
+    assert actual[: len(seed + output)] == seed + output
+    assert h.counters["healed_turns"] == 1
+    assert h.counters["nonlinear"] == 0

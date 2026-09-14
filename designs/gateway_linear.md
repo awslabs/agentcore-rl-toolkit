@@ -5,7 +5,7 @@
 | Status | Accepted |
 | Implementation | Shipped |
 | Date | 2026-08-31 |
-| Pull request | [#119](https://github.com/awslabs/agentcore-rl-toolkit/pull/119) |
+| Pull request | [#119](https://github.com/awslabs/agentcore-rl-toolkit/pull/119), [#142](https://github.com/awslabs/agentcore-rl-toolkit/pull/142) |
 
 ## Summary
 
@@ -29,12 +29,10 @@ the real Qwen3-Coder-30B tokenizer. Remaining follow-ups at the end.
 
 ## Motivation
 
-The gateway owns tokenization, so each turn it re-renders the whole conversation the agent
-replays. Chat templates are deterministic, so system/user/tool messages re-render to
-identical ids — but a prior **assistant** message rarely does: its served tokens came from
-generation, while on the next turn it is re-rendered from a parsed message dict
-(`text` + `tool_calls`) back through the template, yielding near-identical ids that differ
-in whitespace, tool-call JSON spacing, or reasoning re-keying. `TrajectoryManager`
+In tree mode, the gateway renders and encodes the whole conversation the agent replays.
+A prior **assistant** turn's served tokens came from generation; rendering and encoding
+its parsed message dict (`text` + `tool_calls`) can produce different IDs due to
+whitespace, tool-call JSON spacing, or reasoning re-keying. `TrajectoryManager`
 (`rollout_gateway/trajectory.py`) detects that drift and, to stay safe for harnesses that
 may branch or edit history, resolves it by FORK (split the rollout into a second sample) or
 REALIGN (drop a turn's signal).
@@ -47,8 +45,13 @@ trajectory, so it is a large, avoidable training-efficiency loss.
 
 ## Design
 
+**Template rendering** (`render_text` in pseudocode) converts messages to text via
+`apply_chat_template(..., tokenize=False)`. **Encoding**, also called tokenization,
+converts text to token IDs (`encode`). The APIs `Renderer.render()` and
+`HfTemplateRenderer.render_delta()` combine these steps and return token IDs.
+
 Because the gateway controls the tokens handed to the backend, it can splice the exact ids
-it already served for prior turns over the client's re-rendered version **before**
+it already served for prior turns over IDs recomputed from the client's messages **before**
 generation, so the model always generates on the canonical, drift-free context:
 
 ```
@@ -78,14 +81,25 @@ fed tokens:
 ```
 assert messages[:len(prev_messages)] == prev_messages and tools == prev_tools  # linearity check
 new        = messages[len(prev_messages):]
-r_prev     = render(prev_messages,       tools=prev_tools, add_generation_prompt=False)
-r_ext      = render(prev_messages + new, tools=prev_tools, add_generation_prompt=True)
-delta_tail = r_ext[len(r_prev):]                                               # new messages + generation prompt
+text_prev  = render_text(prev_messages,       tools=prev_tools, add_generation_prompt=False)
+text_ext   = render_text(prev_messages + new, tools=prev_tools, add_generation_prompt=True)
+assert text_ext.startswith(text_prev)
+delta_tail = encode(text_ext[len(text_prev):])  # new messages + generation prompt
 ```
 
-Both renders share the literal `prev_messages` prefix and the same tools, so `r_ext` starts
-with `r_prev` **by construction** — the prior turns are re-rendered from the gateway's
-canonical dicts, not the client's replay.
+Incremental healing renders four texts: the two histories above and two closer probes
+described below. Only the closer and new tail are encoded into token IDs.
+
+The tail is sliced from text because the same append boundary may not exist in token
+space. For example, the Qwen3-Coder tokenizer encodes `\n` as `[198]` but `\n\n` as
+`[271]`, so a newline on each side becomes one token when encoded together. Encoding
+the new newline separately lets the healer append it without changing `served_prefix`.
+
+If the text prefix or closer check fails, `render_delta()` returns `None`.
+`LinearHealer` then uses `Renderer.render()` to render and encode both histories
+(`r_prev`, `r_ext`), check their token prefix, and probe the closer in token space.
+Renderers without `render_delta()` also use this path. If full-history healing fails,
+`linear_on_nonlinear` determines whether to reset, raise, or disable healing.
 
 Deciding linearity at the message level (rather than by a raw token-prefix check on the
 client's render) is what keeps the healer in agreement with `TrajectoryManager`. A harness
@@ -96,20 +110,16 @@ A token-prefix check would wrongly flag that cosmetic re-serialization as non-li
 reset, needlessly. Matching at dict equality keeps cosmetic drift healed and reserves the
 non-linear path for a genuine edit/branch (see *When the assumption breaks*).
 
-This relies only on chat templates being prefix-consistent with
-`add_generation_prompt=False` (rendering `[m0..mk]` is a prefix of `[m0..mk, mk+1]`), which
-holds for turn-delimited templates such as Qwen and Llama-3.
-
 ### Isolating the assistant closer
 
 The canonical `served_prefix` ends at the model's last generated content; to rejoin it to
 `delta_tail` we reinsert the template's between-message glue (Qwen: `<|im_end|>\n`). That
-glue is **message-type independent** — the same after a text turn and a tool-call turn — so
-`LinearHealer._assistant_close` recovers it by rendering the prior turns with the last
+glue must be **message-type independent** — the same after a text turn and a tool-call turn.
+`render_delta()` probes it by rendering the prior turns with the last
 assistant replaced by two distinct *text* bodies and taking the common suffix of the two
-renders (the bodies differ in every trailing token, only the glue survives). It then asserts
-that glue is actually a suffix of the real `r_prev`; if a template's glue turns out to be
-type-dependent the assert fails and the turn falls back rather than emit a wrong boundary.
+strings. It checks that the suffix also terminates the real `text_prev`, then encodes
+only that short suffix. The full-history fallback uses `LinearHealer._assistant_close`
+to perform the same probe and suffix check on token IDs.
 Probing with text bodies avoids a tool-call turn's `<tool_call>…</tool_call>` wrapper, which
 is itself content-independent and would otherwise be mistaken for the closer.
 
@@ -135,10 +145,11 @@ correctly not treated as closer.
   canonical state is coherent regardless of which wire protocol its turns arrive on.
   `fork_threshold_tokens` is ignored in linear mode (forking is disabled by construction) and
   a warning is logged if both are set.
-- `rollout_gateway/adapters/common.py` — `BaseAdapter` heals between render and
-  `backend.generate` in `_run_turn`, feeds the healed ids to both `generate` and the
-  `TurnRecord`, and calls `commit` before `record_turn`. Session teardown drops per-sid healer
-  state. The existing `TrajectoryManager` is unchanged.
+- `rollout_gateway/adapters/common.py` — `BaseAdapter` calls `heal` before
+  `backend.generate` in `_run_turn`; the healer handles rendering and encoding internally.
+  The adapter feeds the healed ids to both `generate` and `TurnRecord`, and calls `commit`
+  before `record_turn`. Session teardown drops per-sid healer state.
+  The existing `TrajectoryManager` is unchanged.
 - `rollout_gateway/__init__.py` — exports `LinearHealer`.
 
 ### Config surface
@@ -158,9 +169,9 @@ same prefix. The same fallback path also fires when the closer probe cannot isol
 (a message-type-dependent template — `close_unresolved` counter). Behavior is controlled by
 `linear_on_nonlinear`:
 
-- `"reset"` (default) — drop per-sid state and re-anchor to the current render, treating the
-  jump as the start of a fresh linear segment. The turns before and after each stay
-  drift-free; only the single jump turn conditions on the client's render. Correct for benign,
+- `"reset"` (default) — drop per-sid state and re-anchor to the fully rendered and encoded
+  prompt, treating the jump as the start of a fresh linear segment. The turns before and after
+  each stay drift-free; only the single jump turn conditions on that prompt. Correct for benign,
   agent-controlled jumps; increments a counter so a run that resets constantly is visible.
 - `"error"` — raise and fail the rollout, for runs that want a hard guarantee the assumption
   holds.
@@ -201,11 +212,15 @@ sample with it (loss mask covering every generated turn, served logprobs preserv
 multi-turn drift stays one sample; the closer probe isolates the glue for both text and
 tool-call turns and does not double the closer when the served output already ends with the
 stop token; and the three `linear_on_nonlinear` paths behave as specified. The template-level
-assumptions (generation-prompt tokens equal the assistant open; prefix-consistency turn to
+assumptions (generation-prompt tokens equal the assistant open; token-prefix consistency turn to
 turn; the closer probe returns `<|im_end|>\n` for both text and tool-call turns and is a
 genuine suffix of a tool-call `r_prev`; served ids end with the stop token) were confirmed
 against the live Qwen3-Coder-30B tokenizer/template.
 
+`tests/rollout_gateway/test_render.py` covers four incremental-path properties with a local
+HF/Rust tokenizer: correct delta extraction without encoding old history, multi-turn
+trajectory preservation, fallback on incompatible text prefixes or closers, and preservation
+of the served token prefix across a BPE merge boundary.
 
 ## Assumptions and target use case
 
@@ -219,7 +234,7 @@ against the live Qwen3-Coder-30B tokenizer/template.
   edits prior turns.
 - Cosmetic re-tokenization drift is treated as OOD-insignificant, so training on the
   canonical/healed context is acceptable.
-- Chat templates are turn-delimited and prefix-consistent (Qwen, Llama-3). The
+- Incremental healing requires a stable text prefix and a matching closer. The
   type-independent-closer assumption is validated for Qwen3-Coder-30B; re-check it when
   targeting a template family whose between-message glue could differ after tool-call vs text
   turns (the `close_unresolved` fallback keeps such a case correct, just unhealed).
