@@ -1,7 +1,4 @@
-"""Build MigrationBench parquet files for the verl AgentCore example.
-
-Each row is a ``task_id`` (the repo slug) and a ``payload`` -- the agent's exact invoke
-payload. ``PayloadDataset`` synthesizes the chat ``prompt`` column verl needs from it.
+"""Build payload-only MigrationBench parquet files for the verl AgentCore example.
 
 Run ``examples/strands_migration_agent/preprocess.py`` first to upload repository
 tarballs and metadata. Training excludes repositories without tests; validation
@@ -72,12 +69,6 @@ def build_split(
             continue
         rows.append(
             {
-                # The dataset's own name for the task: the repo slug. The agent loop groups
-                # rollouts by it, stamps it into the session record, and uses it as the
-                # `input_id` the agent's S3 results are keyed under -- so a training rollout
-                # and a batch evaluation of the same repo meet on it. A row without it
-                # aborts the rollout loudly rather than falling back to the row index.
-                "task_id": folder,
                 "payload": {
                     "prompt": PROMPT_TEMPLATE,
                     "repo_uri": f"s3://{bucket}/{prefix}{folder}/{folder}.tar.gz",
@@ -128,7 +119,7 @@ def main():
                 "preprocess.py against this bucket first (see this file's docstring)."
             )
         out_path = os.path.join(args.output_dir, out_name)
-        pd.DataFrame(rows, columns=["task_id", "payload"]).to_parquet(out_path, index=False)
+        pd.DataFrame(rows, columns=["payload"]).to_parquet(out_path, index=False)
         print(f"wrote {out_path}: {len(rows)} rows ({skipped} skipped)")
 
 

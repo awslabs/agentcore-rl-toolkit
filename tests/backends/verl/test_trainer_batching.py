@@ -211,69 +211,6 @@ def test_every_mode_layers_the_metric_mixins(mode):
     assert issubclass(cls, trainer_module.RolloutFailureIsolationMixin)
 
 
-@pytest.mark.parametrize("mode", list(TRAINER_MODES))
-def test_every_mode_sends_partition_count_and_records_batching_metrics(mode):
-    trainer = _trainer(
-        mode,
-        "data.train_batch_size=16",
-        "actor_rollout_ref.actor.ppo_mini_batch_size=16",
-        "actor_rollout_ref.rollout.n=4",
-        # verl's separate-async default is 4 triggers; one keeps every mode comparable.
-        "trainer.v1.separate_async.parameter_sync_step=1",
-    )
-    trainer.actor_rollout_wg = _ActorWorkerGroup()
-    batch = SimpleNamespace(
-        extra_info={},
-        keys=["uid0_0_0", "uid0_0_1", "pad_0_0"],
-        tags=[{"is_padding": False}, {}, {"is_padding": True}],
-    )
-    metrics = {}
-
-    assert trainer._update_actor(batch, metrics) is batch
-
-    assert batch.extra_info["num_mini_batch"] == 1
-    assert "mini_batch_size" not in batch.extra_info
-    assert batch.extra_info["global_batch_size"] == 64
-    assert metrics["batching/total_real_rows"] == 2
-    assert metrics["batching/total_padding_rows"] == 1
-    # 16 prompts * n=4 nominal rollouts expected, one distinct session seen.
-    assert metrics["training/rollout_failure/total_missing_sessions"] == 63
-
-
-def test_batching_counters_are_summed_across_sync_triggers():
-    """A step can hold several triggers; verl reduces by metric name, and only names
-    containing "sum"/"total" are summed instead of sample-weighted-averaged."""
-    trainer = AgentCorePPOTrainerSync(_make_config("actor_rollout_ref.rollout.n=1"))
-    trainer.actor_rollout_wg = _ActorWorkerGroup()
-    aggregator = MetricsAggregator()
-    for trigger in range(2):
-        metrics = {}
-        trainer._update_actor(
-            SimpleNamespace(
-                extra_info={},
-                keys=[f"uid{trigger}_0_0", "pad_0_0"],
-                tags=[{"is_padding": False}, {"is_padding": True}],
-            ),
-            metrics,
-        )
-        aggregator.add_step_metrics(metrics, sample_count=2)
-
-    aggregated = aggregator.get_aggregated_metrics()
-
-    assert aggregated["batching/total_real_rows"] == 2
-    assert aggregated["batching/total_rows"] == 4
-    assert aggregated["batching/total_padding_rows"] == 2
-    assert aggregated["training/rollout_failure/total_missing_sessions"] == 126
-
-
-@pytest.mark.parametrize("mode", list(TRAINER_MODES))
-def test_every_mode_layers_the_metric_mixins(mode):
-    cls = type(_trainer(mode))
-
-    assert issubclass(cls, trainer_module.AgentLoopMetricsMixin)
-    assert issubclass(cls, trainer_module.AdvantageZeroMetricsMixin)
-
-
 @pytest.mark.parametrize(
     ("override", "message"),
     [

@@ -1,4 +1,4 @@
-"""The verl v1 agent loop for rollouts that run in a container, over the session protocol.
+"""The verl v1 agent loop for agents that implement the rollout session protocol.
 
 One instance per rollout. It owns the verl-facing contracts -- token budgets, trajectory
 rows, staleness tags, reward and metric plumbing -- and delegates everything about the
@@ -19,8 +19,6 @@ Two behaviours are worth knowing before reading the code:
   infrastructure rather than the policy; training it would push the group's advantages
   around for a reason the policy cannot learn from. ``backends/verl/agent_loop.py`` trains
   those partial traces; this loop deliberately does not.
-
-See ``docs/verl_agent_loop_merge.md`` for how this loop relates to that one.
 """
 
 import datetime as dt
