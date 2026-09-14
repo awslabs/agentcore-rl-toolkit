@@ -5,7 +5,7 @@
 | Status | Accepted |
 | Implementation | Shipped |
 | Date | 2026-08-31 |
-| Pull request | [#119](https://github.com/awslabs/agentcore-rl-toolkit/pull/119), [#142](https://github.com/awslabs/agentcore-rl-toolkit/pull/142) |
+| Pull request | [#119](https://github.com/awslabs/agentcore-rl-toolkit/pull/119), [#143](https://github.com/awslabs/agentcore-rl-toolkit/pull/143) |
 
 ## Summary
 
