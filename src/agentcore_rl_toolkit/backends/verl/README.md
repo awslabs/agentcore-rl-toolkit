@@ -21,12 +21,11 @@ several rows, and for AgentCore-specific observability:
 | `agentcore_colocate_async` | `colocate_async` |
 | `agentcore_separate_async` | `separate_async` |
 
-Each is that verl trainer plus four mixins from
+Each is that verl trainer plus three mixins from
 [`trainer_mixins/`](trainer_mixins/) — `VariableRowBatchingMixin` (below),
 `AgentLoopMetricsMixin` (agent-reported metrics as tracker series and
-`reward_extra_info`), `AdvantageZeroMetricsMixin` (collapsed-GRPO-group
-accounting), and `RolloutFailureIsolationMixin` (below). An `agentcore_*` name is
-only a registry key: the trainer writes
+`reward_extra_info`), and `AdvantageZeroMetricsMixin` (collapsed-GRPO-group
+accounting). An `agentcore_*` name is only a registry key: the trainer writes
 verl's own mode string back into `trainer.v1.trainer_mode` before the base
 trainer initializes, because `PPOTrainer` compares that string literally to pick
 the replay buffer, refill semantics, and the `trainer.v1.<mode>` config node it
@@ -76,32 +75,6 @@ optimizer steps, although the configured step count and additive weighting withi
 each step remain stable. See the
 [variable-row batching design](../../../../designs/verl_variable_trajectory_batching.md)
 for the derivation.
-
-### Failed-rollout isolation
-
-`RolloutFailureIsolationMixin` lets an agent loop report a failed rollout
-(container never came up, handler raised, run timed out) *without* raising. A loop
-that raises marks the whole prompt group `failure`, which the sync trainer
-tolerates but the async trainers answer by evicting and refilling the group —
-throwing away the failed rollout's healthy siblings, repeatedly.
-
-So the loop emits an inert row instead — one masked response token, zero reward,
-`extra_fields["rollout_failed"] = 1.0` — and this mixin rewrites that row's `uid`
-to `fail<hex>` after `_balance_batch`, the same trick verl uses for its own
-`pad<hex>` padding rows. The row then forms a GRPO group of its own: it trains
-nothing (its `response_mask` is all zeros) and its siblings are scored as if it had
-never been sampled. Both trainer families end up training the same rows for the
-same rollouts. It also stamps `is_failed_rollout` on the batch tag, so
-`AdvantageZeroMetricsMixin` excludes the row while `AgentLoopMetricsMixin` still
-reports its metrics, and publishes
-`training/rollout_failure/total_failed_rows` per trigger.
-
-`RolloutSessionAgentLoop`
-([`backends/experimental/verl`](../experimental/verl/rollout_session_agent_loop.py))
-emits those rows; `AgentCoreAgentLoop` still raises, which is why it needs the sync
-mode. Exceptions that every rollout of a run would hit — a dataset with no
-`task_id`, a non-numeric agent reward — are `RolloutContractError` and still
-propagate. See [`docs/verl_agent_loop_merge.md`](../../../../docs/verl_agent_loop_merge.md) §4.
 
 ## How it works
 

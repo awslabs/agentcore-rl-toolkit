@@ -1,10 +1,15 @@
 """``RolloutSessionAgentLoop``: verl-facing contracts, and the failure path in particular.
 
-The loop's headline promise is that a failed rollout never fails its group -- ``run``
-returns one inert row instead of raising, whatever went wrong -- with two deliberate
-exceptions: a ``RolloutContractError`` (which every rollout of the run would hit) and a
-task that has no ``task_id`` at all. These tests pin that split, the trajectory-row
-conversion around verl's fixed-width regions, and the key sets verl reduces across a batch.
+What a failed rollout reports to verl is a configured choice (``on_rollout_failure``:
+``raise`` | ``empty`` | ``inert_row``), so these tests pin two things separately: which
+conditions count as a failed rollout at all, and what each setting then does with one.
+Two conditions ignore the setting and always raise -- a ``RolloutContractError`` (which
+every rollout of the run would hit) and a task with no ``task_id``. Also here: the
+trajectory-row conversion around verl's fixed-width regions, and the key sets verl reduces
+across a batch.
+
+Most failure-cause tests run under ``inert_row``, the one setting whose row carries the
+diagnosis (``failure_reason``) they assert on.
 """
 
 import logging
@@ -249,7 +254,101 @@ async def test_records_without_tokens_are_dropped():
     assert outputs[0].extra_fields["num_trace_records"] == 1
 
 
-# -- the failure path ----------------------------------------------------------
+# -- what each on_rollout_failure setting reports ------------------------------
+
+
+async def test_raise_is_the_default():
+    """Removing the trainer-side isolation mixin must not put anyone on a biased path by
+    default, so the failure reaches verl unless a recipe asks for something else."""
+    assert make_loop().loop_config.on_rollout_failure == "raise"
+
+
+@pytest.mark.parametrize("mode", ["typo", "", None, "inert row"])
+async def test_an_unknown_failure_mode_is_rejected_at_construction(mode):
+    """A typo would otherwise sit unnoticed until the first failure, hours into a run."""
+    with pytest.raises(ValueError, match="on_rollout_failure must be one of"):
+        make_loop(on_rollout_failure=mode)
+
+
+async def test_raise_reraises_the_trainer_side_exception_after_the_dump(fake_upload):
+    """The original exception, not a wrapper: its traceback is the diagnosis."""
+    loop = make_loop(session=FakeRolloutSession(error=RuntimeError("connection reset")), on_rollout_failure="raise")
+
+    with pytest.raises(RuntimeError, match="connection reset"):
+        await run_loop(loop)
+
+    assert fake_upload.await_count == 1  # on record before the raise
+    assert loop.meta["aborted"] is True
+
+
+async def test_raise_synthesizes_an_error_for_a_container_reported_failure(fake_upload):
+    """Nothing raised on this side of the wire -- the container reported the failure in its
+    dump -- so the reason it gave becomes the exception verl sees."""
+    loop = make_loop(
+        session=FakeRolloutSession(make_dump(reward=None, exception="agent raised: boom")),
+        on_rollout_failure="raise",
+    )
+
+    with pytest.raises(rsal.RolloutFailedError, match="agent raised: boom"):
+        await run_loop(loop)
+
+    assert fake_upload.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        FakeRolloutSession(make_dump(reward=None, exception="agent raised: boom")),
+        FakeRolloutSession(error=RuntimeError("connection reset")),
+    ],
+    ids=["container_reported", "trainer_side"],
+)
+async def test_empty_returns_no_rows_and_does_not_raise(session, fake_upload):
+    """The prompt group stays ``finished`` and trains its surviving siblings; the only
+    record of the failure is the dump."""
+    loop = make_loop(session=session, on_rollout_failure="empty")
+
+    assert await run_loop(loop) == []
+    assert loop.meta["aborted"] is True
+    assert fake_upload.await_count == 1
+
+
+async def test_inert_row_returns_one_stand_in_row(fake_upload):
+    loop = make_loop(
+        session=FakeRolloutSession(make_dump(reward=None, exception="agent raised: boom")),
+        on_rollout_failure="inert_row",
+    )
+
+    outputs = await run_loop(loop)
+
+    assert len(outputs) == 1
+    assert_inert_row(outputs[0])
+    assert outputs[0].extra_fields["failure_reason"] == "agent raised: boom"
+    assert loop.meta["aborted"] is True
+    # the dump is still written, so the failure is diagnosable
+    assert fake_upload.await_count == 1
+
+
+@pytest.mark.parametrize("mode", ["raise", "empty", "inert_row"])
+async def test_a_contract_error_raises_whatever_the_failure_mode(mode, fake_upload):
+    """No rollout of this run could satisfy the contract, so absorbing it would spend the
+    whole job producing nothing trainable."""
+    session = FakeRolloutSession(error=RolloutContractError("non-numeric reward"))
+    loop = make_loop(session=session, on_rollout_failure=mode)
+
+    with pytest.raises(RolloutContractError, match="non-numeric reward"):
+        await run_loop(loop)
+
+    # the offending task is on record before the raise
+    assert fake_upload.await_count == 1
+
+
+# -- what counts as a failed rollout -------------------------------------------
+
+
+def failing_loop(session, **overrides):
+    """A loop that reports failures as inert rows, so the diagnosis is assertable."""
+    return make_loop(session=session, on_rollout_failure="inert_row", **overrides)
 
 
 def assert_inert_row(output, *, dispatch_step: int = 3):
@@ -269,19 +368,6 @@ def assert_inert_row(output, *, dispatch_step: int = 3):
     assert output.extra_fields["max_global_steps"] == dispatch_step
 
 
-async def test_container_reported_failure_emits_one_inert_row(fake_upload):
-    loop = make_loop(session=FakeRolloutSession(make_dump(reward=None, exception="agent raised: boom")))
-
-    outputs = await run_loop(loop)
-
-    assert len(outputs) == 1
-    assert_inert_row(outputs[0])
-    assert outputs[0].extra_fields["failure_reason"] == "agent raised: boom"
-    assert loop.meta["aborted"] is True
-    # the dump is still written, so the failure is diagnosable
-    assert fake_upload.await_count == 1
-
-
 @pytest.mark.parametrize(
     ("dump", "reason"),
     [
@@ -290,7 +376,7 @@ async def test_container_reported_failure_emits_one_inert_row(fake_upload):
     ],
 )
 async def test_a_dump_missing_its_result_is_a_failed_rollout(dump, reason):
-    loop = make_loop(session=FakeRolloutSession(dump))
+    loop = failing_loop(FakeRolloutSession(dump))
 
     outputs = await run_loop(loop)
 
@@ -299,9 +385,10 @@ async def test_a_dump_missing_its_result_is_a_failed_rollout(dump, reason):
     assert reason in outputs[0].extra_fields["failure_reason"]
 
 
-async def test_a_trainer_side_error_emits_one_inert_row(caplog):
-    """Transport, timeout, teardown: still one inert row, never a failed group."""
-    loop = make_loop(session=FakeRolloutSession(error=RuntimeError("connection reset")))
+async def test_a_trainer_side_error_is_a_failed_rollout(caplog):
+    """Transport, timeout, teardown: a failure on this side of the wire, logged and
+    reported the same way as one the container reports."""
+    loop = failing_loop(FakeRolloutSession(error=RuntimeError("connection reset")))
 
     with caplog.at_level(logging.ERROR):
         outputs = await run_loop(loop)
@@ -316,7 +403,7 @@ async def test_a_failed_rollout_discards_its_partial_trace():
     """The partial trace exists because the container died, so a zero reward on it would
     describe the infrastructure, not the policy."""
     session = FakeRolloutSession(make_dump(reward=None, exception="died mid-run"), turns=2)
-    loop = make_loop(session=session)
+    loop = failing_loop(session)
 
     outputs = await run_loop(loop)
 
@@ -327,7 +414,7 @@ async def test_a_failed_rollout_discards_its_partial_trace():
 async def test_a_failing_rollout_still_releases_its_gateway_session():
     """The gateway holds a session's trajectory tree until it is drained, so a failure
     that skipped ``finish_session`` would leak one tree per failed rollout."""
-    loop = make_loop(session=FakeRolloutSession(error=RuntimeError("boom")))
+    loop = failing_loop(FakeRolloutSession(error=RuntimeError("boom")))
 
     await run_loop(loop)
 
@@ -338,7 +425,7 @@ async def test_a_failing_rollout_still_releases_its_gateway_session():
 async def test_a_setup_failure_does_not_finish_an_uncreated_session():
     """A container that never came up: the gateway session was created before the run, so
     it is still drained -- and the setup error is what gets reported, not a gateway error."""
-    loop = make_loop(session=FakeRolloutSession(setup_error=RuntimeError("no capacity")))
+    loop = failing_loop(FakeRolloutSession(setup_error=RuntimeError("no capacity")))
 
     outputs = await run_loop(loop)
 
@@ -346,9 +433,9 @@ async def test_a_setup_failure_does_not_finish_an_uncreated_session():
     assert loop.test_session.events == ["setup", "shutdown"]
 
 
-async def test_no_trainable_trace_emits_one_inert_row():
+async def test_no_trainable_trace_is_a_failed_rollout():
     """The agent never called the model (a no-op harness, an agent that crashed on start)."""
-    loop = make_loop(session=FakeRolloutSession(turns=0))
+    loop = failing_loop(FakeRolloutSession(turns=0))
 
     outputs = await run_loop(loop)
 
@@ -360,25 +447,13 @@ async def test_no_trainable_trace_emits_one_inert_row():
 async def test_static_session_capture_is_diagnosed(caplog):
     """Stale agent image: the agent sends a fixed api key, so the real sid drains empty
     while turns pile up under 'EMPTY'. Without the warning this trains nothing, silently."""
-    loop = make_loop(session=FakeRolloutSession(session_key="EMPTY"))
+    loop = failing_loop(FakeRolloutSession(session_key="EMPTY"))
 
     with caplog.at_level(logging.WARNING):
         outputs = await run_loop(loop)
 
     assert_inert_row(outputs[0])
     assert any("static session 'EMPTY'" in record.message for record in caplog.records)
-
-
-async def test_contract_error_propagates_after_the_dump_is_written(fake_upload):
-    """No rollout of this run could satisfy the contract, so absorbing it would spend the
-    whole job on inert rows."""
-    loop = make_loop(session=FakeRolloutSession(error=RolloutContractError("non-numeric reward")))
-
-    with pytest.raises(RolloutContractError, match="non-numeric reward"):
-        await run_loop(loop)
-
-    # the offending task is on record before the raise
-    assert fake_upload.await_count == 1
 
 
 async def test_a_task_without_a_task_id_raises_before_anything_runs():
@@ -510,10 +585,11 @@ async def test_reward_extra_info_key_set_is_identical_on_success_and_failure():
 
 
 async def test_extra_field_key_set_is_identical_on_success_and_failure():
-    """The TransferQueue stores one field set for the whole run."""
+    """The TransferQueue stores one field set for the whole run -- which only matters for the
+    setting that emits a row for a failed rollout."""
     successful_loop = make_loop()
     outputs = await run_loop(successful_loop)
-    failed_loop = make_loop(session=FakeRolloutSession(error=RuntimeError("boom")))
+    failed_loop = failing_loop(FakeRolloutSession(error=RuntimeError("boom")))
     failed_outputs = await run_loop(failed_loop)
 
     assert set(outputs[0].extra_fields) == set(failed_outputs[0].extra_fields)

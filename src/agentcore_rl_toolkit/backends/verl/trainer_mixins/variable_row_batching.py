@@ -123,10 +123,7 @@ class VariableRowBatchingMixin(TrainerMixinBase):
         total_rows = len(batch.tags)
         padding_rows = sum(tag.get("is_padding", False) for tag in batch.tags)
         # ReplayBuffer keys are {uid}_{session_id}_{trajectory_index}; multiple
-        # trajectory rows from one rollout session count once. A session that *failed* still
-        # emitted a row, so it counts as present here and is reported separately as
-        # training/rollout_failure/total_failed_rows (see RolloutFailureIsolationMixin);
-        # "missing" means the session never reached the trainer at all.
+        # trajectory rows from one rollout session count once.
         actual_sessions = {
             tuple(key.rsplit("_", 2)[:2])
             for key, tag in zip(batch.keys, batch.tags, strict=True)

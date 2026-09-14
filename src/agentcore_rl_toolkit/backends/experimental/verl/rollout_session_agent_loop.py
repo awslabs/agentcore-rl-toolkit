@@ -7,18 +7,35 @@ driven under the cluster-wide limits in :class:`RolloutSessionBounds`.
 
 Two behaviours are worth knowing before reading the code:
 
-* **A failed rollout never fails its group.** Whatever goes wrong on either side of the
-  wire, ``run`` returns one inert row (:meth:`make_failed_loop_output`) instead of raising,
-  and ``RolloutFailureIsolationMixin`` moves that row into a GRPO group of its own. Raising
-  would mark the whole prompt group ``failure``, which the async trainers respond to by
-  evicting the healthy siblings too. The only exceptions that leave this loop are
-  :class:`RolloutContractError` -- a broken dataset or reward function, which every rollout
-  of the run would hit -- and cancellation.
+* **What a failed rollout contributes is configurable.** Whatever goes wrong on either side
+  of the wire, the S3 dump is written first and then ``on_rollout_failure`` decides what verl
+  sees: ``raise`` (the default) lets the failure mark the prompt group, ``empty`` returns no
+  rows, ``inert_row`` returns one masked zero-reward row (:meth:`make_failed_loop_output`).
+  None of the three is known to train best -- the knob exists to compare them; see
+  :class:`RolloutSessionAgentLoopConfig` for what each costs. Two exceptions ignore the
+  setting and always leave the loop: :class:`RolloutContractError` -- a broken dataset or
+  reward function, which every rollout of the run would hit -- and cancellation.
 * **A failed rollout's partial trace is discarded.** A trajectory that exists only because
   the container died halfway is still a real sample, but its zero reward describes the
   infrastructure rather than the policy; training it would push the group's advantages
   around for a reason the policy cannot learn from. ``backends/verl/agent_loop.py`` trains
   those partial traces; this loop deliberately does not.
+
+Inside verl, the three settings differ like this (verl 0.9.0):
+
+* ``raise`` -- ``_run_prompt`` catches the exception and marks the group ``failure``. The sync
+  replay buffer leaves the group sampleable (``sync_refill_failed_groups=False``), so the
+  healthy siblings still train; ``ReplayBufferAsync`` treats ``failure`` as terminal and
+  evicts *and refills* the whole group, healthy siblings included.
+* ``empty`` -- ``_agent_loop_postprocess`` logs the empty output and writes nothing to the
+  TransferQueue. The group stays ``finished`` with fewer than ``n`` rows and every mode trains
+  the survivors, but nothing about the failure reaches the step's metrics (no ``extra_fields``
+  are written), and a group whose rollouts *all* fail raises -- from DAPO's group filter, or
+  from the sync buffer's "no materializable trajectories" guard.
+* ``inert_row`` -- a real row, so metrics and row counts survive. verl does not backfill a
+  missing group member either way, so this is the only setting under which the group keeps its
+  full width -- at the price of a synthetic zero inside it: a group that scored ``[1, 1, 1]``
+  plus a failure trains as ``[1, 1, 1, 0]``.
 """
 
 import datetime as dt
@@ -41,7 +58,6 @@ from agentcore_rl_toolkit.aws_tools.persistent_dict import (
 )
 from agentcore_rl_toolkit.aws_tools.s3_tools import upload_object
 from agentcore_rl_toolkit.backends.verl.gateway_host import GatewayHandle, get_or_start_gateway
-from agentcore_rl_toolkit.backends.verl.trainer_mixins.rollout_failure_isolation import ROLLOUT_FAILED_FIELD
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.rollout_session.exception_utils import exception_to_string
@@ -66,6 +82,14 @@ logging.getLogger("backoff").setLevel(logging.ERROR)
 # raises when a finished trajectory lacks the configured key -- so it must be present on
 # every row, failures included, and must be the same number the advantage is computed from.
 REWARD_EXTRA_INFO_SCORE_KEY = "reward_score"
+
+# Accepted ``on_rollout_failure`` values; see RolloutSessionAgentLoopConfig for what each does.
+ON_ROLLOUT_FAILURE_MODES = ("raise", "empty", "inert_row")
+
+
+class RolloutFailedError(RuntimeError):
+    """A rollout failed and ``on_rollout_failure=raise``, with no trainer-side exception to
+    re-raise -- the container reported the failure itself, so all we have is its reason."""
 
 
 def _int_or(value: Any, default: int) -> int:
@@ -101,8 +125,9 @@ class ExtraFields(TypedDict):
     # verl only populates this itself when reward_score is None; we set reward_score
     # directly, so supply the key to avoid a KeyError in _agent_loop_postprocess.
     reward_extra_info: dict
-    # 1.0 on the stand-in row a failed rollout emits. RolloutFailureIsolationMixin reads
-    # this to give the row its own GRPO group; keep the name in sync with it.
+    # 1.0 on the stand-in row a failed rollout emits under on_rollout_failure=inert_row,
+    # 0.0 on every real row. The other two settings emit no row, so under them a failure
+    # is absent from this field rather than reported as 1.0.
     rollout_failed: float
     trace_index: int
     trace_metadata: dict
@@ -155,13 +180,19 @@ class RolloutSessionAgentLoop(AgentLoopBase):
             raise ValueError(
                 "RolloutSessionAgentLoop requires trainer.use_v1=true: it returns "
                 "list[AgentLoopOutput] (one per trajectory-tree leaf), which only the v1 "
-                "TransferQueue path consumes, and its failure handling depends on the "
-                "v1 trainer mixins."
+                "TransferQueue path consumes."
             )
 
         self.loop_config: RolloutSessionAgentLoopConfig = instantiate(
             self.config.rollout_session_agent_loop, _convert_="all"
         )
+        # Validated here rather than at the failure site: a typo would otherwise sit unnoticed
+        # until the first rollout failed, hours into a run, and then change what training sees.
+        if self.loop_config.on_rollout_failure not in ON_ROLLOUT_FAILURE_MODES:
+            raise ValueError(
+                f"rollout_session_agent_loop.on_rollout_failure must be one of "
+                f"{list(ON_ROLLOUT_FAILURE_MODES)}, got {self.loop_config.on_rollout_failure!r}"
+            )
 
         # extract verl config. rollout.* rather than data.max_*: those are the lengths of the
         # regions a trajectory is actually stored in, and only rollout carries max_model_len.
@@ -259,8 +290,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         self._ran = True
 
         # Built before any container or session state exists: a task-contract violation is a
-        # config error that would hit every rollout, so it raises here rather than degrading
-        # this rollout into an inert row.
+        # config error that would hit every rollout, so it raises here rather than being
+        # absorbed by whatever on_rollout_failure does with a failed rollout.
         task = self.make_task(sampling_params, kwargs)
         task_id = require_task_id(task)
 
@@ -296,19 +327,37 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                     exception = exception_to_string(e)
                     failure = e
 
-                if agent_loop_outputs is None:
+                rollout_failed = agent_loop_outputs is None
+                if rollout_failed:
                     await self.meta.set("aborted", True)
-                    agent_loop_outputs = [self.make_failed_loop_output(exception)]
+                    agent_loop_outputs = self._failed_rollout_outputs(exception)
 
+                # Written before anything is raised below, so a failure is on record in S3
+                # whichever way on_rollout_failure sends it.
                 await self.save_to_s3(task, agent_loop_outputs, exception, rollout_dump_response)
 
                 if isinstance(failure, RolloutContractError):
                     # Not a rollout failure: no rollout of this run can satisfy the contract, so
-                    # absorbing it would spend the whole job on inert rows. The dump above is
-                    # written first so the offending task is on record.
+                    # absorbing it would spend the whole job on failures. Raises whatever
+                    # on_rollout_failure says.
                     raise failure
 
+                if rollout_failed and self.loop_config.on_rollout_failure == "raise":
+                    # verl marks the prompt group `failure`: sync trains the siblings anyway,
+                    # the async trainers evict and refill the group.
+                    raise failure if failure is not None else RolloutFailedError(exception)
+
             return agent_loop_outputs
+
+    def _failed_rollout_outputs(self, failure_reason: str | None) -> list[AgentLoopOutput]:
+        """The rows a failed rollout contributes to training, per ``on_rollout_failure``.
+
+        Only ``inert_row`` contributes one; ``raise`` and ``empty`` both contribute none and
+        differ in what ``run`` does next, not in what it would have returned.
+        """
+        if self.loop_config.on_rollout_failure == "inert_row":
+            return [self.make_failed_loop_output(failure_reason)]
+        return []
 
     async def save_to_s3(self, task, agent_loop_outputs, exception, rollout_dump_response):
         s3_uri = f"{self.loop_config.rollout_output_s3}/{self.experiment_start_at}/{self.session_id}"
@@ -472,7 +521,6 @@ class RolloutSessionAgentLoop(AgentLoopBase):
             if isinstance(value, bool | int | float):
                 info[key] = float(value)
         info[REWARD_EXTRA_INFO_SCORE_KEY] = reward_score
-        info[ROLLOUT_FAILED_FIELD] = 1.0 if failed else 0.0
         info["num_trace_records"] = float(num_records)
         return info
 
@@ -575,15 +623,18 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         )
 
     def make_failed_loop_output(self, failure_reason: str | None = None) -> AgentLoopOutput:
-        """The inert row that stands in for a rollout that failed.
+        """The inert row that stands in for a rollout that failed (``on_rollout_failure=inert_row``).
 
         Shaped like verl's own padding rows (one prompt token, one masked response token, zero
-        reward) so it trains nothing at all: with ``response_mask=[0]`` both its advantage and
-        its loss are zero whatever the group does. What it does carry is the rollout's metrics
-        and the ``rollout_failed`` flag, so the failure is visible in ``agent_loop/*`` and
-        ``RolloutFailureIsolationMixin`` can keep it out of its group -- which is why this is a
-        row and not an empty list: a group that lost rows silently is a group whose remaining
-        rollouts are reweighted, and one with no rows at all trips verl's own guards.
+        reward) so it contributes no loss of its own: with ``response_mask=[0]`` both its
+        advantage and its loss are zero whatever the group does. What it does carry is the
+        rollout's metrics and the ``rollout_failed`` flag, so the failure is countable in
+        ``agent_loop/*``, and a row, so the group keeps its full width.
+
+        It is not neutral for its siblings, though. GRPO baselines the group on the rows it has,
+        this zero included, so ``[1, 1, 1]`` plus a failure trains as ``[1, 1, 1, 0]``: every
+        sibling's advantage shifts because the container died. That bias is the cost of the
+        metrics and the row count, and the reason this is not the default.
         """
         # No engine-reported weight version exists, so stand in the dispatch step: it keeps
         # trajectory_staleness comparable to valid data instead of inflating it to global_steps.

@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Accepted |
 | Implementation | Shipped |
-| Date | 2026-09-10, extended to the async trainer modes 2026-09-13, failed-rollout isolation added 2026-09-13 |
+| Date | 2026-09-10, extended to the async trainer modes 2026-09-13 |
 | Pull request | [#131](https://github.com/awslabs/agentcore-rl-toolkit/pull/131) |
 
 ## Summary
@@ -279,15 +279,6 @@ Because the padded row count is divisible by `D * M`, V1 can first split the row
 evenly across `D` ranks, and each worker can then split its local rows evenly into
 `M` mini-batches.
 
-A sibling mixin now wraps the same method: `RolloutFailureIsolationMixin._balance_batch`
-calls `super()._balance_batch(...)` and then rewrites the `uid` of every row an agent loop
-flagged as a failed rollout, so that row lands in a GRPO group of its own. It runs *after*
-this design's padding for two reasons: verl's padding rows already carry an isolated
-`pad<hex>` uid, and each is built by deep-copying the batch's first sample's tags, so
-stamping the failure tag earlier would mark them all. Row counts and the `D * M`
-divisibility this design establishes are untouched — only the `uid` field and an in-memory
-tag change.
-
 For `M > 1`, individual local mini-batches may have uneven token workloads even though each
 rank's whole chunk is balanced. That matches current V1 behavior and affects performance,
 not optimizer-step correctness. Restoring V0's `keep_minibatch=True` behavior is left to a
@@ -517,20 +508,12 @@ replaced.
   batching metrics. Its siblings in that package are the metric mixins.
 - `src/agentcore_rl_toolkit/backends/verl/trainer.py` is the one definition file: it
   registers `agentcore_sync`, `agentcore_colocate_async`, and `agentcore_separate_async`,
-  each layering the four mixins onto the corresponding verl v1 trainer, and is the module
+  each layering the three mixins onto the corresponding verl v1 trainer, and is the module
   recipes name in `VERL_USE_EXTERNAL_MODULES`.
-- `src/agentcore_rl_toolkit/backends/verl/trainer_mixins/rollout_failure_isolation.py`
-  contains `RolloutFailureIsolationMixin`, layered immediately ahead of
-  `VariableRowBatchingMixin` in every mode. It is what lets an agent loop report a failed
-  rollout as an inert row rather than by raising, which is the only way the sync and async
-  trainer families treat a failure identically (the async replay buffers evict and refill a
-  group whose loop raised). See `docs/verl_agent_loop_merge.md` §4.
 - `tests/backends/verl/test_training_worker_batching.py` exercises the installed
   verl worker's real mini-batch iterator.
 - `tests/backends/verl/test_trainer_batching.py` covers trainer metadata,
   fail-fast configuration, metrics, and fresh-process registration.
-- `tests/backends/verl/test_rollout_failure_isolation.py` covers the isolation mixin,
-  including its ordering against this design's padding.
 - The FSDP and Megatron example scripts export `VERL_USE_EXTERNAL_MODULES` and
   select `trainer.v1.trainer_mode=agentcore_sync`.
 - The backend README and public setup guide document the supported contract.
@@ -580,19 +563,9 @@ The `_update_actor(batch, metrics)` override adds:
 - `batching/total_padding_rows`
 - `training/rollout_failure/total_missing_sessions`
 
-`RolloutFailureIsolationMixin._balance_batch` adds a fifth, on the same naming rule:
-
-- `training/rollout_failure/total_failed_rows`
-
-The two `rollout_failure/*` counters stay distinct and both stay meaningful: *missing*
-means a dispatched session wrote nothing to the queue at all, *failed* means it wrote an
-inert stand-in row. A loop that reports failures as rows should therefore hold
-`total_missing_sessions` at zero, which makes it an invariant rather than a redundant
-counter.
-
-All five are per-trigger counts. verl's `MetricsAggregator` reduces a step's metrics
+All four are per-trigger counts. verl's `MetricsAggregator` reduces a step's metrics
 by name — a name containing `sum` or `total` is summed, anything else is
-sample-weighted-averaged — so the `total_*` naming is what keeps the counters
+sample-weighted-averaged — so the `total_*` naming is what keeps the four counters
 consistent when a step spans several `sample -> update` triggers (separate-async with
 `parameter_sync_step > 1`).
 

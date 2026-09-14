@@ -208,7 +208,6 @@ def test_every_mode_layers_the_metric_mixins(mode):
 
     assert issubclass(cls, trainer_module.AgentLoopMetricsMixin)
     assert issubclass(cls, trainer_module.AdvantageZeroMetricsMixin)
-    assert issubclass(cls, trainer_module.RolloutFailureIsolationMixin)
 
 
 @pytest.mark.parametrize(

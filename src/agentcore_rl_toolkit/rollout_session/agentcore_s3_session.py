@@ -8,8 +8,7 @@ for a :class:`RolloutFuture` to poll. An agent already deployed for batch evalua
 therefore trains with no container-side change at all -- same image, same payload, same
 result contract.
 
-What that contract costs, all accepted deliberately (see
-``docs/rollout_session_migration.md``):
+What that contract costs, all accepted deliberately:
 
 * **The setup/run split is vacuous.** ``invoke_async`` both creates the ACR session and
   starts the rollout, so ``setup`` provisions nothing, ``container_setup_timeout`` bounds

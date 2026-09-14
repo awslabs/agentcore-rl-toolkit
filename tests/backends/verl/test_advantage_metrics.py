@@ -1,6 +1,6 @@
 """``critic/advantages/zero_*``: what the collapsed-group diagnostics count, and what they
-deliberately ignore -- verl's padding rows and the stand-in rows failed rollouts emit, whose
-zero ``rm_scores`` would otherwise report an all-pass group as an all-fail one.
+deliberately ignore -- verl's padding rows, whose zero ``rm_scores`` would otherwise report
+an all-pass group as an all-fail one.
 
 The TransferQueue is faked (a real one needs a live cluster); the torch reductions are real.
 """
@@ -12,7 +12,6 @@ import torch
 
 from agentcore_rl_toolkit.backends.verl.trainer_mixins import advantage_metrics as am
 from agentcore_rl_toolkit.backends.verl.trainer_mixins.advantage_metrics import AdvantageZeroMetricsMixin
-from agentcore_rl_toolkit.backends.verl.trainer_mixins.rollout_failure_isolation import FAILED_ROLLOUT_TAG
 
 
 class _Batch:
@@ -53,12 +52,12 @@ def _mixin() -> AdvantageZeroMetricsMixin:
     return type("_Trainer", (AdvantageZeroMetricsMixin,), {})()
 
 
-def test_inert_rows_do_not_turn_an_all_pass_group_into_a_failure():
-    """Both siblings passed, so the group collapsed for the good reason; the failed
-    rollout's own group is not a policy outcome at all and must not be counted."""
+def test_padding_rows_do_not_turn_an_all_pass_group_into_a_failure():
+    """Both siblings passed, so the group collapsed for the good reason; verl's synthetic
+    padding row carries a zero ``rm_scores`` that is not a policy outcome at all."""
     batch = _Batch(
-        keys=["uidA_s0_0", "uidA_s1_0", "failhex_s2_0", "padhex_s3_0"],
-        tags=[{}, {}, {FAILED_ROLLOUT_TAG: True}, {"is_padding": True}],
+        keys=["uidA_s0_0", "uidA_s1_0", "padhex_s2_0"],
+        tags=[{}, {}, {"is_padding": True}],
     )
     tq = _FakeTQ(
         {
@@ -94,8 +93,8 @@ def test_zero_mean_counts_valid_advantage_entries_only():
     assert metrics["critic/advantages/zero_pass_mean"] == 0.0
 
 
-def test_a_batch_of_only_inert_rows_reports_nothing():
-    batch = _Batch(keys=["failhex_s0_0"], tags=[{FAILED_ROLLOUT_TAG: True}])
+def test_a_batch_of_only_padding_reports_nothing():
+    batch = _Batch(keys=["padhex_s0_0"], tags=[{"is_padding": True}])
 
     with patch.object(am, "tq", _FakeTQ({})):
         assert _mixin()._advantage_zero_metrics(batch) == {}

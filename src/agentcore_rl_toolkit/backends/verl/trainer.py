@@ -1,11 +1,10 @@
 """verl's three v1 PPO backends plus this package's mixins, one registered name each.
 
-Every AgentCore recipe wants the same four mixins -- its agent loop reports metrics
-through ``AgentLoopOutput.extra_fields``, produces GRPO groups that can collapse, reports a
-failed rollout as an inert row that must not join its group, and may emit a variable number
-of training rows per rollout -- so the registrations live here rather than in one recipe.
-Name this module in ``VERL_USE_EXTERNAL_MODULES`` to make the ``agentcore_*`` trainer modes
-available, in the driver and on every node.
+Every AgentCore recipe wants the same three mixins -- its agent loop reports metrics
+through ``AgentLoopOutput.extra_fields``, produces GRPO groups that can collapse, and may
+emit a variable number of training rows per rollout -- so the registrations live here
+rather than in one recipe. Name this module in ``VERL_USE_EXTERNAL_MODULES`` to make the
+``agentcore_*`` trainer modes available, in the driver and on every node.
 
 Must stay importable by any verl worker: no driver-only imports at module scope.
 """
@@ -21,7 +20,6 @@ from verl.trainer.ppo.v1 import (
 from .trainer_mixins import (
     AdvantageZeroMetricsMixin,
     AgentLoopMetricsMixin,
-    RolloutFailureIsolationMixin,
     VariableRowBatchingMixin,
 )
 
@@ -53,14 +51,12 @@ class _AgentCoreTrainerBase:
 
 
 # One registered name per verl backend. VariableRowBatchingMixin comes last of the mixins so
-# it stays closest to the trainer whose batching seams it overrides; RolloutFailureIsolationMixin
-# sits just above it, since it wraps the same ``_balance_batch`` call that consumes those seams.
+# it stays closest to the trainer whose batching seams it overrides.
 @register_trainer("agentcore_sync")
 class AgentCorePPOTrainerSync(
     _AgentCoreTrainerBase,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
-    RolloutFailureIsolationMixin,
     VariableRowBatchingMixin,
     PPOTrainerSync,
 ):
@@ -72,7 +68,6 @@ class AgentCorePPOTrainerColocateAsync(
     _AgentCoreTrainerBase,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
-    RolloutFailureIsolationMixin,
     VariableRowBatchingMixin,
     PPOTrainerColocateAsync,
 ):
@@ -84,7 +79,6 @@ class AgentCorePPOTrainerSeparateAsync(
     _AgentCoreTrainerBase,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
-    RolloutFailureIsolationMixin,
     VariableRowBatchingMixin,
     PPOTrainerSeparateAsync,
 ):

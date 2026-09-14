@@ -15,7 +15,6 @@ import transfer_queue as tq
 from transfer_queue import KVBatchMeta
 
 from .base import TrainerMixinBase
-from .rollout_failure_isolation import FAILED_ROLLOUT_TAG
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -46,14 +45,9 @@ class AdvantageZeroMetricsMixin(TrainerMixinBase):
         The step's TransferQueue entries are still live here (``fit()`` clears them after this
         call), so the fields can be re-fetched. Computed unconditionally, so an all-masked batch
         yields ``nan`` rather than a spurious 0.0.
-
-        Failed-rollout stand-ins are dropped alongside verl's padding rows: both are inert by
-        construction (all-zero ``response_mask``, so they never reach ``zero_mean`` anyway) and
-        counting their zero ``rm_scores`` in a group's reward would report an all-pass group as
-        a failure below.
         """
-        real = [not (tag.get("is_padding", False) or tag.get(FAILED_ROLLOUT_TAG, False)) for tag in batch.tags]
-        keys = [k for k, keep in zip(batch.keys, real, strict=True) if keep]
+        non_padding = [not tag.get("is_padding", False) for tag in batch.tags]
+        keys = [k for k, keep in zip(batch.keys, non_padding, strict=True) if keep]
         if not keys:
             return {}
 

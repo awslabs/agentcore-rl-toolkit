@@ -32,6 +32,20 @@ class RolloutSessionAgentLoopConfig:
     # seconds between ec2_monitor polls; <= 0 disables the monitor
     ec2_monitor_poll_interval: float = 30.0
 
+    # What the loop does when a rollout fails (container never came up, agent handler raised,
+    # run timed out). Which of these trains best is an open question -- the knob exists to
+    # gather comparable runs, not because one is known to win. See the module docstring of
+    # ``rollout_session_agent_loop`` for what each does inside verl.
+    #
+    # ``raise``     -- (default) verl marks the whole prompt group ``failure``. Sync trains the
+    #                 surviving siblings; the async trainers evict and refill the entire group.
+    # ``empty``     -- return no rows. The group stays ``finished`` and trains its survivors in
+    #                 every trainer mode, but the failure leaves no ``agent_loop/*`` metrics.
+    # ``inert_row`` -- return one masked zero-reward row. Metrics and row counts survive, but
+    #                 the synthetic zero sits inside the GRPO group and biases every sibling's
+    #                 advantage. Biased by construction; use it knowing that.
+    on_rollout_failure: str = "raise"
+
     # Names the agent's own ``metrics`` entries that ride along in verl's
     # ``reward_extra_info``, with the value to report when a rollout does not produce one.
     # Declared rather than discovered because verl reduces this dict across the batch and a
