@@ -117,7 +117,7 @@ async def test_run_end_to_end_single_trace(fake_upload):
     assert out.extra_fields["request_id"] == loop.session_id
     assert out.extra_fields["trace_index"] == 0
     assert out.extra_fields["num_trace_records"] == 1
-    assert out.extra_fields["reward_extra_info"] == {SCORE_KEY: 0.75, "rollout_failed": 0.0, "num_trace_records": 1.0}
+    assert out.extra_fields["reward_extra_info"] == {SCORE_KEY: 0.75, "num_trace_records": 1.0}
     # the container's own metrics ride along in the session record
     assert out.extra_fields["metrics"]["agent_latency_s"] == 2.5
     assert out.extra_fields["metrics"]["num_records"] == 1
@@ -361,7 +361,6 @@ def assert_inert_row(output, *, dispatch_step: int = 3):
     assert output.num_turns == 0
     assert output.extra_fields["rollout_failed"] == 1.0
     assert output.extra_fields["num_trace_records"] == 0
-    assert output.extra_fields["reward_extra_info"]["rollout_failed"] == 1.0
     assert output.extra_fields["reward_extra_info"][SCORE_KEY] == 0.0
     # staleness stands in the dispatch step rather than inflating to global_steps
     assert output.extra_fields["min_global_steps"] == dispatch_step
@@ -548,7 +547,6 @@ async def test_reward_extra_info_carries_declared_metrics_only():
     assert info["f_beta"] == 0.6
     assert info["num_turns"] == 3.0
     assert info[SCORE_KEY] == 0.75
-    assert info["rollout_failed"] == 0.0
     assert info["num_trace_records"] == 1.0
     assert "undeclared" not in info
     assert "reward" not in info  # verl derives its own reward metric from rm_scores
@@ -556,21 +554,20 @@ async def test_reward_extra_info_carries_declared_metrics_only():
 
 async def test_reward_extra_info_key_set_is_identical_on_success_and_failure():
     """verl reduces this dict across the batch, so a key only some rows carry is averaged
-    over the wrong denominator -- and the v1 replay buffer raises on a missing one."""
+    over the wrong denominator -- and the v1 replay buffer raises on a missing one. A failed
+    rollout reports every declared key at its default, the score at 0.0, and nothing else:
+    whether the rollout failed is carried by the ``rollout_failed`` extra field, not here."""
     defaults = {"submitted": 0.0, "num_turns": 0.0, "ok": 0.0}
     loop = make_loop(reward_extra_info_defaults=defaults)
 
-    successful = loop._reward_extra_info(
-        make_dump(reward=1.0, metrics={"submitted": 1.0, "num_turns": 4}), 1, 1.0, failed=False
-    )
-    failed = loop._reward_extra_info(None, 0, 0.0, failed=True)
+    successful = loop._reward_extra_info(make_dump(reward=1.0, metrics={"submitted": 1.0, "num_turns": 4}), 1, 1.0)
+    failed = loop._reward_extra_info(None, 0, 0.0)
 
     assert successful == {
         "submitted": 1.0,
         "num_turns": 4.0,
         "ok": 0.0,
         SCORE_KEY: 1.0,
-        "rollout_failed": 0.0,
         "num_trace_records": 1.0,
     }
     assert failed == {
@@ -578,7 +575,6 @@ async def test_reward_extra_info_key_set_is_identical_on_success_and_failure():
         "num_turns": 0.0,
         "ok": 0.0,
         SCORE_KEY: 0.0,
-        "rollout_failed": 1.0,
         "num_trace_records": 0.0,
     }
     assert set(successful) == set(failed)

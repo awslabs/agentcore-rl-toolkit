@@ -51,6 +51,6 @@ class RolloutSessionAgentLoopConfig:
     # Declared rather than discovered because verl reduces this dict across the batch and a
     # key that only some rollouts carry is silently averaged over the wrong denominator; a
     # declared default keeps every row's key set identical. ``reward`` is ignored (verl
-    # derives it from ``rm_scores`` itself); ``score``, ``rollout_failed`` and
-    # ``num_trace_records`` are always added.
+    # derives it from ``rm_scores`` itself); ``reward_score`` and ``num_trace_records`` are
+    # always added.
     reward_extra_info_defaults: dict[str, float] | None = None

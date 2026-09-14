@@ -476,7 +476,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
             **linear_metrics,
         )
 
-        reward_extra_info = self._reward_extra_info(rollout, len(records), reward_score, failed=False)
+        reward_extra_info = self._reward_extra_info(rollout, len(records), reward_score)
         outputs = [
             self._record_to_output(
                 record,
@@ -505,10 +505,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         rollout: RolloutDumpResponse | None,
         num_records: int,
         reward_score: float,
-        *,
-        failed: bool,
     ) -> dict[str, float]:
-        """The agent's declared scalar metrics, plus this rollout's score and outcome.
+        """The agent's declared scalar metrics, plus this rollout's score.
 
         Only *declared* keys are carried (``reward_extra_info_defaults``): verl reduces this
         dict across the batch, so a key that only some rollouts report would be averaged over
@@ -658,7 +656,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                 trace_index=0,
                 num_records=0,
                 staleness=(dispatch_step, dispatch_step),
-                reward_extra_info=self._reward_extra_info(None, 0, 0.0, failed=True),
+                reward_extra_info=self._reward_extra_info(None, 0, 0.0),
                 trace_metadata={},
                 failed=True,
                 failure_reason=failure_reason,
