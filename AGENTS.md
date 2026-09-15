@@ -508,6 +508,7 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - GitHub pull request descriptions must not hard-wrap prose at a fixed column width. Write each Markdown paragraph as one physical line, regardless of length, and let GitHub handle visual wrapping.
 - In pull request descriptions, insert newlines only for Markdown structure: paragraph boundaries, headings, list items, blockquotes, tables, code blocks, and similar constructs.
 - This pull request formatting rule does not apply to git commit messages or repository documentation; follow their existing wrapping conventions.
+- When implementing or changing behavior covered by a document in `designs/`, update that document and its `Implementation` status in the same change.
 - Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)

@@ -4,10 +4,77 @@ Train agents deployed on Bedrock AgentCore Runtime (ACR) with [verl](https://git
 using the in-repo [rollout gateway](../../rollout_gateway/) for token-level trajectory
 capture.
 
-The integration keeps verl stock: it plugs into
-`python -m verl.trainer.main_ppo` as a custom v1 agent loop, captures tokens with
-the in-repo gateway, and leaves verl's replay buffer, filtering, checkpointing,
-validation, and rollout-correction paths unchanged.
+The integration uses verl's public v1 agent-loop interface. Replay buffering,
+filtering, checkpointing, rollout correction, worker execution, and data-parallel
+balancing remain verl-owned.
+
+## Trainer modes
+
+verl's built-in `trainer.v1.trainer_mode` values work when every rollout is
+guaranteed to produce exactly one training row. `trainer.py` registers one
+`agentcore_*` name per verl v1 backend for the case where a rollout may produce
+several rows, and for AgentCore-specific observability:
+
+| `trainer.v1.trainer_mode` | wraps verl's |
+|---|---|
+| `agentcore_sync` | `sync` |
+| `agentcore_colocate_async` | `colocate_async` |
+| `agentcore_separate_async` | `separate_async` |
+
+Each is that verl trainer plus three mixins from
+[`trainer_mixins/`](trainer_mixins/) — `VariableRowBatchingMixin` (below),
+`AgentLoopMetricsMixin` (agent-reported metrics as tracker series and
+`reward_extra_info`), and `AdvantageZeroMetricsMixin` (collapsed-GRPO-group
+accounting). An `agentcore_*` name is only a registry key: the trainer writes
+verl's own mode string back into `trainer.v1.trainer_mode` before the base
+trainer initializes, because `PPOTrainer` compares that string literally to pick
+the replay buffer, refill semantics, and the `trainer.v1.<mode>` config node it
+reads `parameter_sync_step` from.
+
+Register the modes by naming the module in `VERL_USE_EXTERNAL_MODULES` before
+running `python -m verl.trainer.main_ppo`:
+
+```bash
+export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
+```
+
+verl imports the external module in the driver and inherited Ray actor
+environments before its process-local trainer lookup. On a cluster started with
+`ray start`, the variable must already be in each node's environment — verl does
+not forward it.
+
+### Variable-row batching
+
+`VariableRowBatchingMixin` keeps the configured actor optimizer schedule stable
+when one rollout expands into a variable number of trajectory rows. verl's `step`
+splits a training batch into `parameter_sync_step` `sample -> update` triggers, so
+with
+
+```
+M = data.train_batch_size / parameter_sync_step / actor.ppo_mini_batch_size
+```
+
+the trainer pads only to `actor_data_parallel_size * M` and sends
+`num_mini_batch=M` to the actor worker instead of verl's fixed
+`mini_batch_size`. The expanded row count can therefore change the number of rows
+in each mini-batch without silently creating additional optimizer steps. `M`
+reduces to `train_batch_size / ppo_mini_batch_size` for `agentcore_sync` and
+`agentcore_colocate_async` (both held to `parameter_sync_step=1`) and to `1` for
+`agentcore_separate_async`, which verl requires to satisfy
+`train_batch_size == parameter_sync_step * ppo_mini_batch_size`.
+
+Every `agentcore_*` mode requires v1 actor-only training with distillation
+disabled and `loss_agg_mode=seq-mean-token-sum`; the colocated modes additionally
+require `parameter_sync_step=1`, since they sleep their rollout engines for the
+whole training pass and a second trigger would wait forever. Unsupported
+configurations fail at startup. The loss mode ensures that expanded rows add
+token-loss mass without replacing the configured pre-expansion denominator; other
+aggregation modes change that normalization or weighting. With `M=1`, all emitted
+rows are optimized together. With `M > 1`, rows from one rollout may cross
+optimizer steps, although the configured step count and additive weighting within
+each step remain stable. See the
+[variable-row batching design](../../../../designs/verl_variable_trajectory_batching.md)
+for the derivation.
 
 ## How it works
 
@@ -37,6 +104,7 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
 - A session's trajectory tree can fork (sub-agents, context compaction); every leaf
   becomes its own training row (`run()` returns `list[AgentLoopOutput]`) — hence the
   hard `trainer.use_v1=true` requirement.
+
 The agent must forward the trainer-supplied key when it constructs its model client:
 
 ```python
@@ -54,8 +122,7 @@ endpoints.
 
 ## Install
 
-verl is pinned to uni-agent's blessed submodule commit `78bba31d` via
-`[tool.uv.sources]`. From a checkout of this repo:
+verl is pinned to version 0.9.0. From a checkout of this repo:
 
 ```bash
 uv sync --extra verl
@@ -77,6 +144,27 @@ uv sync --extra verl --group verl-megatron
   `megatron.vanilla_mbridge=False`.
 - LoRA recipes without NVIDIA Apex must set
   `++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False`.
+
+#### Context parallelism on VL models: apply the megatron-bridge patch
+
+**Required for `context_parallel_size > 1` on a vision-language architecture** (e.g. Qwen3.6-27B / `Qwen3_5ForConditionalGeneration`, which carries a `vision_config` even when the task is text-only). Run it after every `uv sync`, since uv reinstalls the package and reverts the edit:
+
+```bash
+./patches/apply-megatron-bridge-cp-clamp.sh    # from the repo root; idempotent
+```
+
+To check whether it is currently applied:
+
+```bash
+grep -c "LOCAL PATCH (agentcore-rl-toolkit)" \
+  .venv/lib/python3.12/site-packages/megatron/bridge/models/qwen_vl/modelling_qwen3_vl/utils.py
+```
+
+What it fixes: megatron-bridge's `qwen_vl` `preprocess_packed_seqs` pads each sequence to `align_size = tp * cp * 2`, then slices chunk one of the zigzag-CP split by position in the *padded* sequence while reading a buffer that holds only real tokens. It clamps chunk two but not chunk one, so any row shorter than `tp * cp` raises `RuntimeError: The expanded size of the tensor (N) must match the existing size (M)` from `actor_rollout_compute_log_prob` — i.e. the rollout completes in full and then the first training-side forward pass dies, so a single short row costs the whole batch. The patch clamps chunk one the same way chunk two already is; it is a no-op on rows long enough to split, verified byte-identical on normal-length rows.
+
+Short rows are not avoidable from config: verl synthesizes `prompt_len=1 / response_len=1` samples itself in `trainer/ppo/padding_utils.py` to make the batch divisible by the dp size. Nor is any `cp > 1` layout safer than another — the alignment depends on the `tp * cp` product, not on either alone.
+
+Text-only models (e.g. `Qwen3MoeForCausalLM`) take verl's own THD path, never reach this function, and need none of this.
 
 ## Dataset contract: the `payload` column
 
@@ -128,6 +216,11 @@ computation.
   agent-side contract error. verl contains the exception to the affected prompt
   group, so training continues without rows from that group.
 
+To aggregate numeric fields from the agent result's `metrics` dict, declare each
+field and its missing-value default under `reward_extra_info_defaults` in
+`agentcore_agent.yaml`. Only declared fields are forwarded, so every rollout has
+the same keys. `reward` is omitted because verl derives it from `rm_scores`.
+
 **Trainer-side rewards (`reward_mode="separate"`) are not supported yet** and are
 rejected at startup because verl's v1 reward managers require dataset columns that
 the payload-first contract does not provide.
@@ -143,12 +236,25 @@ Each recipe separates verl configuration in its shell script from
 Hydra overrides, but loop kwargs are loaded worker-side and are not CLI-addressable;
 edit the YAML or use `${oc.env:...}` interpolation.
 
+## Trainer observability
+
+Every `agentcore_*` mode logs, per actor update, `batching/total_real_rows`,
+`batching/total_rows`, `batching/total_padding_rows`, and
+`training/rollout_failure/total_missing_sessions` (nominal rollouts for the trigger
+minus the distinct sessions actually seen). These are per-trigger counts, and verl
+reduces a step's metrics by name: the `total_*` naming is what makes all four sum
+across the triggers of a step (separate-async with `parameter_sync_step > 1`) rather
+than being sample-weighted-averaged. The metric mixins add
+`agent_loop/<name>/{mean,min,max,sum}` for every metric an agent loop reports
+through `AgentLoopOutput.extra_fields`, plus `critic/advantages/zero_mean` and
+`critic/advantages/zero_pass_mean` for collapsed GRPO groups.
+
 ## Token budgets
 
 The integration keeps four limits separate:
 
 - `rollout.max_model_len` is the inference engine's model-context capacity. It
-  must be set explicitly; stock verl validates it against the model's Hugging
+  must be set explicitly; verl validates it against the model's Hugging
   Face `max_position_embeddings`.
 - `prompt_length` is verl's fixed storage width for the leading context of each
   emitted training row; it does not cap the prompts the gateway sends to the
@@ -173,7 +279,7 @@ memory and transfer overhead. Set `prompt_length` high enough for the leading
 contexts expected in emitted rows (or to `max_model_len` to rule out overflow).
 If a leading context does exceed `prompt_length`, the adapter preserves its
 overflow at the front of the response region with loss mask and rollout logprob
-zero. Training remains correct, but verl's stock length metrics count those
+zero. Training remains correct, but verl's existing length metrics count those
 overflow tokens as part of the response region, so overflow should be a
 fallback rather than the normal configuration.
 
@@ -183,6 +289,9 @@ remain trainable. With asynchronous replay, verl's existing failed-group policy
 evicts and refills the entire prompt group, including successful sibling
 trajectories. Preserving partial failed groups in asynchronous training requires
 session-level or partial-group failure handling in verl's replay buffer.
+The `training/rollout_failure/total_missing_sessions` metric reports
+`data.train_batch_size / parameter_sync_step * rollout.n` minus the number of
+materialized rollout sessions in each actor update, summed over a step's updates.
 
 ## Troubleshooting
 

@@ -12,6 +12,8 @@
   # Maximum output from one model call. The cumulative rollout remains bounded
   # separately by min(rollout.max_model_len, rollout.response_length).
   max_tokens_per_turn: 2048
+  fork_threshold_tokens: 0
+  tps_limit: 4
   # math rollouts finish in well under 2 minutes; fail hung sessions fast
   # instead of holding a TransferQueue slot for the 1800s library default
   max_rollout_time: 180

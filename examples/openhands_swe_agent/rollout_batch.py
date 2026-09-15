@@ -32,8 +32,8 @@ from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.agentcore_session import AgentCoreSession
 from agentcore_rl_toolkit.rollout_session.exception_utils import exception_to_string
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
-    ContainerBounds,
     RolloutSession,
+    RolloutSessionBounds,
     run_rollout_with_bounds,
 )
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
@@ -354,11 +354,11 @@ def _trace_to_dict(record: TraceRecord) -> dict:
     }
 
 
-def local_bounds(config: EvalConfig) -> ContainerBounds:
-    """Fill :class:`ContainerBounds` with process-local implementations (training fills
+def local_bounds(config: EvalConfig) -> RolloutSessionBounds:
+    """Fill :class:`RolloutSessionBounds` with process-local implementations (training fills
     it with Ray actors). Built once per experiment, which is what makes the semaphores
     cap anything."""
-    return ContainerBounds(
+    return RolloutSessionBounds(
         container_semaphore=LocalPrioritySemaphore(config.concurrency),
         rollout_semaphore=LocalPrioritySemaphore(config.rollout_concurrency or config.concurrency),
         container_priority_assigner=LocalPriorityAssigner(),
@@ -412,7 +412,7 @@ async def run_one(
     experiment_start_at: str,
     task_row: dict,
     n_idx: int,
-    bounds: ContainerBounds,
+    bounds: RolloutSessionBounds,
     s3_prefix: str,
     session_table: str,
     storage_region: str,

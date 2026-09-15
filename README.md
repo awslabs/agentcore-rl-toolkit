@@ -331,6 +331,8 @@ We welcome contributions!
 
 - **Adding examples**: Create a new folder under `examples/` with its own `pyproject.toml`
 - **Improving the core library**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup
+- **Proposing significant features or architectural changes**: See the
+  [design document process](designs/README.md)
 
 For bug reports, feature requests, and pull request guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 

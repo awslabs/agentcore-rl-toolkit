@@ -24,7 +24,7 @@ Per turn the healer holds, per sid:
 * ``prev_messages`` / ``prev_tools`` — the message list (including the generated assistant)
   and tools schema last rendered, used to re-derive the drifted skeleton.
 
-Healing ``messages`` for the next turn (:meth:`heal`):
+Healing ``messages`` for the next turn (``await heal(...)``):
 
 1. Linearity check at the **message level**: ``prev_messages`` must be a prefix of the
    incoming ``messages`` under dict equality (``==``, which is order-independent), and the
@@ -131,7 +131,7 @@ class LinearHealer:
 
     # -- public -------------------------------------------------------------
 
-    def heal(self, sid: str, messages: list[dict], tools: list[dict] | None) -> list[int]:
+    async def heal(self, sid: str, messages: list[dict], tools: list[dict] | None) -> list[int]:
         """Return the token ids to feed the backend for this turn.
 
         For the first turn of a sid (or a passthrough sid) this is just the plain render;
@@ -147,7 +147,7 @@ class LinearHealer:
         st = self._state.get(sid)
         if st is None or sid in self._disabled:
             # first turn, or healing disabled for this sid: feed the plain render
-            return self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+            return await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
 
         # Linearity is decided in MESSAGE space, not token space. st.prev_messages is this
         # session's history before this request (including the last assistant message). The
@@ -160,22 +160,22 @@ class LinearHealer:
         new = self._linear_delta(st, messages, tools)
         if new is None:
             # genuine edit/drop/branch/compaction (or a tools change): re-anchor
-            r_full = self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+            r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
             return self._handle_nonlinear(sid, r_full)
 
         # r_prev is the token-space render of the gateway's OWN stored history. r_ext extends
         # that same stored prefix by only the genuinely-new (non-assistant, drift-free)
         # messages, so r_ext starts with r_prev by construction (identical prefix list and
         # tools) -- the client's re-serialized prior turns never enter the fed tokens.
-        r_prev = self.renderer.render(st.prev_messages, tools=st.prev_tools, add_generation_prompt=False)
-        r_ext = self.renderer.render(st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True)
+        r_prev = await self.renderer.render(st.prev_messages, tools=st.prev_tools, add_generation_prompt=False)
+        r_ext = await self.renderer.render(st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True)
         if r_ext[: len(r_prev)] != r_prev:
             # template glue for the prior turns depends on the appended messages, so we
             # cannot splice the canonical prefix safely; re-anchor rather than emit garbage.
             return self._handle_nonlinear(sid, r_ext)
 
         # close is the token-space marker of the end of the assistant turn
-        close = self._assistant_close(st.prev_messages, st.prev_tools, r_prev)
+        close = await self._assistant_close(st.prev_messages, st.prev_tools, r_prev)
         if close is None:
             # couldn't isolate the assistant-closer (e.g. a template whose glue depends on
             # message type); don't emit a subtly-wrong sequence — fall back.
@@ -283,7 +283,7 @@ class LinearHealer:
         logger.info("linear healer: sid=%s non-linear jump; re-anchoring", sid)
         return r_full
 
-    def _assistant_close(
+    async def _assistant_close(
         self, prev_messages: list[dict], tools: list[dict] | None, r_prev: list[int]
     ) -> list[int] | None:
         """The template's between-message glue that follows the last assistant message
@@ -302,10 +302,10 @@ class LinearHealer:
         emit a wrong boundary.
         """
         before = prev_messages[:-1]
-        ra = self.renderer.render(
+        ra = await self.renderer.render(
             before + [{"role": "assistant", "content": _PROBE_A}], tools=tools, add_generation_prompt=False
         )
-        rb = self.renderer.render(
+        rb = await self.renderer.render(
             before + [{"role": "assistant", "content": _PROBE_B}], tools=tools, add_generation_prompt=False
         )
         close = _common_suffix(ra, rb)

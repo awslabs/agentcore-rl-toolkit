@@ -1,0 +1,52 @@
+actor_rollout_ref:
+  rollout:
+    agent:
+      default_agent_loop: rollout_session_agent_loop
+
+rollout_session_agent_loop:
+  _target_: agentcore_rl_toolkit.backends.experimental.verl.config.RolloutSessionAgentLoopConfig
+
+  # region of every AWS resource below (session table, output bucket, ec2 monitor)
+  aws_region: "${oc.env:AWS_REGION}"
+
+  dynamodb_table: "${oc.env:agent_dynamodb_table}"
+  rollout_output_s3: "${oc.env:rollout_output_s3}"
+
+  # record the ec2 instance id of each session
+  ec2_monitor_poll_interval: 60
+
+  task_kwargs:
+    agent: "openhands"
+    docker_image_namespace: "${oc.env:docker_image_namespace}"
+
+  # passed as-is to the rollout gateway (get_or_start_gateway)
+  rollout_gateway:
+    adapters: ["openai"]
+    max_turns_per_sid: 1000
+    # one record per trajectory reaches the trainer, so linearize history
+    history_mode: "linear"
+    fork_threshold_tokens: 0
+
+  # gateway defaults for turns the agent did not specify; verl's own
+  # temperature/top_p/top_k override the same keys
+  rollout_gateway_sampling_params:
+    max_new_tokens: 16000
+
+  rollout_session_bounds:
+    # at most rollout dp x max_num_seqs, or prefix kv cache hit rate drops
+    rollout_concurrency: 128
+    # capacity and/cost control
+    container_concurrency: 256
+
+    # AgentCore session creation: 25 TPS, 0 burst; EC2 CreateFleet: 5 TPS, 50 burst
+    session_create_rate: 5
+
+    agent_run_timeout: 1200
+    # includes task-specific setup
+    container_setup_timeout: 1200
+
+  # `backend` picks the implementation; only that backend's keys have to be set
+  rollout_session_backend:
+    backend: agentcore
+    agentcore_runtime_arn: "${oc.env:agentcore_runtime_arn}"
+    capacity_provider_arn: "${oc.env:agentcore_capacity_provider_arn}"

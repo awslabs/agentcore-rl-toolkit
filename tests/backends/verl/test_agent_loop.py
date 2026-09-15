@@ -93,7 +93,11 @@ async def test_run_end_to_end_inline_reward():
     assert len(out.prompt_ids) > 0
     assert out.reward_score == 0.75
     assert out.extra_fields["acr_result"]["rewards"] == 0.75
-    assert out.extra_fields["reward_extra_info"] == {}
+    assert out.extra_fields["reward_extra_info"] == {
+        "agent_reward": 0.75,
+        "acr_failed": 0.0,
+        "num_trace_records": 1.0,
+    }
 
     # invoke wiring: sid is a 36-char uuid used as both ACR session id and Bearer sid
     call = invoke.calls[0]
@@ -356,3 +360,63 @@ async def test_padded_region_cannot_exceed_max_model_len(field):
 async def test_invalid_max_tokens_per_turn_rejected(value):
     with pytest.raises(ValueError, match="max_tokens_per_turn"):
         _make_loop(max_tokens_per_turn=value)
+
+
+async def test_reward_extra_info_carries_scalar_metrics_over_defaults():
+    loop = _make_loop(
+        FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0, "num_turns": 0.0, "reward": 0.0}
+    )
+    _wire_result(
+        loop,
+        {
+            "status_code": 200,
+            "rewards": 0.75,
+            "metrics": {"f_beta": 0.6, "num_turns": 3, "undeclared": 9, "note": "x"},
+        },
+    )
+    outs = await loop.run(
+        {"temperature": 1.0}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"q": 1}, uid="u"
+    )
+    rei = outs[-1].extra_fields["reward_extra_info"]
+    assert rei["f_beta"] == 0.6 and rei["num_turns"] == 3.0
+    assert rei["acr_failed"] == 0.0 and rei["num_trace_records"] == 1.0
+    assert "reward" not in rei  # verl derives its reward metric from rm_scores
+    # ...but the agent's own scalar is carried under a non-colliding key, so it does not
+    # append to the list verl fills from rm_scores.
+    assert rei["agent_reward"] == 0.75
+    assert "undeclared" not in rei and "note" not in rei
+
+
+async def test_failed_rollout_carries_reward_extra_info_defaults():
+    loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults={"f_beta": 0.0})
+    rei = loop._reward_extra_info(None, 0.0, 0, failed=True)
+    assert rei == {"f_beta": 0.0, "agent_reward": 0.0, "acr_failed": 1.0, "num_trace_records": 0.0}
+
+
+async def test_reward_extra_info_keys_are_stable_across_loop_instances():
+    defaults = {"submitted": 0.0, "num_turns": 0.0, "ok": 0.0}
+    successful_loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults=defaults)
+    failed_loop = _make_loop(FakeLLMServerClient(), reward_extra_info_defaults=defaults)
+
+    successful = successful_loop._reward_extra_info(
+        {"metrics": {"submitted": 1.0, "num_turns": 4, "ok": True}}, 0.75, 1, failed=False
+    )
+    failed = failed_loop._reward_extra_info(None, 0.0, 0, failed=True)
+
+    assert successful == {
+        "submitted": 1.0,
+        "num_turns": 4.0,
+        "ok": 1.0,
+        "agent_reward": 0.75,
+        "acr_failed": 0.0,
+        "num_trace_records": 1.0,
+    }
+    assert failed == {
+        "submitted": 0.0,
+        "num_turns": 0.0,
+        "ok": 0.0,
+        "agent_reward": 0.0,
+        "acr_failed": 1.0,
+        "num_trace_records": 0.0,
+    }
+    assert set(successful) == set(failed)

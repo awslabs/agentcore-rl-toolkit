@@ -7,5 +7,11 @@
   # Per model call; cumulative context is configured in the training script.
   max_tokens_per_turn: 8192
   max_rollout_time: 1800
-  # Preserve sampled tokens by forking rather than realigning across turn drift.
+
+  history_mode: linear
+  linear_on_nonlinear: reset
   fork_threshold_tokens: 0
+
+  reward_thresholds:
+    task_success: 1.0
+    build_success: 0.5

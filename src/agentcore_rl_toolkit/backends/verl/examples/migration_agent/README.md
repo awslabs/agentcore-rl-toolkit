@@ -35,7 +35,7 @@ uv run python preprocess_migrationbench.py --s3-bucket-name <data-bucket>
 export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/...
 export ACR_S3_BUCKET=your-results-bucket
 wandb login
-./megatron_lora_sync_grpo.sh
+./megatron_lora_sync_grpo_qwen3-coder-30b-a3b.sh
 ```
 
 The per-turn generation limit is configured in `agentcore_agent.yaml`; the shell

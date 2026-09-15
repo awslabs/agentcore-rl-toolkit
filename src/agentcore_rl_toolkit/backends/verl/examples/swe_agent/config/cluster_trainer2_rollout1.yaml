@@ -1,0 +1,15 @@
+actor_rollout_ref:
+  rollout:
+    # deallocating KV cache reduces memory pressure during weight sync
+    free_cache_engine: true
+
+    # these are model/dataset specific
+    gpu_memory_utilization: 0.8
+    nnodes: 1
+
+    checkpoint_engine:
+      backend: "nccl"
+      custom_backend_module: "verl.checkpoint_engine.nccl_checkpoint_engine"
+
+trainer:
+  nnodes: 2

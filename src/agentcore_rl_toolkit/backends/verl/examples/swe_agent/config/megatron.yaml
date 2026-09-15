@@ -1,0 +1,6 @@
+actor_rollout_ref:
+  actor:
+    strategy: megatron
+    megatron:
+      use_mbridge: true
+      vanilla_mbridge: false

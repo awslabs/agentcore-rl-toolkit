@@ -1,5 +1,12 @@
 # Runtime Invocation Protocol: an execution lifecycle for stateful, long-running workloads
 
+| Field | Value |
+| --- | --- |
+| Status | Proposed |
+| Implementation | Not started |
+| Date | 2026-09-09 |
+| Pull request | [#120](https://github.com/awslabs/agentcore-rl-toolkit/pull/120) |
+
 ## Summary
 
 Stateful, long-running workloads separate three lifetimes that a simple

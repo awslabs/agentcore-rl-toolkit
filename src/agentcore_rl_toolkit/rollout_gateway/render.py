@@ -66,17 +66,20 @@ class ParsedOutput:
 class Renderer(Protocol):
     """The gateway's tokenization seam.
 
-    ``render``             : canonical chat messages (+ tools) -> prompt ``token_ids``
+    ``await render``       : canonical chat messages (+ tools) -> prompt ``token_ids``;
+                             ``chat_template_kwargs`` are per-request template variables
+                             (e.g. ``enable_thinking``) from the client's request body
     ``get_stop_sequences`` : stop strings / token ids for sampling
     ``parse``              : sampled response ``token_ids`` -> :class:`ParsedOutput`
     """
 
-    def render(
+    async def render(
         self,
         messages: list[dict],
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
         ...
 
@@ -129,8 +132,10 @@ class HfTemplateRenderer:
         stop_sequences: list[str] | list[int] | None = None,
         reasoning_parser: ReasoningParserFn | None = None,
         tool_parser: ToolParserFn | None = None,
+        chat_template_kwargs: dict | None = None,
     ) -> None:
         self.tokenizer = tokenizer
+        self._chat_template_kwargs: dict = dict(chat_template_kwargs or {})
         self._stop_sequences: list = list(stop_sequences) if stop_sequences else []
         self.reasoning_parser: ReasoningParserFn = reasoning_parser or split_reasoning
         # No implicit tool parser: None means tools-bearing requests are rejected at
@@ -164,25 +169,82 @@ class HfTemplateRenderer:
             if schema_name is not None:
                 self._schema = RESPONSE_SCHEMAS[schema_name]
 
-    def render(
+    def _render_text(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None) -> str:
+        return self.tokenizer.apply_chat_template(
+            self._rekey_reasoning(messages),
+            tools=tools,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            return_dict=False,
+            **({"chat_template": self._chat_template} if self._chat_template else {}),
+            **{**self._chat_template_kwargs, **(chat_template_kwargs or {})},
+        )
+
+    async def _encode(
+        self, text: str, *, padding=False, truncation=False, max_length=None, return_tensors=None, **kwargs
+    ) -> list[int]:
+        """Encode rendered text with HF options and native async tokenization.
+
+        HF currently has no async equivalent of ``apply_chat_template``. The
+        setup below mirrors the encoding configuration normally handled by its
+        synchronous tokenizer wrapper, then awaits the native ``async_encode``
+        call. Template rendering itself remains synchronous in ``_render_text``.
+        """
+        if return_tensors is not None or kwargs.get("return_overflowing_tokens", False):
+            raise ValueError("The gateway requires a single list[int], not tensor or overflow batches")
+        padding_strategy, truncation_strategy, max_length, _ = self.tokenizer._get_padding_truncation_strategies(
+            padding=padding, truncation=truncation, max_length=max_length, **kwargs
+        )
+        self.tokenizer.set_truncation_and_padding(
+            padding_strategy=padding_strategy,
+            truncation_strategy=truncation_strategy,
+            max_length=max_length,
+            stride=kwargs.get("stride", 0),
+            pad_to_multiple_of=kwargs.get("pad_to_multiple_of"),
+            padding_side=kwargs.get("padding_side"),
+        )
+        backend = self.tokenizer.backend_tokenizer
+        split_special_tokens = kwargs.get("split_special_tokens")
+        backend.encode_special_tokens = (
+            self.tokenizer.split_special_tokens if split_special_tokens is None else split_special_tokens
+        )
+        # tokenizers 0.22.2 snapshots its Rust configuration when async_encode is
+        # called, before returning the future. Do not await between configuring
+        # the backend and this call; other requests can then use their own settings.
+        encoding = await backend.async_encode(
+            text,
+            pair=kwargs.get("text_pair") or None,
+            is_pretokenized=kwargs.get("is_split_into_words", False),
+            add_special_tokens=kwargs.get("add_special_tokens", False),
+        )
+        return encoding.ids
+
+    async def render(
         self,
         messages: list[dict],
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
-        # return_dict=False: we want only the token ids. The dict form (the
-        # transformers>=5 default) bundles an attention mask, but that is a padding
-        # artifact the training backend builds itself when it batches rows.
-        ids = self.tokenizer.apply_chat_template(
-            self._rekey_reasoning(messages),
+        """Render with HF, then apply its encoding options using native async."""
+        kwargs = {**self._chat_template_kwargs, **(chat_template_kwargs or {})}
+        text = self._render_text(
+            messages,
             tools=tools,
-            tokenize=True,
             add_generation_prompt=add_generation_prompt,
-            return_dict=False,
-            **({"chat_template": self._chat_template} if self._chat_template else {}),
+            chat_template_kwargs=kwargs,
         )
-        return list(ids)
+        tokenizer_kwargs = kwargs.get("tokenizer_kwargs")
+        return await self._encode(
+            text,
+            padding=kwargs.get("padding", False),
+            truncation=kwargs.get("truncation", False),
+            max_length=kwargs.get("max_length"),
+            return_tensors=kwargs.get("return_tensors"),
+            add_special_tokens=False,
+            **(tokenizer_kwargs if tokenizer_kwargs is not None else {}),
+        )
 
     def _rekey_reasoning(self, messages: list[dict]) -> list[dict]:
         """Move assistant ``reasoning_content`` to the key this template reads.
@@ -325,7 +387,10 @@ class TinkerRenderer:
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
+        if chat_template_kwargs:
+            logger.warning("TinkerRenderer ignores chat_template_kwargs %s", sorted(chat_template_kwargs))
         msgs = list(messages)
         if tools:
             # tinker-cookbook tool schemas are ToolSpec dicts {name, description, parameters};

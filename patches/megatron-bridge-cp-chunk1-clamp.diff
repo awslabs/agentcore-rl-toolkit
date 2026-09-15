@@ -1,0 +1,27 @@
+--- .venv/lib/python3.12/site-packages/megatron/bridge/models/qwen_vl/modelling_qwen3_vl/utils.py.orig-preclamp	2026-09-10 06:54:42.000000000 +0000
++++ .venv/lib/python3.12/site-packages/megatron/bridge/models/qwen_vl/modelling_qwen3_vl/utils.py	2026-09-12 21:04:59.000000000 +0000
+@@ -748,9 +748,21 @@
+             start_idx = cu_seqlens_padded_cpu[i] // cp_size
+             # split to 2 chunks
+             d = input_ids[i, attention_mask[i]]
+-            input_ids_rmpad[start_idx : start_idx + half_seqlen] = d[
+-                half_seqlen * cp_rank : half_seqlen * (cp_rank + 1)
+-            ]
++            # LOCAL PATCH (agentcore-rl-toolkit): clamp chunk one to the real tokens,
++            # mirroring the clamp chunk two already has below. The chunk indices are
++            # positions in the *padded* sequence while d holds only real tokens, so any
++            # row shorter than tp*cp made this slice raise "The expanded size of the
++            # tensor (N) must match the existing size (M)". verl injects such rows
++            # itself (trainer/ppo/padding_utils.py builds prompt_len=1/response_len=1
++            # synthetic samples to make the batch divisible), so this cannot be avoided
++            # from config. Untouched destination positions keep their zeros, which is
++            # what chunk two already does for the padded tail.
++            # Pristine original: utils.py.orig-preclamp. Lost on every `uv sync`.
++            chunk_start = min(half_seqlen * cp_rank, d.shape[0])
++            chunk_end = min(half_seqlen * (cp_rank + 1), d.shape[0])
++            chunk_len = chunk_end - chunk_start
++            if chunk_len > 0:
++                input_ids_rmpad[start_idx : start_idx + chunk_len] = d[chunk_start:chunk_end]
+
+             remain_start = seqlen_padded_i - half_seqlen * (cp_rank + 1)
+             remain_end = seqlen_padded_i - half_seqlen * cp_rank

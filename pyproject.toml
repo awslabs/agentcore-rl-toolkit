@@ -39,6 +39,7 @@ dev = [
     # (>=5.0 matches the [gateway] extra: tokenizer.parse_response).
     "aiohttp>=3.9",
     "transformers>=5.0",
+    "tokenizers>=0.22.2",  # native async_encode used by the gateway renderer
     # openai: real-SDK wire-contract test for the gateway (Bearer-slot session capture).
     "openai>=1.0",
     # Runtime deps of agentcore_rl_toolkit.{aws_tools,rollout_session} rather than
@@ -63,6 +64,7 @@ gateway = [
     # transitively present via boto3 already, declared because the gateway relies on it.
     "aiohttp>=3.9",
     "transformers>=5.0",
+    "tokenizers>=0.22.2",  # native async_encode
     "jmespath>=1.0",
 ]
 # NOTE: the Tinker backend (TinkerSdkBackend + TinkerRenderer) needs `tinker` and
@@ -151,7 +153,11 @@ verl = [
     "torchvision>=0.23.0",
     # matches verl 0.9.0's reference stack
     "vllm==0.24.0",
-    "flash-linear-attention",
+    # 0.5.1's gated_delta_rule backward faults with "Triton Error [CUDA]: misaligned
+    # address" when H == HV (Qwen3.6-27B expands q/k to 48 heads via repeat_interleave
+    # before the call, so all 48 linear_attention layers hit it on the first optimizer
+    # step). Not varlen-specific; reproduces on the dense path at T=512.
+    "flash-linear-attention>=0.5.2",
     "flash-attn==2.8.3",
     "qwen-vl-utils",
 ]

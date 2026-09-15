@@ -15,3 +15,9 @@ clone swegym https://github.com/SWE-Gym/SWE-Bench-Fork.git 242429c188fcfd06aad13
 
 uv pip install -e ./swebench
 uv pip uninstall swebench
+
+# SWE-smith's grader (swesmith.harness.grading) -- a package, not a checkout, because the name
+# collides with nothing. Every one of its requirements sits behind an extra, so this installs
+# the module alone; what the grader path then imports (swebench via the sys.path append above,
+# plus docker, dotenv, ghapi, unidiff) is already here from the swebench install.
+uv pip install swesmith==0.0.9

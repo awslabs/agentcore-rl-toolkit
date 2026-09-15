@@ -248,14 +248,14 @@ def _build_reply_parts(parsed: ParsedOutput, finish: str) -> tuple[dict[str, Any
         "content": parsed.text or None,
     }
     # manager_message must equal what the client echoes on the next request, or the
-    # history match (dict equality) diverges and the turn mounts as a new branch. It
-    # mirrors wire_message minus reasoning_content
+    # history match (dict equality) diverges and the turn mounts as a new branch.
     manager_message: dict[str, Any] = {
         "role": "assistant",
         "content": parsed.text or "",
     }
     if parsed.reasoning:
         wire_message["reasoning_content"] = parsed.reasoning
+        manager_message["reasoning_content"] = parsed.reasoning
     if wire_tool_calls:
         wire_message["tool_calls"] = wire_tool_calls
         manager_message["tool_calls"] = manager_tool_calls

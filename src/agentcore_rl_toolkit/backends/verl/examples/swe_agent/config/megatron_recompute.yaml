@@ -1,0 +1,11 @@
+actor_rollout_ref:
+  actor:
+    megatron:
+      override_transformer_config:
+        recompute_method: uniform
+        recompute_granularity: full
+        recompute_num_layers: 1
+        # works with pp=2
+        # recompute_granularity: selective
+        # recompute_modules: ["moe"]
+        # recompute_num_layers: null

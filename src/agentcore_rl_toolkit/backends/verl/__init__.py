@@ -1,8 +1,10 @@
 """verl integration built on the in-repo rollout gateway.
 
-Plugs into verl as a custom agent loop (``rollout.agent.agent_loop_config_path``)
-running under the stock ``python -m verl.trainer.main_ppo`` entrypoint with
-``trainer.use_v1=true``. See README.md in this directory for setup.
+Plugs into verl as a custom agent loop (``rollout.agent.agent_loop_config_path``).
+Variable-row training can additionally select the ``agentcore_sync`` trainer
+by setting ``VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer``
+before running ``python -m verl.trainer.main_ppo``. See README.md in this
+directory for setup.
 
 ``AgentCoreAgentLoop`` (which imports verl) is exposed lazily so that importing
 this package — e.g. for ``VerlSamplingBackend`` in tests — does not require verl.

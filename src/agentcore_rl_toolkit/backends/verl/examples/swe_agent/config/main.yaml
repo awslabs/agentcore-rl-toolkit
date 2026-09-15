@@ -1,0 +1,33 @@
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+defaults:
+  - ppo_megatron_trainer
+  - megatron
+  - lora
+  - megatron_offload
+  - smart_ppo
+  - rollout_correction_decoupled
+  - dataset_swe_gym
+  - qwen3_30b_p6
+  - rollout_session_agent_loop
+  - async_separate_b2
+  - cluster_trainer_rollout_n2
+  - _self_
+
+actor_rollout_ref:
+  rollout:
+    agent:
+      num_workers: 64
+
+trainer:
+  project_name: verl_grpo_swe_gym
+  experiment_name: openhands_swe_agent
+
+  # training run
+  save_freq: 10
+  test_freq: 10
+  max_actor_ckpt_to_keep: 1
+  val_before_train: true
+  total_epochs: 15

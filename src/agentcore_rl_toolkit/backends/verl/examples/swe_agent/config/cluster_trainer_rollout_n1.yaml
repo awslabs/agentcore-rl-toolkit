@@ -1,0 +1,11 @@
+actor_rollout_ref:
+  rollout:
+    nnodes: 1
+    n_gpus_per_node: 4
+    checkpoint_engine:
+      backend: "nccl"
+      custom_backend_module: "verl.checkpoint_engine.nccl_checkpoint_engine"
+
+trainer:
+  nnodes: 1
+  n_gpus_per_node: 4
