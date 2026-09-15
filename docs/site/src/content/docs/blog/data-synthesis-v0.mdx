@@ -20,9 +20,9 @@ _September 10, 2026_
 We built a task synthesis recipe that takes nothing but an agent's environment
 (its tools, its state, its policy document) and grows a curriculum of verifiable
 training tasks from it for reinforcement learning. No seed tasks, no production
-traces, no human annotation. We applied this recipe to RL-train compact models 
-(Qwen3-8B and Qwen3-30B-A3B) across the τ²-Bench customer-service domains and 
-CAR-bench that includes tasks that require at strict policy compliance, disambiguation, 
+traces, no human annotation. We applied this recipe to RL-train compact models
+(Qwen3-8B and Qwen3-30B-A3B) across the τ²-Bench customer-service domains and
+CAR-bench that includes tasks that require at strict policy compliance, disambiguation,
 and hallucination avoidance. The trained 8B and 30B models match or exceed frontier models.
 :::
 
@@ -41,24 +41,24 @@ training tasks - the training data for agentic models. Production traces, if the
 requests and carry no reliable label. Hand-written tasks don't scale past a few
 hundred.
 
-This challenge is particularly acute in embodied and specialized operational domains, 
-such as in-vehicle voice assistants. Here, the operating environment is finite and tightly 
-constrained: an agent interacts with a defined set of vehicle control APIs, climate systems, 
-navigation services, and communication tools under strict safety and privacy policies. 
-While massive frontier LLMs in the cloud can handle broad reasoning, real-world deployment 
-in automotive favors compressing the full interaction space into compact, compute-efficient models 
-(e.g., 8B to 30B parameters). Edge and embedded models minimize latency, eliminate per-turn cloud API 
+This challenge is particularly acute in embodied and specialized operational domains,
+such as in-vehicle voice assistants. Here, the operating environment is finite and tightly
+constrained: an agent interacts with a defined set of vehicle control APIs, climate systems,
+navigation services, and communication tools under strict safety and privacy policies.
+While massive frontier LLMs in the cloud can handle broad reasoning, real-world deployment
+in automotive favors compressing the full interaction space into compact, compute-efficient models
+(e.g., 8B to 30B parameters). Edge and embedded models minimize latency, eliminate per-turn cloud API
 costs, and guarantee deterministic policy execution even with intermittent connectivity.
 
-To enable reinforcement learning without human-labeled datasets, we sought a recipe 
+To enable reinforcement learning without human-labeled datasets, we sought a recipe
 with two foundational properties:
 
-- **Coverage and difficulty**: Tasks should span the entire space the environment induces, 
-including the unglamorous and safety-critical edge cases: requests the agent must refuse, 
-under-specified requests that demand contextual clarification before taking action, 
-requests involving multi-step actions across diverse states over long horizons, and 
+- **Coverage and difficulty**: Tasks should span the entire space the environment induces,
+including the unglamorous and safety-critical edge cases: requests the agent must refuse,
+under-specified requests that demand contextual clarification before taking action,
+requests involving multi-step actions across diverse states over long horizons, and
 requests requiring strict policy adherence.
-- **Verifiability**: Every synthesized task ships with a ground-truth reference outcome 
+- **Verifiability**: Every synthesized task ships with a ground-truth reference outcome
 verified against the live environment state, not graded by an LLM's fallible opinion.
 
 ## The recipe
@@ -80,7 +80,7 @@ trusted until the environment confirms it.
 tool code, the state schema, the seeded database, and the policy document, and
 compiles them into a structured description of what each action needs, what it
 changes, and how it can fail. This turns an opaque environment into something
-the rest of the pipeline can reason over. 
+the rest of the pipeline can reason over.
 
 **Stage 2: Evolve scenarios from easy to hard.** We start from every atomic
 action and grow. Each generation takes existing scenarios and applies
@@ -163,13 +163,13 @@ domains, each governed by its own policy document. We evaluate the `base` split 
     - **Airline** (50 tasks): Flight booking, cancellation, and customer support (agent-only control).
     - **Retail** (114 tasks): Order management, returns, and product inquiries over a stateful order database (agent-only control).
     - **Telecom** (114 tasks): Account management and multi-fault troubleshooting under dual control (agent guiding the user through device-side actions the agent cannot perform itself).
-  
-  **CAR-bench** (Kirmayr et al., ACL 2026): An automotive in-cabin voice assistant benchmark comprising 58 
-interconnected tools (navigation, vehicle hardware control, climate, calendar, media) and 19 domain policies. 
+
+  **CAR-bench** (Kirmayr et al., ACL 2026): An automotive in-cabin voice assistant benchmark comprising 58
+interconnected tools (navigation, vehicle hardware control, climate, calendar, media) and 19 domain policies.
 CAR-bench assesses agents across three complementary dimensions:
     - **Base** tasks (100 tasks): End-to-end multi-turn goal completion and correct tool invocation in a stateful world.
     - **Disambiguation** tasks (56 tasks): Real-world uncertainty resolution where instructions are under-specified.
-    - **Hallucination** / Limit-Awareness tasks (98 tasks): Robust boundary detection where tools or permissions are deliberately absent. 
+    - **Hallucination** / Limit-Awareness tasks (98 tasks): Robust boundary detection where tools or permissions are deliberately absent.
 
 ## Results
 
@@ -234,10 +234,10 @@ the hallucination split, where the request cannot be fulfilled with the
 available tools and the agent must say so, are where frontier models struggle
 most: frontier model A scores 0.69 and 0.62, frontier model B scores 0.37 and 0.61. The
 RL-trained student reaches 0.74 and 0.90, above both. These are exactly the
-behaviors the synthesis pipeline is designed to cover. **Why this matters for edge deployment.** 
-These results demonstrate that a compact 8B or 30B model does not need to master open-domain 
-world knowledge to operate as an expert assistant. By distilling the finite graph of domain 
-tools and safety policies via environment-grounded RL, smaller models achieve frontier-grade 
+behaviors the synthesis pipeline is designed to cover. **Why this matters for edge deployment.**
+These results demonstrate that a compact 8B or 30B model does not need to master open-domain
+world knowledge to operate as an expert assistant. By distilling the finite graph of domain
+tools and safety policies via environment-grounded RL, smaller models achieve frontier-grade
 consistency at latencies and resource envelopes viable for on-device automotive hardware.
 
 **What fine-tuning actually changed.** We ran each of the 114 telecom evaluation
@@ -265,7 +265,7 @@ rollout variants of each verified task hardens them.
 ## Case studies
 
 Here are two conversations from the evaluation runs, each one attempted twice by
-the same model — once **before** training, once **after**. 
+the same model — once **before** training, once **after**.
 
 ### Telecom: When Fixing the Obvious Problem Isn't Enough
 A customer calls because their picture messages stopped working a few hours ago. What makes this call
@@ -388,7 +388,7 @@ Both models identify the same gap in their reasoning, and both consider the pass
 heater as an alternative. The difference is disclosure. The untrained model applies the
 substitute without mentioning it and reports the request as completed, leaving the driver
 with no reason to think the temperature is unchanged. The trained model states the
-limitation, then offers the seat heater and asks before applying it. 
+limitation, then offers the seat heater and asks before applying it.
 
 
 ## What's next
