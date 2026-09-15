@@ -121,8 +121,8 @@ class HfTemplateRenderer:
         an explicit opt-in (``tool_parser=parse_tool_uses``).
 
       Passing either parser disables schema detection entirely: explicit injection
-      always wins (see ``backends.slime.integration.sglang_parsing``, which supplies
-      SGLang's detectors without this package importing an engine).
+      always wins. That is how a backend supplies its own engine's detectors (e.g.
+      SGLang's) without this package importing an engine.
     """
 
     def __init__(

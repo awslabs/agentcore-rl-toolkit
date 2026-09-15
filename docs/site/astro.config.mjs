@@ -47,6 +47,7 @@ export default defineConfig({
 								{ label: 'slime', slug: 'guides/slime-backend-setup' },
 								{ label: 'rllm', slug: 'guides/rllm-backend-setup' },
 								{ label: 'verl', slug: 'guides/verl-backend-setup' },
+								{ label: 'SageMaker', slug: 'guides/sagemaker-backend-setup' },
 							],
 						},
 					],
