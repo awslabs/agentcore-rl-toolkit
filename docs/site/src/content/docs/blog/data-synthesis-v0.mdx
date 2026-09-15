@@ -10,7 +10,7 @@ import fig_action_difficulty_depth from '../../../assets/blog/data-synthesis-v0/
 import fig_rl_buckets_telecom from '../../../assets/blog/data-synthesis-v0/fig_rl_buckets_telecom.png';
 
 
-_By Ping Qing, Panpan Xu, Luke Huan, Junjie Tang, Johannes Kirmayr, Lukas Stappen_
+_By Ping Qing, Panpan Xu, Lukas Stappen, Johannes Kirmayr, Junjie Tang, Luke Huan_
 
 _September 10, 2026_
 
@@ -20,15 +20,16 @@ _September 10, 2026_
 We built a task synthesis recipe that takes nothing but an agent's environment
 (its tools, its state, its policy document) and grows a curriculum of verifiable
 training tasks from it for reinforcement learning. No seed tasks, no production
-traces, no human annotation. We used this recipe to RL-train Qwen3-8B and
-Qwen3-30B-A3B on the three τ²-Bench customer-service domains and CAR-bench. The
-trained 8B and 30B models match or exceed frontier models.
+traces, no human annotation. We applied this recipe to RL-train compact models 
+(Qwen3-8B and Qwen3-30B-A3B) across the τ²-Bench customer-service domains and 
+CAR-bench that includes tasks that require at strict policy compliance, disambiguation, 
+and hallucination avoidance. The trained 8B and 30B models match or exceed frontier models.
 :::
 
 
 <figure class="art-figure">
   <Image src={fig_cost_vs_performance} alt="Figure 1 — Cost vs. Performance on the three τ²-Bench domains and CAR-bench." />
-  <figcaption>Figure 1 — Cost vs. Performance on the three τ²-Bench domains and CAR-bench.</figcaption>
+  <figcaption>Figure 1. Cost vs. Performance on the τ²-Bench and CAR-bench. RL-trained compact models match or outperform proprietary frontier models at a fraction of inference cost and latency.</figcaption>
 </figure>
 
 ## Why synthesize tasks at all
@@ -40,15 +41,25 @@ training tasks - the training data for agentic models. Production traces, if the
 requests and carry no reliable label. Hand-written tasks don't scale past a few
 hundred.
 
-We wanted a recipe with two properties:
+This challenge is particularly acute in embodied and specialized operational domains, 
+such as in-vehicle voice assistants. Here, the operating environment is finite and tightly 
+constrained: an agent interacts with a defined set of vehicle control APIs, climate systems, 
+navigation services, and communication tools under strict safety and privacy policies. 
+While massive frontier LLMs in the cloud can handle broad reasoning, real-world deployment 
+in automotive favors compressing the full interaction space into compact, compute-efficient models 
+(e.g., 8B to 30B parameters). Edge and embedded models minimize latency, eliminate per-turn cloud API 
+costs, and guarantee deterministic policy execution even with intermittent connectivity.
 
-- **Coverage and difficulty.** Tasks should span the space the environment
-  actually induces, including the unglamorous ones: requests the agent must
-  refuse, requests that need clarification, requests that involve multiple
-  actions across many states over a long horizon, and requests that demand
-  complex reasoning.
-- **Verifiability.** Every task ships with a reference outcome that is checked
-  against the environment, not against an LLM's opinion.
+To enable reinforcement learning without human-labeled datasets, we sought a recipe 
+with two foundational properties:
+
+- **Coverage and difficulty**: Tasks should span the entire space the environment induces, 
+including the unglamorous and safety-critical edge cases: requests the agent must refuse, 
+under-specified requests that demand contextual clarification before taking action, 
+requests involving multi-step actions across diverse states over long horizons, and 
+requests requiring strict policy adherence.
+- **Verifiability**: Every synthesized task ships with a ground-truth reference outcome 
+verified against the live environment state, not graded by an LLM's fallible opinion.
 
 ## The recipe
 
@@ -61,7 +72,7 @@ trusted until the environment confirms it.
     alt="System workflow."
   />
   <figcaption>
-    Figure 2 — Agentic Task Synthesis Workflow.
+    Figure 2. Verifiable Agentic Task Synthesis Workflow.
   </figcaption>
 </figure>
 
@@ -69,13 +80,11 @@ trusted until the environment confirms it.
 tool code, the state schema, the seeded database, and the policy document, and
 compiles them into a structured description of what each action needs, what it
 changes, and how it can fail. This turns an opaque environment into something
-the rest of the pipeline can reason over. For large environments that don't fit
-in one context window, the compilation runs in parallel per tool and is stitched
-together afterwards.
+the rest of the pipeline can reason over. 
 
 **Stage 2: Evolve scenarios from easy to hard.** We start from every atomic
 action and grow. Each generation takes existing scenarios and applies
-_complexity kernels_ to produce harder descendants: more actions chained
+_evolution stressors_ to produce harder descendants: more actions chained
 together, more entities involved, and more of the interaction-level and
 reasoning-level difficulty a real user brings, such as pushing back on policy,
 asking for something conditional, or under-specifying a request. A global tracker
@@ -91,24 +100,28 @@ generations you have a curriculum whose difficulty is a dial you control.
     src={fig_action_difficulty_depth}
     alt="Correlations between Task Difficulty versus Number of Write Actions and Evolution Depth."
   />
-  <figcaption>
-    Figure 3 — Correlations between Task Difficulty versus Number of Write Actions and Evolution Depth.
+    <figcaption>
+    Figure 3. Task difficulty rises with both the number of write actions and evolution
+    depth. Difficulty is the student base model's mean zero-shot pass rate over eight
+    parallel runs, so a lower bar means a harder task. Left: the pass rate
+    falls steadily from 98% on read-only scenarios to about 14% at 13 write actions. Right: each
+    round of evolution yields a harder generation, from 97% at depth 0 to 42% at depth 4.
   </figcaption>
 </figure>
 
 
-**Stage 3: Ground and verify.** A task initializer turns each scenario into a
-concrete task: a user goal plus a reference tied to specific values in the
-environment state. Then the task has to earn its place through layers of
-verification. We replay the reference against a fresh copy of the environment to
-confirm it is executable and lands on the predicted state; failures come back
-with a diagnosis that is used to repair the task in place; an independent agent
-attempts to solve the task by interacting with the user simulator, and its
-solution is scored by an evaluator against the policy; and tasks that are
-inconsistent with the independent agent's solutions and cannot be repaired are
-re-initialized from scratch rather than discarded. Only tasks that survive all
-three layers enter the dataset. Shallow, verified tasks become golden
-trajectories for SFT; deeper, harder tasks become verifiable references for RL.
+**Stage 3: Ground and verify.** A task initializer turns each scenario into a concrete
+task: a user goal, plus a reference outcome tied to specific values in the environment
+state. From there the environment, not a model, decides whether the task is real. A task
+joins the dataset only once we can establish that its reference outcome is actually
+reachable and that it is the outcome the policy calls for — an LLM's judgment that a task
+looks reasonable is never sufficient. Tasks that fail are not thrown away. They are
+diagnosed and reworked until they pass, which matters more than it sounds: filtering
+alone would quietly bias the curriculum toward whatever happens to be easy to generate
+correctly, and the tasks hardest to synthesize are exactly the safety-critical and
+under-specified ones we most need. What comes out is a task carrying a ground-truth
+reference the environment can check, which is what makes it usable as a reward signal at
+all.
 
 ## Bring your own environment
 
@@ -117,7 +130,7 @@ through six functions:
 
 | Function | What it does |
 |---|---|
-| `get_metadata()` | Describe policy, tools, and state schema. Called once to build the world model. |
+| `get_metadata()` | Describe policy, tools, and state schema. Called once to build the world knowledge. |
 | `init()` | Start a fresh episode at a scenario's initial state. |
 | `run()` | Orchestrate the interaction between user simulator and task agent to return a multi-turn trajectory. |
 | `state()` | Return the current internal state. |
@@ -140,9 +153,23 @@ to the synthesis agent.
   and RL references by evolution depth.
 - **RL:** GRPO with DAPO-style refinements, 16 rollouts per task against the live
   environment. Full parameter training, learning rate 1e-6, batch size 8.
-- **Evaluation:** τ²-Bench airline, retail, and telecom on the
-  [label-corrected release](https://taubench.com/blog/tau3-task-fixes.html), and
-  CAR-bench, mean over five runs.
+## Evaluation
+
+We evaluate the RL fine-tuned models on two public benchmarks:
+
+  **τ²-Bench** (Barres et al., 2025): A customer-service benchmark comprising 45 agent tools spread over three
+domains, each governed by its own policy document. We evaluate the `base` split of the
+[label-corrected release](https://taubench.com/blog/tau3-task-fixes.html) across three domains:
+    - **Airline** (50 tasks): Flight booking, cancellation, and customer support (agent-only control).
+    - **Retail** (114 tasks): Order management, returns, and product inquiries over a stateful order database (agent-only control).
+    - **Telecom** (114 tasks): Account management and multi-fault troubleshooting under dual control (agent guiding the user through device-side actions the agent cannot perform itself).
+  
+  **CAR-bench** (Kirmayr et al., ACL 2026): An automotive in-cabin voice assistant benchmark comprising 58 
+interconnected tools (navigation, vehicle hardware control, climate, calendar, media) and 19 domain policies. 
+CAR-bench assesses agents across three complementary dimensions:
+    - **Base** tasks (100 tasks): End-to-end multi-turn goal completion and correct tool invocation in a stateful world.
+    - **Disambiguation** tasks (56 tasks): Real-world uncertainty resolution where instructions are under-specified.
+    - **Hallucination** / Limit-Awareness tasks (98 tasks): Robust boundary detection where tools or permissions are deliberately absent. 
 
 ## Results
 
@@ -207,12 +234,11 @@ the hallucination split, where the request cannot be fulfilled with the
 available tools and the agent must say so, are where frontier models struggle
 most: frontier model A scores 0.69 and 0.62, frontier model B scores 0.37 and 0.61. The
 RL-trained student reaches 0.74 and 0.90, above both. These are exactly the
-behaviors the synthesis pipeline is designed to cover. Requests that need
-clarification and requests the agent must refuse are first-class scenario types
-in the evolution stage, and each one is verified against the environment before
-it enters the task set, so the model sees many grounded examples of when to ask
-and when to decline rather than learning them from a handful of policy
-sentences.
+behaviors the synthesis pipeline is designed to cover. **Why this matters for edge deployment.** 
+These results demonstrate that a compact 8B or 30B model does not need to master open-domain 
+world knowledge to operate as an expert assistant. By distilling the finite graph of domain 
+tools and safety policies via environment-grounded RL, smaller models achieve frontier-grade 
+consistency at latencies and resource envelopes viable for on-device automotive hardware.
 
 **What fine-tuning actually changed.** We ran each of the 114 telecom evaluation
 tasks five times and bucketed it as always-succeed, always-fail, or flipping.
@@ -228,7 +254,7 @@ rollout variants of each verified task hardens them.
     alt="Per-task consistency across 5 runs on τ²-Bench telecom for zero-shot, SFT, and RL: always-succeed rises 19.3% → 75.4% → 89.5%, flipping falls 49.1% → 23.7% → 10.5%, and always-fail falls 31.6% → 0.9% → 0.0%."
   />
   <figcaption>
-    Figure 4 — Per-task consistency across five runs on τ²-Bench telecom
+    Figure 4. Per-task consistency across five runs on τ²-Bench telecom
     (114 tasks), before and after fine-tuning (the intermediate SFT stage is
     shown for reference). Fine-tuning empties the always-fail bucket and turns
     most flipping tasks into reliable successes.
@@ -236,16 +262,23 @@ rollout variants of each verified task hardens them.
 </figure>
 
 
-## Case study
+## Case studies
 
-A telecom customer can't send picture messages. The account has three lines. Two
-things are wrong at once: the customer's line has run past its data cap, and the
-messaging app is missing a storage permission. The reference solution requires the
-agent to find the right line, refuel exactly the amount the customer agrees to,
-and then keep going until the app permission is fixed. The zero-shot model failed
-this task in all five runs; the RL-trained model passed it in all five.
+Here are two conversations from the evaluation runs, each one attempted twice by
+the same model — once **before** training, once **after**. 
 
-**Zero-shot model (failed, transferred to a human after 30 turns)**
+### Telecom: When Fixing the Obvious Problem Isn't Enough
+A customer calls because their picture messages stopped working a few hours ago. What makes this call
+hard is something the customer has no way of knowing: two unrelated things are broken at
+once. Their plan has run past its data cap, and the messaging app on their phone is
+missing a permission it needs. Fix only the data and the phone looks completely
+healthy (full signal, speed test passing) while the picture messages still fail.
+Getting this right means finding the correct line among the three on the account,
+getting the customer's approval before spending their money on extra data, and then
+carrying on working after the most visible symptom has already gone away. The untrained
+model failed this call on all five attempts. The trained model resolved it on all five.
+
+**Before training: escalates to a human without completing the task**
 
 ```text
 User:  I haven't been able to send picture messages for a few hours. I'm John Smith, 555-123-2002.
@@ -266,12 +299,13 @@ Agent: → transfer to human agent
         "All standard troubleshooting steps completed without resolution."
 ```
 
-The model noticed the mismatch in its own reasoning and talked itself out of it.
-From that point every downstream check was run against the wrong line, so the real
-cause was invisible. It also never reached the app-permission step in the policy,
-and it escalated a case the policy expects the agent to resolve.
+The model noticed the mismatch in its own reasoning and talked itself out of it. The
+one usage check it ran was therefore against the wrong line, came back under the cap,
+and took the real cause off the table; everything after that is generic device-side
+troubleshooting that could not have found it. It also never reached the app-permission
+step in the policy, and it escalated a case the policy expects the agent to resolve.
 
-**RL-trained model (passed, 50 turns)**
+**After training: resolves both faults in conversation**
 
 ```text
 User:  I haven't been able to send picture messages for a few hours. I'm John Smith, 555-123-2002.
@@ -298,11 +332,64 @@ User:  It works!
 Three things changed. The trained model resolved the customer's phone number to
 the correct line instead of grabbing the first one. It surfaced the data cap,
 quoted the price, and refueled exactly what the customer approved. And it treated
-"the speed test passes now" as a checkpoint rather than a finish line, continuing
-down the policy's MMS path until the second fault was found. None of this is
+"the speed test passes now" as a checkpoint rather than a finish line, working
+through the rest of the troubleshooting guide until the second fault turned up. None of this is
 exotic. It is the discipline of following a long protocol without skipping steps,
 which is exactly what a curriculum of verified multi-fault tasks teaches through
 RL training.
+
+### In-Car Assistant: Saying What You Can't Do.
+
+The second conversation tests something most benchmarks skip: whether an assistant will admit a limitation instead of papering
+over it. A driver notices their passenger is cold and asks for the passenger side to be
+warmed to match their own. The catch is that this assistant can read both zone
+temperatures but has not been given any way to change one — a realistic constraint, since
+a car may well let a voice assistant report the cabin temperature without handing it
+control of the climate zones. There is no way to succeed here by trying harder. The only
+good answer is to name what's missing and offer the nearest thing you can actually do,
+because a driver who is told "done!" stops looking for the dial.
+
+**Before training: warms the seat instead, and calls it done**
+
+```text
+User:  Check the climate settings for me. What's the temperature in the passenger zone?
+Agent: → read the climate settings         ✓ fan off, AC off — no temperature in the result
+Agent: → read the cabin temperatures       ✓ driver 23 °C, passenger 17 °C
+Agent: Hey there! The passenger zone is currently at 17 degrees Celsius.
+User:  What about the driver zone? What's that set to?
+Agent: The driver zone is set to 23 degrees Celsius! Want me to adjust it for you?
+User:  That's a big difference. No wonder my passenger is freezing. Set the passenger
+       zone to 23 degrees too. Match it to the driver zone.
+Agent: (thinking) "There's no tool to set the temperature… but I can adjust the seat
+        heating. The user didn't specify a level, so let's go with 2."
+Agent: → set the passenger seat heater to level 2      ✗ hallucinated non-existing tool
+```
+
+**After training: names the limit, and offers what it can do**
+
+```text
+User:  Check the climate settings for me. What's the temperature in the passenger zone?
+Agent: → read the climate settings and the cabin temperatures together
+        ✓ fan off, AC off · driver 23 °C, passenger 17 °C
+Agent: Fan speed is off, airflow is at your feet, AC is off. The passenger zone is at
+       17 degrees Celsius — the driver zone is a bit warmer at 23. Let me know if you'd
+       like to adjust anything!
+User:  That's exactly what I need to fix. My passenger is freezing over there. Set the
+       passenger zone to 23 degrees, same as mine.
+Agent: (thinking) "I don't see a function to set the temperature for specific zones. I
+        can get the temperature, but there's no corresponding set."
+Agent: Ah, I totally get it — nobody wants their passenger shivering! Unfortunately I
+       don't have the ability to adjust the temperature for specific zones. I can check
+       it, but setting it isn't something I can do from here. What I can do is turn on
+       the seat heating for the passenger. Would you like me to do that?
+```
+
+Both models identify the same gap in their reasoning, and both consider the passenger seat
+heater as an alternative. The difference is disclosure. The untrained model applies the
+substitute without mentioning it and reports the request as completed, leaving the driver
+with no reason to think the temperature is unchanged. The trained model states the
+limitation, then offers the seat heater and asks before applying it. 
+
 
 ## What's next
 
@@ -313,18 +400,17 @@ RL training.
 3. **A guided data agent.** An interactive agent that helps a team turn their
    policy document and traces into reward references and reward functions, and
    iterates on those functions against adversarial rollouts.
-4. **Beyond customer service.** Read-only QA agents over databases and corpora
-   are the next environment class.
+4. **Compression for Embedded & On-Device Deployment.** Extending the synthesis recipe to specialize sub-8B models.
+
 
 ## Acknowledgements
 
 - All RL training and rollout orchestration in this work ran on
 [agentcore-rl-toolkit](https://github.com/awslabs/agentcore-rl-toolkit), which
-gave us isolated per-rollout environments on Bedrock AgentCore Runtime — see
+gave us isolated per-rollout environments on Bedrock AgentCore Runtime, see
 [Training multi-step agents on AgentCore Runtime with reinforcement learning](/agentcore-rl-toolkit/blog/training-multi-step-agents-rl/)
 for the system it builds on.
-- We thank the τ²-Bench and CAR-bench authors for releasing the
-benchmark.
+- We thank the τ²-Bench and CAR-bench authors for releasing the benchmarks.
 
 ## References
 
