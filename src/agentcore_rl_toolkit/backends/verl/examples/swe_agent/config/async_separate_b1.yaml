@@ -7,4 +7,4 @@ trainer:
 
     # separete_async trainer uses its own name
     separate_async:
-      parameter_sync_step: 2
+      parameter_sync_step: 1

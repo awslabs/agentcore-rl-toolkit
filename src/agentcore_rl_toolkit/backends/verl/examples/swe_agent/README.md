@@ -175,7 +175,7 @@ worker, so these are cluster-wide numbers, not per-worker ones:
 `ec2_monitor_poll_interval` (60s) controls the single poller that stamps each session's
 EC2 instance id into the session table; one poller per run rather than a call per
 session, which would exhaust the EC2 API's rate limit at this scale. It is skipped
-unless the backend is `agentcore` and `dynamodb_table` is set.
+unless the backend is `agentcore_http` and `dynamodb_table` is set.
 
 ## Watching a run
 
@@ -201,6 +201,8 @@ unless the backend is `agentcore` and `dynamodb_table` is set.
 - The gateway runs in `history_mode: linear` with `fork_threshold_tokens: 0`, because
   verl's v1 trainer does not yet handle one rollout producing several trainable
   trajectories. `num_records` in the session meta shows if that ever happens anyway.
-- A failed rollout still emits a masked, zero-reward sample so the GRPO group stays
-  intact. Container-side failures are recorded from the container's own dump rather
-  than re-raised.
+- What a failed rollout reports to verl is set by `on_rollout_failure` in
+  `config/rollout_session_agent_loop.yaml` (`raise` | `empty` | `inert_row`); each has a
+  different cost and none is known to train best, so the recipe states the default
+  explicitly. Either way, the failure is recorded from the container's own dump (or the
+  trainer-side exception) into the S3 rollout dump and the session record first.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Unit tests for :class:`AgentCoreSession`'s data-plane client: one client per session
+"""Unit tests for :class:`AgentCoreHttpSession`'s data-plane client: one client per session
 (start, setup, every status poll, the dump, the delete), not one per call, and a client
 per call for anyone calling the helpers standalone. Fake aioboto3 session, no AWS.
 """
@@ -14,7 +14,8 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
     invoke_agentcore_session,
 )
 from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
-from agentcore_rl_toolkit.rollout_session.agentcore_session import AgentCoreSession
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
+from agentcore_rl_toolkit.rollout_session.exception_utils import describe_with_root_cause, root_cause
 from agentcore_rl_toolkit.rollout_session.wire import (
     InvocationRequest,
     InvocationResponse,
@@ -88,6 +89,8 @@ class FakeClient:
         self._record("delete")
         if self.recorder.deletes_missing:
             raise ResourceNotFoundException("session already gone")
+        if self.recorder.delete_error is not None:
+            raise self.recorder.delete_error
 
 
 class FakeClientContext:
@@ -108,11 +111,17 @@ class FakeClientContext:
 class Recorder:
     """Counts the clients a run opened, and logs every call across all of them."""
 
-    def __init__(self, pending_polls: int = 0, deletes_missing: bool = False):
+    def __init__(
+        self,
+        pending_polls: int = 0,
+        deletes_missing: bool = False,
+        delete_error: Exception | None = None,
+    ):
         self.clients: list[FakeClient] = []
         self.calls: list[str] = []
         self.pending_polls = pending_polls
         self.deletes_missing = deletes_missing
+        self.delete_error = delete_error
 
     def session(self):
         recorder = self
@@ -153,8 +162,8 @@ def no_sleep():
     return mock.patch("asyncio.sleep", _sleep)
 
 
-def session(session_id: str = "s1") -> AgentCoreSession:
-    return AgentCoreSession(
+def session(session_id: str = "s1") -> AgentCoreHttpSession:
+    return AgentCoreHttpSession(
         session_id,
         session_state=PersistentDict({"session_id": session_id}, persister=NullPersister()),
         runtime_arn=RUNTIME_ARN,
@@ -162,7 +171,7 @@ def session(session_id: str = "s1") -> AgentCoreSession:
     )
 
 
-async def run_rollout(s: AgentCoreSession) -> RolloutDumpResponse:
+async def run_rollout(s: AgentCoreHttpSession) -> RolloutDumpResponse:
     """One whole rollout: the lifecycle ``run_rollout_with_bounds`` drives."""
     async with s:
         await s.setup({"index": 1})
@@ -248,6 +257,73 @@ class SharedClientTest(IsolatedAsyncioTestCase):
         self.assertTrue(recorder.clients[0].closed)
         # Teardown still happened, on the still-open client.
         self.assertEqual(recorder.calls[-2:], ["delete", "close"])
+
+
+class TeardownDoesNotMaskTest(IsolatedAsyncioTestCase):
+    """A failing delete must not erase the error that ended the rollout."""
+
+    def chain(self, exc: BaseException) -> list[str]:
+        names, cur = [], exc
+        while cur is not None:
+            names.append(type(cur).__name__)
+            cur = cur.__cause__ or cur.__context__
+        return names
+
+    async def test_the_rollouts_error_survives_under_the_delete_error(self):
+        recorder = Recorder(delete_error=RuntimeError("403 Forbidden"))
+        with recorder.patch():
+            with self.assertRaises(RuntimeError) as caught:
+                async with (s := session()):
+                    await s.setup({})
+                    raise ValueError("the real error")
+
+        self.assertEqual(self.chain(caught.exception), ["RuntimeError", "ValueError"])
+        self.assertEqual(root_cause(caught.exception).args, ("the real error",))
+
+    async def test_a_cancelled_body_survives_too(self):
+        # The tell for the other hypothesis: rollouts torn down en masse, not rejected.
+        recorder = Recorder(delete_error=RuntimeError("403 Forbidden"))
+        with recorder.patch():
+            with self.assertRaises(RuntimeError) as caught:
+                async with (s := session()):
+                    await s.setup({})
+                    raise asyncio.CancelledError()
+
+        self.assertEqual(self.chain(caught.exception), ["RuntimeError", "CancelledError"])
+
+    async def test_a_delete_error_over_a_clean_body_has_no_chain(self):
+        recorder = Recorder(delete_error=RuntimeError("403 Forbidden"))
+        with recorder.patch():
+            with self.assertRaises(RuntimeError) as caught:
+                async with (s := session()):
+                    await s.setup({})
+
+        self.assertEqual(self.chain(caught.exception), ["RuntimeError"])
+
+    async def test_the_client_still_closes_when_the_delete_fails(self):
+        recorder = Recorder(delete_error=RuntimeError("403 Forbidden"))
+        with recorder.patch():
+            with self.assertRaises(RuntimeError):
+                async with (s := session()):
+                    await s.setup({})
+
+        self.assertEqual(recorder.calls[-2:], ["delete", "close"])
+        self.assertTrue(recorder.clients[0].closed)
+
+    async def test_the_summary_line_names_the_error_under_the_mask(self):
+        mask = RuntimeError("An error occurred (403) ... DeleteCapacityProviderSession")
+        mask.__context__ = ValueError("the real error")
+
+        described = describe_with_root_cause(mask)
+        self.assertIn("403", described)
+        self.assertIn("ValueError: the real error", described)
+        # Nothing to add when the exception is its own root cause.
+        self.assertEqual(describe_with_root_cause(ValueError("alone")), "alone")
+
+    async def test_a_context_cycle_does_not_hang_the_walk(self):
+        a, b = ValueError("a"), ValueError("b")
+        a.__context__, b.__context__ = b, a
+        self.assertIn(root_cause(a), (a, b))
 
 
 class ShutdownTest(IsolatedAsyncioTestCase):

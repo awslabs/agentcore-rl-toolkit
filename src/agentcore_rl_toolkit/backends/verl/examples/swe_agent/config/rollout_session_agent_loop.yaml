@@ -15,6 +15,10 @@ rollout_session_agent_loop:
   # record the ec2 instance id of each session
   ec2_monitor_poll_interval: 60
 
+  # what a failed rollout contributes to training: raise | empty | inert_row
+  # (see RolloutSessionAgentLoopConfig -- each has a different cost, none is known to be best)
+  on_rollout_failure: raise
+
   task_kwargs:
     agent: "openhands"
     docker_image_namespace: "${oc.env:docker_image_namespace}"
@@ -47,6 +51,6 @@ rollout_session_agent_loop:
 
   # `backend` picks the implementation; only that backend's keys have to be set
   rollout_session_backend:
-    backend: agentcore
+    backend: agentcore_http
     agentcore_runtime_arn: "${oc.env:agentcore_runtime_arn}"
     capacity_provider_arn: "${oc.env:agentcore_capacity_provider_arn}"

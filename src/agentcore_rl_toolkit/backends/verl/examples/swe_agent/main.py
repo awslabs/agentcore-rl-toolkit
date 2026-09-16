@@ -19,9 +19,12 @@ def main(config):
     with open_dict(config):
         config.ec2_instance_type = get_current_instance_type()
         config.trainer.experiment_start_at = dt.datetime.now().isoformat()
-        config.data.train_batch_size = (
-            config.trainer.v1.separate_async.parameter_sync_step * config.actor_rollout_ref.actor.ppo_mini_batch_size
-        )
+
+        if "separate_async" in config.trainer.v1.trainer_mode:
+            config.data.train_batch_size = (
+                config.trainer.v1.separate_async.parameter_sync_step
+                * config.actor_rollout_ref.actor.ppo_mini_batch_size
+            )
 
     validate_config(
         config=config,
