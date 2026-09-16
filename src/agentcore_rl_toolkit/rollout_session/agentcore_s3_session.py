@@ -26,7 +26,8 @@ What that contract costs, all accepted deliberately:
 import logging
 from typing import Any
 
-from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict
+from agentcore_rl_toolkit.aws_tools.agentcore_tools import start_agentcore_session
+from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.client import RolloutClient, RolloutFuture
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.rollout_session.lifecycle import RolloutSession, require_task_id
@@ -148,25 +149,17 @@ class AgentCoreS3Session(RolloutSession):
         await self.shutdown()
 
     async def setup(self, task: dict) -> None:
-        """Provision nothing: :meth:`run`'s invoke creates the ACR session itself.
-
-        Only records which runtime and result bucket this rollout used, so the session
-        record identifies where to look when it fails.
-        """
         await self.session_state.update(
             {
                 "runtime_arn": self._client.agent_runtime_arn,
-                "result_s3_bucket": self._client.s3_bucket,
-                # The client's exp_id: the experiment name, under the configured prefix.
-                "result_s3_prefix": self._client.exp_id,
             }
         )
 
+        async with measure_span_persistent("agentcore_setup", self.session_state):
+            await start_agentcore_session(self.runtime_arn, self.session_id, self._client)
+
     async def run(self, task: dict) -> RolloutDumpResponse:
         llm = _require_llm(task)
-        # The session id doubles as the ACR runtimeSessionId and as the agent's api_key,
-        # which is the slot the rollout gateway reads as its capture session -- so the
-        # trajectory the trainer drains is the one this container generated.
         future = await self._client.invoke_async(
             _require_payload(task),
             session_id=self.session_id,
@@ -178,12 +171,6 @@ class AgentCoreS3Session(RolloutSession):
         )
         self._future = future
         await self.session_state.set("result_key", future.result_key)
-        # `task["sampling_params"]` is deliberately not forwarded: the gateway applies the
-        # session's own sampling defaults over whatever the container asks for, so a second
-        # copy on the invoke payload would only be able to disagree.
-
-        # No timeout argument: run_rollout_with_bounds already wraps this call in
-        # bounds.agent_run_timeout and shuts the session down on the way out.
         result = await future
         return to_dump(result)
 
