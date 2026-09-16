@@ -142,8 +142,6 @@ uv sync --extra verl --group verl-megatron
 
 - Use NVIDIA Megatron-Bridge with `megatron.use_mbridge=True` and
   `megatron.vanilla_mbridge=False`.
-- LoRA recipes without NVIDIA Apex must set
-  `++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False`.
 
 #### Context parallelism on VL models: apply the megatron-bridge patch
 

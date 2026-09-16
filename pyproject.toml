@@ -208,6 +208,7 @@ verl-ci = [
     "torchvision>=0.23.0",
 ]
 verl-megatron = [
+    "apex",
     # Root-pin TE's transitive packages so uv applies the explicit Astral index to each.
     "transformer-engine[pytorch]==2.16.0",
     "transformer-engine-torch==2.16.0",
@@ -274,6 +275,7 @@ torchvision = [
     { index = "pytorch-cpu", group = "verl-ci" },
 ]
 # Prebuilt GPU wheels avoid local source builds from PyPI.
+apex = { index = "verl-wheelhouse" }
 flash-attn = { index = "astral-cu130" }
 transformer-engine = { index = "astral-cu130" }
 transformer-engine-torch = { index = "astral-cu130" }
@@ -287,6 +289,11 @@ explicit = true
 [[tool.uv.index]]
 name = "astral-cu130"
 url = "https://wheels.astral.sh/simple/cu130/"
+explicit = true
+
+[[tool.uv.index]]
+name = "verl-wheelhouse"
+url = "https://verl-project.github.io/verl-wheelhouse/simple/"
 explicit = true
 
 

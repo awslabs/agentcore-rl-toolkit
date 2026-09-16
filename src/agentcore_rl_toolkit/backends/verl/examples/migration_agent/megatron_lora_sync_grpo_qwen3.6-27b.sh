@@ -72,7 +72,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.megatron.sequence_parallel=true \
     actor_rollout_ref.actor.megatron.use_dist_checkpointing=False \
     actor_rollout_ref.actor.megatron.use_mbridge=True \
-    ++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1 \

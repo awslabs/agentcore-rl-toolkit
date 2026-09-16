@@ -18,8 +18,6 @@
 #        uv sync --extra verl --group verl-megatron
 #      Use a Python 3.12 venv (`uv venv --python 3.12`).
 #
-# LoRA without NVIDIA Apex requires gradient_accumulation_fusion=False below.
-#
 # Tool-call parsing happens in the rollout gateway's renderer, auto-detected from the
 # model's chat template (rollout_gateway/response_schemas.py — Qwen3-Coder maps to the
 # qwen3_5 XML schema). Engine-level parser flags (vllm tool_call_parser etc.) have no
@@ -99,7 +97,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.megatron.sequence_parallel=true \
     actor_rollout_ref.actor.megatron.use_dist_checkpointing=False \
     actor_rollout_ref.actor.megatron.use_mbridge=True \
-    ++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1 \
