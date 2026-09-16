@@ -133,7 +133,7 @@ sample-only backends like Tinker, which cannot render themselves.
 | Component | File | Role |
 |---|---|---|
 | `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`. Each training backend converts this to its native sample type in its own process. |
-| `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation, parallel tool-call branches, and heals re-tokenization drift between turns (CLEAN / REALIGN / FORK). Tokenizer-free and torch-free. |
+| `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation and parallel tool-call branches; re-tokenization drift splits records while preserving generated tokens (CLEAN / FORK). Tokenizer-free and torch-free. |
 | `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (default, HF `apply_chat_template`) or `TinkerRenderer` (needs `tinker-cookbook`, installed manually). |
 | `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
 | Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
@@ -202,30 +202,12 @@ The verl backend connects AgentCore rollouts to verl through `AgentCoreAgentLoop
 and the rollout gateway. See `backends/verl/README.md` for its architecture, setup,
 contracts, limitations, and troubleshooting.
 
-**Vendored from upstream projects (baselines).** Several files are adapted from
-[slime](https://github.com/THUDM/slime) and [trl](https://github.com/huggingface/trl)
-(both Apache-2.0; see `NOTICE`). To check what changed upstream before re-syncing, diff
-the source against the baseline commit below:
+**Vendored response schemas.** The response-schema registry is adapted from
+[trl](https://github.com/huggingface/trl) (Apache-2.0; see `NOTICE`).
 
 | This repo | upstream source | Baseline commit |
 |---|---|---|
-| `rollout_gateway/trajectory.py` | `slime/agent/trajectory.py` | `90c212b5` |
-| `rollout_gateway/adapters/{common,openai,anthropic}.py` | `slime/agent/adapters/` | `90c212b5` |
-| `rollout_gateway/parsing.py` | `slime/agent/parsing.py` | `90c212b5` |
-| `rollout_gateway/server.py` | `slime/agent/aiohttp_threaded.py` | `fa3c990a` |
 | `rollout_gateway/response_schemas.py` | `trl/chat_template_utils.py` (schema dicts) + `trl/chat_templates/*.jinja` (hash table) | `7073af94` |
-
-Re-sync workflow: `git -C <slime> diff 90c212b5..HEAD -- slime/agent/<file>` shows upstream
-changes since the lift (same pattern for trl). Our copies are intentionally modified
-(torch-free; `Sample` → `TraceRecord`; injected backend/renderer seams; sglang parser hook
-removed), so treat the diff as a review aid, not an automatic merge.
-
-`adapters/openai.py` additionally returns the assistant's text alongside `tool_calls`
-and every parallel call, where upstream sends `content=null` and only the first call.
-Do not re-adopt upstream's shape: it costs the agent its own text in the replayed
-history, and the replayed history then no longer reproduces the sampled tokens (see the
-mixed text + parallel tool-call test in
-`tests/rollout_gateway/test_gateway_integration.py`).
 
 For `response_schemas.py`, re-sync means updating the schema dicts and recomputing the
 sha256 hashes of the covered chat templates — preserving the marked local-additions

@@ -330,7 +330,7 @@ async def test_delta_healing_preserves_multiturn_tokens_and_training_masks(fast_
     full_renderer = HfTemplateRenderer(tok)
     full_renderer.render_delta = None  # Exercise the existing full-history oracle.
     healers = [LinearHealer(renderer), LinearHealer(full_renderer)]
-    managers = [TrajectoryManager(fork_threshold_tokens=1) for _ in healers]
+    managers = [TrajectoryManager() for _ in healers]
     history = [{"role": "user", "content": "Inspect the project."}]
     generated_ids = []
     with patch.object(renderer, "render_delta", wraps=renderer.render_delta) as delta:

@@ -1,6 +1,6 @@
 """Unit tests for the torch-free trajectory core (TrajectoryManager + TraceRecord).
 
-Covers CLEAN / REALIGN / FORK drift classification, loss masking of interleaved
+Covers CLEAN / FORK drift classification, loss masking of interleaved
 observations, sibling-branch dedup for parallel tool calls, and reward/rollout_id
 propagation. No torch, no aiohttp, no network.
 """
@@ -142,6 +142,33 @@ def test_fork_produces_two_samples():
     recs = mgr.get_trajectory("s", base_sample=BaseTrace(index=0), reward=0.5)
     assert len(recs) == 2
     assert all(r.reward == 0.5 for r in recs)
+
+
+@pytest.mark.parametrize("rewrite", [False, True], ids=["token-drift", "message-rewrite"])
+@pytest.mark.parametrize("first_response_length", [2, 1500])
+def test_drift_preserves_both_generations(rewrite, first_response_length):
+    mgr = TrajectoryManager()
+    first = TurnRecord(
+        prompt_ids=[1, 2],
+        output_ids=[9] * first_response_length,
+        finish_reason="stop",
+        output_log_probs=[-0.1] * first_response_length,
+    )
+    second = TurnRecord(prompt_ids=[1, 2, 8, 3], output_ids=[7], finish_reason="stop", output_log_probs=[-0.2])
+    mgr.record_turn("s", turn=first, prompt_messages=[_um("q")], response_message=_am("a"))
+    mgr.record_turn(
+        "s",
+        turn=second,
+        prompt_messages=[_um("q"), _am("edited" if rewrite else "a"), _um("more")],
+        response_message=_am("b"),
+    )
+    recs = mgr.get_trajectory("s", base_sample=BaseTrace(rollout_id="ep"), reward=1.0)
+    assert len(recs) == 2
+    for rec, turn in zip(recs, [first, second], strict=True):
+        assert rec.token_ids == turn.prompt_ids + turn.output_ids
+        assert rec.loss_mask == [1] * len(turn.output_ids)
+        assert rec.logprobs == turn.output_log_probs
+        assert rec.reward == 1.0 and rec.rollout_id == "ep"
 
 
 def test_truncated_metadata_from_length_finish():

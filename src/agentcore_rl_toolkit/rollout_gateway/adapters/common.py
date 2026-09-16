@@ -133,7 +133,6 @@ class BaseAdapter:
         renderer: Renderer,
         tokenizer=None,
         max_turns_per_sid: int | None = None,
-        fork_threshold_tokens: int | None = None,
         history_mode: str = "tree",
         linear_on_nonlinear: str = "reset",
         healer: LinearHealer | None = None,
@@ -151,15 +150,11 @@ class BaseAdapter:
         self.closed: set[str] = set()
 
         # one manager shared across all sids (and across co-mounted adapters, when
-        # passed in); per-sid trees live inside it. fork_threshold_tokens left None
-        # means the manager uses its own default.
+        # passed in); per-sid trees live inside it.
         if manager is not None:
             self.manager = manager
         else:
-            mgr_kwargs: dict[str, int] = {}
-            if fork_threshold_tokens is not None:
-                mgr_kwargs["fork_threshold_tokens"] = fork_threshold_tokens
-            self.manager = TrajectoryManager(**mgr_kwargs)
+            self.manager = TrajectoryManager()
 
         # linear-history mode: heal re-tokenization drift at generation time so the
         # manager stays permanently CLEAN (one sample per session). See linear.py.

@@ -174,11 +174,9 @@ async def test_single_turn_token_exact(server):
     assert rec.metadata["truncated"] is False and rec.metadata["ill_formed"] is False
 
 
-async def test_multi_turn_drift_healed_into_one_record(server):
-    """Two turns with the echoed history. Qwen3's template strips the <think> block
-    from the replayed assistant turn, so turn 2's prompt does NOT prefix-extend the
-    captured tokens — the manager must heal that real drift (REALIGN) rather than
-    fork, yielding ONE record whose trained tail is exactly turn 2's generation."""
+async def test_multi_turn_preserves_both_generations(server):
+    """Echoed history may re-tokenize differently (e.g. Qwen3 strips reasoning).
+    Keep both generations trainable, splitting records when the tokens drift."""
     gateway, backend, renderer, tokenizer = make_gateway()
     sid = "e2e:multi"
     gateway.create_session(sid, sampling_defaults={"temperature": 0.0})
@@ -203,35 +201,26 @@ async def test_multi_turn_drift_healed_into_one_record(server):
     assert len(backend.calls) == 2
     out1, out2 = backend.calls[0]["output_ids"], backend.calls[1]["output_ids"]
 
-    # ONE record: the manager absorbed the drift instead of splitting the episode
-    assert len(records) == 1
-    rec = records[0]
-    assert rec.reward == 0.5 and rec.rollout_id == "e2e-2"
-    assert len(rec.loss_mask) == len(rec.logprobs) == rec.response_length
+    assert len(records) in (1, 2)
+    assert [t for rec in records for t in _trained(rec)] == out1 + out2
+    assert [lp for rec in records for lp, mask in zip(rec.logprobs, rec.loss_mask, strict=True) if mask] == (
+        backend.calls[0]["logprobs"] + backend.calls[1]["logprobs"]
+    )
+    for rec in records:
+        assert rec.reward == 0.5 and rec.rollout_id == "e2e-2"
+        assert len(rec.loss_mask) == len(rec.logprobs) == rec.response_length
+        assert all(lp == 0.0 for lp, m in zip(rec.logprobs, rec.loss_mask, strict=True) if not m)
 
-    # turn 2's generation is trained, token-exact, at the end of the sequence
+    # turn 2's generation is trained, token-exact, at the end of the last record
+    rec = records[-1]
     assert rec.token_ids[-len(out2) :] == out2
     assert rec.loss_mask[-len(out2) :] == [1] * len(out2)
     assert rec.logprobs[-len(out2) :] == backend.calls[1]["logprobs"]
 
-    trained = _trained(rec)
-    if trained == out2:
-        # REALIGN path: turn 1's drifted response span was overwritten as context
-        assert sum(rec.loss_mask) == len(out2)
-    else:
-        # CLEAN path (no drift for this template/content): both turns trained
-        assert trained == out1 + out2
-    # mask=0 positions carry no logprob signal
-    assert all(lp == 0.0 for lp, m in zip(rec.logprobs, rec.loss_mask, strict=True) if not m)
 
-
-async def test_rewritten_echo_trains_only_final_turn(server):
-    """Non-cumulative capture, rewrite flavor: the client replays history but
-    EDITS the echoed assistant turn (as harnesses do — compaction, whitespace,
-    annotations). The edited echo no longer dict-matches the generated leaf, so
-    the manager merges the rewrite (demotes turn 1 to routing-only) instead of
-    stranding it as a trained dead-end: ONE record, only turn 2's generation
-    trained, turn 1 present as context only."""
+async def test_rewritten_echo_preserves_both_generations(server):
+    """An edited assistant echo forks the message tree. The original generation
+    remains trainable; the edited text is only context for the second turn."""
     gateway, backend, renderer, tokenizer = make_gateway()
     sid = "e2e:rewrite"
     gateway.create_session(sid, sampling_defaults={"temperature": 0.0})
@@ -255,17 +244,13 @@ async def test_rewritten_echo_trains_only_final_turn(server):
         records = await gateway.finish_session(sid, base_sample=BaseTrace(rollout_id="e2e-3"), reward=0.5)
 
     assert len(backend.calls) == 2
-    out2 = backend.calls[1]["output_ids"]
-
-    # one record; the abandoned turn-1 generation is NOT trained
-    assert len(records) == 1
-    rec = records[0]
-    assert _trained(rec) == out2
-    assert sum(rec.loss_mask) == len(out2)
-    # turn 2's full prompt (incl. the rewritten turn-1 text) became leading context
-    assert rec.response_length == len(out2)
-    assert rec.token_ids == backend.calls[1]["prompt_ids"] + out2
-    assert rec.logprobs == backend.calls[1]["logprobs"]
+    assert len(records) == 2
+    for rec, call in zip(records, backend.calls, strict=True):
+        assert _trained(rec) == call["output_ids"]
+        assert rec.loss_mask == [1] * len(call["output_ids"])
+        assert rec.response_length == len(call["output_ids"])
+        assert rec.token_ids == call["prompt_ids"] + call["output_ids"]
+        assert rec.logprobs == call["logprobs"]
 
 
 async def test_stateless_turns_fork_into_separate_records(server):
@@ -309,8 +294,7 @@ async def test_stateless_turns_fork_into_separate_records(server):
 async def test_anthropic_client_multi_turn_token_exact(server):
     """Same two-turn math conversation, driven by the REAL anthropic SDK against
     /v1/messages (auth via api_key -> X-Api-Key). Verifies the Anthropic adapter's
-    translate/reply path end to end: token-exact capture, one record, turn 2
-    trained at the tail."""
+    translate/reply path end to end: token-exact capture of both generations."""
     gateway, backend, renderer, tokenizer = make_gateway()
     sid = "e2e:anthropic"
     gateway.create_session(sid, sampling_defaults={"temperature": 0.0})
@@ -339,21 +323,19 @@ async def test_anthropic_client_multi_turn_token_exact(server):
     out1, out2 = backend.calls[0]["output_ids"], backend.calls[1]["output_ids"]
     assert backend.calls[0]["session_id"] == sid
 
-    # one record; turn 2's generation trained token-exact at the tail
-    assert len(records) == 1
-    rec = records[0]
-    assert rec.rollout_id == "e2e-5" and rec.reward == 1.0
+    assert len(records) in (1, 2)
+    assert all(rec.rollout_id == "e2e-5" and rec.reward == 1.0 for rec in records)
+    assert [t for rec in records for t in _trained(rec)] == out1 + out2
+    rec = records[-1]
     assert rec.token_ids[-len(out2) :] == out2
     assert rec.loss_mask[-len(out2) :] == [1] * len(out2)
     assert rec.logprobs[-len(out2) :] == backend.calls[1]["logprobs"]
-    trained = _trained(rec)
-    assert trained in (out2, out1 + out2)  # REALIGN vs CLEAN, template-dependent
 
 
 async def test_mixed_protocol_clients_share_one_trajectory(server):
     """Turn 1 via the real openai SDK, turn 2 via the real anthropic SDK, SAME sid:
     both adapters feed one TrajectoryManager, so the mixed-protocol session
-    linearizes into ONE record with turn 2 trained at the tail."""
+    captures both generations, splitting records if the replayed tokens drift."""
     gateway, backend, renderer, tokenizer = make_gateway()
     sid = "e2e:mixed-sdk"
     gateway.create_session(sid, sampling_defaults={"temperature": 0.0})
@@ -380,8 +362,9 @@ async def test_mixed_protocol_clients_share_one_trajectory(server):
 
     assert len(backend.calls) == 2
     out2 = backend.calls[1]["output_ids"]
-    # both protocols folded into ONE tree -> ONE record, turn 2 trained at the tail
-    assert len(records) == 1
-    rec = records[0]
+    # Both protocols share one tree; both generations remain trainable.
+    assert len(records) in (1, 2)
+    assert [t for rec in records for t in _trained(rec)] == backend.calls[0]["output_ids"] + out2
+    rec = records[-1]
     assert rec.token_ids[-len(out2) :] == out2
     assert rec.loss_mask[-len(out2) :] == [1] * len(out2)

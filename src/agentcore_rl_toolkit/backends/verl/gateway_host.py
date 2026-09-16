@@ -151,7 +151,6 @@ def get_or_start_gateway(
     public_host: str | None = None,
     adapters: list[str] | None = None,
     max_turns_per_sid: int | None = None,
-    fork_threshold_tokens: int | None = None,
     history_mode: str = "tree",
     chat_template_kwargs: dict | None = None,
     linear_on_nonlinear: str = "reset",
@@ -175,7 +174,6 @@ def get_or_start_gateway(
             tokenizer=tokenizer,
             adapters=adapter_names,
             max_turns_per_sid=max_turns_per_sid,
-            fork_threshold_tokens=fork_threshold_tokens,
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
         )

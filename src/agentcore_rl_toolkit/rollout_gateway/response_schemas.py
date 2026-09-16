@@ -217,8 +217,8 @@ _TEMPLATE_HASHES: dict[str, str] = {
 #
 # Rendering a replayed history therefore does not reproduce the tokens that were
 # sampled, so the next turn's prompt stops extending the captured sequence and the
-# trajectory manager has to REALIGN (dropping the turn's loss mask) or FORK (emitting
-# an extra row). Reordering the render to match generation restores the prefix.
+# trajectory manager has to FORK (emitting an extra row). Reordering the render to
+# match generation restores the prefix.
 #
 # Applies to the render path only; the parse path is handled by GPTOSS_SCHEMA.
 _GPTOSS_TOOLCALL_RENDER_ORIG = (

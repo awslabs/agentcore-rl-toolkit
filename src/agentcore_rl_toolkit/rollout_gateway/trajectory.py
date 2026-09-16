@@ -4,7 +4,7 @@ The :class:`TrajectoryManager` builds one trajectory per session. ``record_turn`
 feeds in each turn (prompt messages + the served model's token snapshot), routing it
 into a per-sid message tree; ``get_trajectory`` then linearizes that tree into a
 ``list[TraceRecord]`` of loss-masked training rows, tolerating re-tokenization drift
-between turns via a CLEAN / REALIGN / FORK classification (see :class:`DriftKind`).
+between turns via a CLEAN / FORK classification (see :class:`DriftKind`).
 
 The manager is tokenizer-free and torch-free: it operates purely on the token ids in
 each :class:`TurnRecord` and emits plain :class:`TraceRecord` rows.
@@ -61,8 +61,7 @@ class MessageNode:
     * **routing-only** (``turn is None``): the message came from the prompt, not
       from generation, so it only exists to route. This is every
       system/user/tool node, AND any assistant we did NOT generate: a foreign
-      assistant the client replayed in a later prompt, or a prior generated turn
-      demoted by the rewrite-merge in ``_try_merge_assistant_rewrite``.
+      assistant the client replayed in a later prompt.
     """
 
     def __init__(
@@ -137,7 +136,6 @@ def _common_prefix_len(a: list[int], b: list[int], chunk: int = 4096) -> int:
 
 class DriftKind(enum.Enum):
     CLEAN = "clean"  # drift == 0: prompt_ids exactly extends held tokens; append the tail beyond them
-    REALIGN = "realign"  # drift inside the most-recent response span, short response; replace span (loss_mask=0)
     FORK = "fork"  # everything else: close this builder, open a fresh one as a fork
 
 
@@ -154,21 +152,18 @@ class _SampleBuilder:
     turn rarely re-tokenizes byte-for-byte: decoding a turn back to text and
     re-rendering it (chat-template round-trips) can perturb the ids of content we've
     already seen. The builder handles this drift in a source-agnostic way, classified
-    by where and how far the prompt diverges from the held tokens (see
+    by whether the prompt diverges from the held tokens (see
     :meth:`classify_token_drift`):
 
     * **CLEAN** -- no drift; append the prompt tail beyond what we hold.
-    * **REALIGN** -- a short divergence inside the most-recent response span;
-      overwrite that span from the prompt as loss_mask=0 and keep accumulating.
-    * **FORK** -- divergence too large or too early to absorb; this builder is
+    * **FORK** -- the prompt diverges from the held tokens; this builder is
       rejected and the caller closes it and opens a fresh one. That boundary is
       the "fork".
 
     Each surviving builder yields one TraceRecord.
     """
 
-    def __init__(self, fork_threshold: int) -> None:
-        self._fork_threshold = fork_threshold
+    def __init__(self) -> None:
         self.tokens: list[int] = []
         self.loss_mask: list[int] = []
         self.logprobs: list[float] = []
@@ -180,38 +175,26 @@ class _SampleBuilder:
 
         The incoming turn's prompt is expected to match the tokens this builder
         already holds as an exact prefix. When token drift has occurred -- the
-        prompt diverges from the held tokens -- we decide whether to REALIGN
-        (heal a short divergence inside the most-recent response span) or to FORK
-        (``len(turn.output_ids) >= fork_threshold``, or the divergence sits too
-        early to absorb). With no drift the turn is handled the CLEAN way -- a
-        plain prefix extension.
+        prompt diverges from the held tokens -- we FORK to preserve the
+        previously generated response. With no drift the turn is handled the CLEAN
+        way -- a plain prefix extension.
         """
-        realign_at = _common_prefix_len(self.tokens, turn.prompt_ids)
-        drift = len(self.tokens) - realign_at
+        prefix_len = _common_prefix_len(self.tokens, turn.prompt_ids)
+        drift = len(self.tokens) - prefix_len
 
         if drift == 0:
             return DriftKind.CLEAN
 
-        # REALIGN only heals drift that falls inside the most-recent response span
-        # (and is short); divergence anywhere earlier, or an empty builder, forks.
-        start = self.last_response_start_idx
-        if start is not None and realign_at >= start and len(turn.output_ids) < self._fork_threshold:
-            return DriftKind.REALIGN
         return DriftKind.FORK
 
     def append_turn(self, turn: TurnRecord, kind: DriftKind, *, trained: bool = True) -> None:
-        """Append one turn into this SampleBuilder, branching on ``kind``: for REALIGN
-        we overwrite the already-saved response span, for CLEAN we just append this
-        turn's prompt tail."""
+        """Append a CLEAN turn's prompt tail and generated response."""
         assert kind is not DriftKind.FORK, "append_turn called on a builder that would fork"
 
         is_first_turn = self.last_response_start_idx is None
 
         # --- append this turn's prompt tail (loss_mask=0) ---
-        if kind is DriftKind.REALIGN:
-            self._align_to_prompt(turn.prompt_ids)  # drop the drifted tail, re-append from prompt
-        else:  # CLEAN: held tokens are an exact prefix of prompt_ids; append the tail beyond them
-            self._append_tokens(turn.prompt_ids[len(self.tokens) :], loss_mask=0)
+        self._append_tokens(turn.prompt_ids[len(self.tokens) :], loss_mask=0)
 
         # --- append this turn's generated response (loss_mask=1 unless re-emitted as context) ---
         self.last_response_start_idx = len(self.tokens)
@@ -221,16 +204,6 @@ class _SampleBuilder:
 
         if is_first_turn:
             self.leading_prompt_len = len(turn.prompt_ids)
-
-    def _align_to_prompt(self, prompt_ids: list[int]) -> None:
-        """Heal REALIGN drift by overwriting the most-recent response span with
-        ``prompt_ids`` as loss_mask=0: the drifted tokens carry no signal, and re-appending
-        from the prompt keeps the builder contiguous. Earlier turns are untouched."""
-        response_start = self.last_response_start_idx
-        tail = prompt_ids[response_start:]
-        self.tokens[response_start:] = tail
-        self.loss_mask[response_start:] = [0] * len(tail)
-        self.logprobs[response_start:] = [0.0] * len(tail)
 
     def _append_tokens(self, ids: list[int], *, loss_mask: int, logprobs: list[float] | None = None) -> None:
         self.tokens.extend(ids)
@@ -273,8 +246,7 @@ class _SampleBuilder:
 
 
 class TrajectoryManager:
-    def __init__(self, *, fork_threshold_tokens: int | None = None) -> None:
-        self._fork_threshold: int = 1024 if fork_threshold_tokens is None else fork_threshold_tokens
+    def __init__(self) -> None:
         self._trees: dict[str, MessageNode] = {}
         self._turn_count: dict[str, int] = {}
 
@@ -306,7 +278,6 @@ class TrajectoryManager:
         root = self._trees.setdefault(sid, MessageNode())
 
         node, depth = self._find_mount_point(root, prompt_messages)
-        node, depth = self._try_merge_assistant_rewrite(sid, node, prompt_messages, depth)
         node = self._mount_prompt_messages(node, prompt_messages[depth:])
         self._attach_assistant_leaf(sid, node, turn=turn, response_message=response_message, metadata=metadata)
 
@@ -373,64 +344,6 @@ class TrajectoryManager:
             depth += 1
         return node, depth
 
-    def _try_merge_assistant_rewrite(
-        self,
-        sid: str,
-        node: MessageNode,
-        prompt_messages: list[dict[str, Any]],
-        depth: int,
-    ) -> tuple[MessageNode, int]:
-        """Merge a short assistant-rewrite onto its node instead of forking.
-
-        A harness may replay a prior assistant message slightly re-rendered (e.g.
-        whitespace) in a later prompt. It no longer matches the node we generated,
-        so it would fork -- stranding the original generated turn as a dead-end
-        leaf that still emits its own training TraceRecord. Instead we overwrite that
-        node's message in place and stop training its generated content (demote to
-        routing-only), so only the live branch trains. This only applies below
-        ``fork_threshold``: a long abandoned response carries enough real signal
-        to fork and train standalone.
-
-        Forking is always safe (a rewrite mounts as routing-only); this is purely
-        a cleanup. So we merge only when the mount point has exactly one assistant
-        child that is a leaf, generated (``turn`` set), and short (response <
-        ``fork_threshold``), and fork otherwise, since absorbing destroys a
-        generated TurnRecord irreversibly.
-        """
-        if self._fork_threshold <= 0:
-            return node, depth  # feature off
-        if depth >= len(prompt_messages) or prompt_messages[depth].get("role") != "assistant":
-            return node, depth  # genuine non-assistant history fork -> leave it
-
-        asst_children = [c for c in node.children if c.role == "assistant"]
-        if len(asst_children) != 1:
-            if len(asst_children) > 1:
-                logger.warning(
-                    "record_turn(sid=%s turn=%s): %d assistant children at mount "
-                    "point; can't tell which the rewrite targets, so forking.",
-                    sid,
-                    self._turn_count.get(sid, 0) + 1,
-                    len(asst_children),
-                )
-            return node, depth
-
-        rewritten_node = asst_children[0]
-        if (
-            rewritten_node.children
-            or rewritten_node.turn is None
-            or len(rewritten_node.turn.output_ids) >= self._fork_threshold
-        ):
-            return node, depth
-
-        rewritten_node.metadata["merged_rewrite"] = {
-            "abandoned_turn_index": rewritten_node.turn_index,
-            "abandoned_response_tokens": len(rewritten_node.turn.output_ids),
-        }
-        rewritten_node.turn = None
-        rewritten_node.turn_index = None
-        rewritten_node.message = prompt_messages[depth]
-        return rewritten_node, depth + 1
-
     def _mount_prompt_messages(
         self,
         node: MessageNode,
@@ -463,7 +376,7 @@ class TrajectoryManager:
         """Pack the chain's generated turns into per-sample token builders.
 
         Turns flow into the current builder until one can't extend it as an
-        exact prefix (re-tokenization drift past what we can drop); that turn
+        exact prefix (re-tokenization drift); that turn
         opens a new builder -- a fork. A generated turn shared by sibling leaves
         is trained only on the first leaf to claim it; later leaves re-emit it
         as loss_mask=0 context so the shared prefix isn't double-counted.
@@ -476,7 +389,7 @@ class TrajectoryManager:
             asst_node.response_trained = True
 
             if not builders or (kind := builders[-1].classify_token_drift(asst_node.turn)) is DriftKind.FORK:
-                builders.append(_SampleBuilder(self._fork_threshold))
+                builders.append(_SampleBuilder())
                 builders[-1].append_turn(asst_node.turn, DriftKind.CLEAN, trained=trained)
             else:
                 builders[-1].append_turn(asst_node.turn, kind, trained=trained)

@@ -25,7 +25,6 @@ rollout_session_agent_loop:
     max_turns_per_sid: 1000
     # one record per trajectory reaches the trainer, so linearize history
     history_mode: "linear"
-    fork_threshold_tokens: 0
 
   # gateway defaults for turns the agent did not specify; verl's own
   # temperature/top_p/top_k override the same keys

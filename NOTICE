@@ -8,7 +8,7 @@ This product includes software developed as part of the slime project
 The rollout gateway (src/agentcore_rl_toolkit/rollout_gateway/) adapts code from
 slime, notably:
   - trajectory.py  — TrajectoryManager, TurnRecord, MessageNode, and the
-                     CLEAN/REALIGN/FORK drift classification, adapted from
+                     CLEAN/FORK drift classification, adapted from
                      slime/agent/trajectory.py (made torch-free).
   - adapters/      — OpenAIAdapter, AnthropicAdapter, and the shared BaseAdapter
                      pipeline, adapted from slime/agent/adapters/.

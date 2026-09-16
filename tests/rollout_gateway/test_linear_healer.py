@@ -116,10 +116,10 @@ async def _drive_turn(mgr, healer, sid, *, messages, served_ids, response_messag
 @pytest.mark.asyncio
 async def test_unhealed_drift_forks():
     """Baseline: served ids [2001,2002] for turn 1 differ from the renderer's re-render of
-    the same assistant message, and turn 2's response is long. Feeding the raw drifted
+    the same assistant message. Feeding the raw drifted
     render forks the linear rollout into two samples."""
     r = FakeRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)  # any drift + response -> fork
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
     await _drive_turn(
         mgr, healer, "s", messages=[_u("q1")], served_ids=[2001, 2002], response_message=_a("r1"), use_healer=False
@@ -142,7 +142,7 @@ async def test_healed_drift_stays_one_sample():
     """Same inputs, healed: turn 2 generates on the canonical served prefix, the manager
     stays CLEAN, and the whole session is one training sample with both turns trained."""
     r = FakeRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
     await _drive_turn(
         mgr, healer, "s", messages=[_u("q1")], served_ids=[2001, 2002], response_message=_a("r1"), logprobs=[-0.1, -0.2]
@@ -184,7 +184,7 @@ async def test_healed_does_not_duplicate_closer_in_served_output():
     stop token), the overlap-trim must drop it from the reinserted glue so it is not
     doubled -- otherwise the manager would see a two-closer sequence and drift."""
     r = FakeRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
     # turn 1's served ids END with the closer token (A_CLOSE == the glue the probe finds).
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001, A_CLOSE], response_message=_a("r1"))
@@ -203,7 +203,7 @@ async def test_healed_three_turns_one_sample():
     """Drift on every replayed assistant turn across a 3-turn chain still yields exactly
     one sample (the case that produced ~6 samples/session on the real run)."""
     r = FakeRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
     await _drive_turn(
@@ -267,7 +267,7 @@ async def test_reordered_tool_call_args_stay_healed():
     different token render under an order-sensitive template) must stay linear/healed --
     the drift a token-prefix linearity check would wrongly treat as non-linear."""
     r = OrderSensitiveRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
 
     emitted = {"path": "/f.py", "text": "x"}  # the model's emission order
@@ -360,17 +360,25 @@ async def test_close_probe_isolates_closer_tool_call_turn():
 
 
 @pytest.mark.asyncio
-async def test_nonlinear_reset_reanchors_and_continues():
-    """If a turn's render is not an append-only extension (here: a prior user message is
-    edited), reset re-anchors to the incoming render and keeps healing forward."""
+@pytest.mark.parametrize("edited_role", ["user", "assistant"])
+async def test_nonlinear_reset_reanchors_and_continues(edited_role):
+    """An edited history re-anchors to the incoming render and preserves both generations."""
     r = FakeRenderer()
     healer = LinearHealer(r, on_nonlinear="reset")
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
-    # turn 2 edits the prior user message ("q1" -> "Q1!"): r_prev is no longer a prefix.
-    healed = await healer.heal("s", [_u("Q1!"), _a("r1"), _u("q2")], None)
-    assert healed == await r.render([_u("Q1!"), _a("r1"), _u("q2")], add_generation_prompt=True)
+    messages = [
+        _u("Q1!" if edited_role == "user" else "q1"),
+        _a("R1!" if edited_role == "assistant" else "r1"),
+        _u("q2"),
+    ]
+    healed = await _drive_turn(mgr, healer, "s", messages=messages, served_ids=[2002], response_message=_a("r2"))
+    assert healed == await r.render(messages, add_generation_prompt=True)
     assert healer.counters["nonlinear"] == 1
+    recs = mgr.get_trajectory("s", base_sample=BaseTrace(index=0))
+    assert len(recs) == 2
+    assert [rec.token_ids[-1] for rec in recs] == [2001, 2002]
+    assert [rec.loss_mask for rec in recs] == [[1], [1]]
 
 
 @pytest.mark.asyncio
@@ -423,7 +431,7 @@ async def test_pop_stats_is_per_session_and_isolated():
     """pop_stats returns just this sid's counters (not the run-cumulative total), keeps
     sessions isolated, and clears the sid so a second pop is empty."""
     r = FakeRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
     # session A: two turns -> one healed turn.
     await _drive_turn(mgr, healer, "a", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
@@ -466,7 +474,7 @@ async def test_pop_stats_counts_nonlinear_for_session():
 @pytest.mark.asyncio
 async def test_drop_clears_per_sid_stats():
     r = FakeRenderer()
-    mgr = TrajectoryManager(fork_threshold_tokens=1)
+    mgr = TrajectoryManager()
     healer = LinearHealer(r)
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
     await _drive_turn(

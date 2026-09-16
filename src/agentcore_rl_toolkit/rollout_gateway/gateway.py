@@ -10,7 +10,6 @@ api-key / Bearer slot (the adapters resolve it via ``sid_from_bearer``); the age
 ``base_url`` is a plain fixed gateway address — there are no per-session URLs.
 """
 
-import logging
 from typing import Any
 
 from aiohttp import web
@@ -23,8 +22,6 @@ from .render import Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, TraceRecord
 from .trajectory import TrajectoryManager
-
-logger = logging.getLogger(__name__)
 
 # name -> adapter class for the `adapters=[...]` convenience arg
 _ADAPTER_REGISTRY: dict[str, type[BaseAdapter]] = {
@@ -43,12 +40,10 @@ class RolloutGateway:
             in ``finish_session`` (the manager itself is tokenizer-free). Optional.
         adapters: which wire protocols to mount — names ("openai", "anthropic") or
             ``BaseAdapter`` subclasses. Defaults to both.
-        fork_threshold_tokens / max_turns_per_sid / debug_callback: forwarded to the
-            shared ``TrajectoryManager`` / adapters.
+        max_turns_per_sid / debug_callback: forwarded to the adapters.
         history_mode: ``"tree"`` (default) or ``"linear"``. In linear mode the gateway
             heals re-tokenization drift at generation time via one shared ``LinearHealer``
-            so the manager stays CLEAN (one sample per session); ``fork_threshold_tokens``
-            is then ignored. See ``linear.py``.
+            so the manager stays CLEAN (one sample per session). See ``linear.py``.
         linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
             behaviour when a turn breaks the append-only assumption (linear mode only).
     """
@@ -60,7 +55,6 @@ class RolloutGateway:
         renderer: Renderer,
         tokenizer=None,
         adapters: list[str | type[BaseAdapter]] | None = None,
-        fork_threshold_tokens: int | None = None,
         history_mode: str = "tree",
         linear_on_nonlinear: str = "reset",
         max_turns_per_sid: int | None = None,
@@ -70,15 +64,7 @@ class RolloutGateway:
         self.renderer = renderer
         self.tokenizer = tokenizer
 
-        mgr_kwargs: dict[str, int] = {}
-        if fork_threshold_tokens is not None:
-            if history_mode == "linear":
-                logger.warning(
-                    "history_mode='linear' ignores fork_threshold_tokens=%s (forking is " "disabled by construction)",
-                    fork_threshold_tokens,
-                )
-            mgr_kwargs["fork_threshold_tokens"] = fork_threshold_tokens
-        self.manager = TrajectoryManager(**mgr_kwargs)
+        self.manager = TrajectoryManager()
 
         # In linear mode, one healer is shared across all co-mounted adapters (like the
         # manager) so a session's canonical served-id state is coherent regardless of

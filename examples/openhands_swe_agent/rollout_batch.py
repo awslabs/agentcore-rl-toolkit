@@ -230,7 +230,6 @@ class VllmGatewayEndpoint:
             tokenizer=tokenizer,
             adapters=["openai"],
             max_turns_per_sid=1000,
-            fork_threshold_tokens=0,
         )
         server = ThreadedGatewayServer(gateway, host=self.host, port=0)
         server.start()

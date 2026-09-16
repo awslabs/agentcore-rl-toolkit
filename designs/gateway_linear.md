@@ -34,11 +34,10 @@ A prior **assistant** turn's served tokens came from generation; rendering and e
 its parsed message dict (`text` + `tool_calls`) can produce different IDs due to
 whitespace, tool-call JSON spacing, or reasoning re-keying. `TrajectoryManager`
 (`rollout_gateway/trajectory.py`) detects that drift and, to stay safe for harnesses that
-may branch or edit history, resolves it by FORK (split the rollout into a second sample) or
-REALIGN (drop a turn's signal).
+may branch or edit history, resolves it by FORK (split the rollout into a second sample).
 
 For a strictly linear, multi-turn tool-calling agent that safety is pure overhead. On a
-real multi-turn SWE-agent run (OpenHands driving Qwen3-Coder-30B, `fork_threshold_tokens=0`)
+real multi-turn SWE-agent run (OpenHands driving Qwen3-Coder-30B, forking on token drift)
 the large majority of sessions forked into several records each, even though every rollout
 was linear. Each fork re-emits the shared prefix as `loss_mask=0` context and splits the
 trajectory, so it is a large, avoidable training-efficiency loss.
@@ -143,8 +142,6 @@ correctly not treated as closer.
   `linear_on_nonlinear`. In linear mode it builds **one** shared `LinearHealer` and injects it
   into every co-mounted adapter (like the shared `TrajectoryManager`), so a session's
   canonical state is coherent regardless of which wire protocol its turns arrive on.
-  `fork_threshold_tokens` is ignored in linear mode (forking is disabled by construction) and
-  a warning is logged if both are set.
 - `rollout_gateway/adapters/common.py` — `BaseAdapter` calls `heal` before
   `backend.generate` in `_run_turn`; the healer handles rendering and encoding internally.
   The adapter feeds the healed ids to both `generate` and `TurnRecord`, and calls `commit`
@@ -154,8 +151,8 @@ correctly not treated as closer.
 
 ### Config surface
 
-- `history_mode`: `"tree"` (default, current behavior) | `"linear"`. Gateway-global, plumbed
-  like `fork_threshold_tokens`; linear and tree sessions do not coexist within a run.
+- `history_mode`: `"tree"` (default, current behavior) | `"linear"`. Gateway-global; linear and tree
+  sessions do not coexist within a run.
 - `linear_on_nonlinear`: `"reset"` (default) | `"error"` | `"passthrough"` — behavior when a
   turn breaks the append-only assumption.
 

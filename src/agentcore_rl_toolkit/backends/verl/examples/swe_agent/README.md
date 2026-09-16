@@ -198,9 +198,10 @@ unless the backend is `agentcore` and `dynamodb_table` is set.
   row, so the extra columns `preprocess.py` writes (`task_id`, `eval_script`,
   `docker_image_uri`, `repo_path`) reach the container as task fields, and
   `extra_info.index` becomes the `task_id` the loop groups rollouts by.
-- The gateway runs in `history_mode: linear` with `fork_threshold_tokens: 0`, because
-  verl's v1 trainer does not yet handle one rollout producing several trainable
-  trajectories. `num_records` in the session meta shows if that ever happens anyway.
+- The gateway runs in `history_mode: linear` to keep append-only history in one
+  training record. This example's rollout loop currently keeps only the record
+  with the most trainable tokens when multiple records are captured.
+  `num_records` in the session meta reports the total captured record count.
 - A failed rollout still emits a masked, zero-reward sample so the GRPO group stays
   intact. Container-side failures are recorded from the container's own dump rather
   than re-raised.

@@ -8,7 +8,7 @@ The problem it removes: each turn the client replays the whole conversation as m
 re-rendering a prior assistant message from its parsed dict rarely reproduces the exact
 token ids the model actually generated (whitespace, tool-call JSON spacing, reasoning
 re-keying). The :class:`~.trajectory.TrajectoryManager` then sees that drift and FORKs the
-single rollout into multiple training samples (or REALIGNs and drops a turn's signal).
+single rollout into multiple training samples.
 
 The fix: because the gateway owns the tokens handed to the backend, it substitutes the
 exact ids it already served for the earlier turns **before** generation, so the model

@@ -259,9 +259,8 @@ async def test_mixed_text_and_parallel_tool_calls_reach_the_client():
     """The reply must carry the assistant's text *and* every tool call.
 
     Withholding either makes the client echo a history that no longer re-renders to
-    the sampled tokens, so the next turn drifts: the previous response span is
-    overwritten at loss_mask=0 (REALIGN) or split off (FORK). The trained-token
-    assertion below is what catches that -- it fails long before any reward metric
+    the sampled tokens, so the next turn drifts and splits off a record (FORK).
+    The single-record and trained-token assertions below catch that before any reward metric
     moves, and the damage grows with turn count.
     """
     reply1 = "checking both sums CALL calculator expr=2+2 CALL calculator expr=3+3"
