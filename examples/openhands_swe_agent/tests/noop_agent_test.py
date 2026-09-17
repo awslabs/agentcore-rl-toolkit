@@ -21,7 +21,7 @@ def _request() -> RolloutStartRequest:
 class RolloutTest(unittest.TestCase):
     def test_grades_untouched_repo(self):
         with (
-            mock.patch.object(noop_agent.subprocess, "check_output", return_value=b"") as check_output,
+            mock.patch.object(noop_agent, "capture_git_diff", return_value="") as capture,
             mock.patch.object(
                 noop_agent,
                 "run_evaluation",
@@ -35,16 +35,14 @@ class RolloutTest(unittest.TestCase):
         self.assertEqual(dump.metrics["eval_latency_s"], 3.5)
         assert dump.task_output is not None
         self.assertEqual(dump.task_output["git_diff"], "")
-        # The only subprocess is a read-only diff: no patch is applied.
-        (argv,), _ = check_output.call_args
-        self.assertEqual(argv[:2], ["git", "--no-pager"])
-        self.assertIn("diff", argv)
+        # The repo is only read, never written: the diff is the backend's whole turn.
+        capture.assert_called_once_with(_request().task_input)
 
     def test_reports_resolved_base_commit_as_reward_one(self):
         # A task resolved with no changes is a broken task, not an error: reward 1.0
         # surfaces it in the run.
         with (
-            mock.patch.object(noop_agent.subprocess, "check_output", return_value=b""),
+            mock.patch.object(noop_agent, "capture_git_diff", return_value=""),
             mock.patch.object(noop_agent, "run_evaluation", return_value={"resolved": True}),
         ):
             dump = noop_agent.rollout(_request())
@@ -53,8 +51,8 @@ class RolloutTest(unittest.TestCase):
 
     def test_failure_is_returned_not_raised(self):
         with mock.patch.object(
-            noop_agent.subprocess,
-            "check_output",
+            noop_agent,
+            "capture_git_diff",
             side_effect=subprocess.CalledProcessError(1, "git"),
         ):
             dump = noop_agent.rollout(_request())

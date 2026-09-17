@@ -53,9 +53,42 @@ def run_setup(request: RolloutSetupRequest):
         )
     finally:
         os.unlink(task_path)
+    _check("swe_unpack.sh", result)
+
+    # After the unpack: the patch applies to the checkout it just copied in.
+    if request.task_input.get("test_patch_applied"):
+        apply_test_patch(request.task_input)
+
+
+def apply_test_patch(task_input: dict) -> None:
+    """Put the task's test files in their post-patch state, before the agent starts.
+
+    Only when the harness asked for it (``test_patch_applied``), because seeing the tests
+    changes the task the agent faces. The script is ``test_patch_script`` from the dataset
+    parquet (see ``preprocess.py``); the eval script resets and re-applies the same patch,
+    so the agent still cannot pass a task by editing its tests.
+    """
+    script = task_input.get("test_patch_script")
+    if not script:
+        raise RuntimeError(
+            "test_patch_applied is set but the task carries no test_patch_script: "
+            "rebuild the dataset parquet with preprocess.py"
+        )
+
+    # A temp file rather than one inside the repo, so the agent never sees it.
+    fd, script_path = tempfile.mkstemp(suffix=".sh", prefix="swe_test_patch_")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(script)
+        result = subprocess.run(["/bin/bash", script_path], capture_output=True, text=True)
+    finally:
+        os.unlink(script_path)
+    _check("test_patch_script", result)
+
+
+def _check(what: str, result: subprocess.CompletedProcess) -> None:
+    """Raise with both streams if ``result`` failed -- setup output is not captured anywhere else."""
     if result.returncode != 0:
         raise RuntimeError(
-            f"swe_unpack.sh failed with exit code {result.returncode}\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"{what} failed with exit code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )

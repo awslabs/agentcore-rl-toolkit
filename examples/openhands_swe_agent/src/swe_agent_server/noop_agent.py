@@ -1,9 +1,8 @@
 """Empty-patch baseline backend: grades the untouched repo, expecting reward 0.0."""
 
 import logging
-import subprocess
 
-from swe_agent_server.evaluation import run_evaluation
+from swe_agent_server.evaluation import capture_git_diff, run_evaluation
 from swe_agent_server.utils import clean_metrics, exc_to_full_string
 
 from agentcore_rl_toolkit.rollout_session.wire import (
@@ -24,16 +23,7 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
 
     try:
         # Should come back empty; a non-empty diff means a dirty testbed.
-        git_diff = subprocess.check_output(
-            [
-                "git",
-                "--no-pager",
-                "diff",
-                "--no-color",
-                request.task_input["base_commit"],
-            ],
-            cwd=request.task_input["repo_path"],
-        ).decode()
+        git_diff = capture_git_diff(request.task_input)
 
         eval_report = run_evaluation(request.task_input)
 

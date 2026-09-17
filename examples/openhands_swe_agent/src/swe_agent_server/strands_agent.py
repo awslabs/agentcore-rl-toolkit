@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import subprocess
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,7 @@ from strands.types.exceptions import (
 from strands.types.streaming import StreamEvent
 from strands.vended_tools.bash import make_bash
 from strands.vended_tools.file_editor import make_file_editor
-from swe_agent_server.evaluation import run_evaluation
+from swe_agent_server.evaluation import capture_git_diff, run_evaluation
 from swe_agent_server.utils import clean_metrics, exc_to_full_string
 
 from agentcore_rl_toolkit.rollout_session.wire import (
@@ -217,16 +216,7 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
         tool_calls_time_s = timing.total_time_s
         llm_latency_sum = model.llm_latency_sum
 
-        git_diff = subprocess.check_output(
-            [
-                "git",
-                "--no-pager",
-                "diff",
-                "--no-color",
-                request.task_input["base_commit"],
-            ],
-            cwd=repo_path,
-        ).decode()
+        git_diff = capture_git_diff(request.task_input)
 
         eval_report = run_evaluation(request.task_input)
 

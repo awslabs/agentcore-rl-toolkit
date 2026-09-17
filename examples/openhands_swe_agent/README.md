@@ -188,6 +188,18 @@ Beside the parquet it writes `<output>.lineage.json`: which runs each filter cam
 dropped, and which tasks that run never measured. The parquet itself says none of this,
 and "which data is this" is the first question asked of a training run six weeks later.
 
+### Showing the agent the tests it is graded on
+
+Every row carries a `test_patch_script` next to its `eval_script`, and the setup stage
+runs it -- after the task image is unpacked, before the agent starts -- when the harness
+passes `test_patch_applied: true` in its task kwargs (`evaluate.py` for an eval,
+`rollout_session_agent_loop.yaml` for training). It is a run-level flag over an unchanged
+parquet, so both framings read the same dataset.
+
+The script applies the same test patch the harness's own eval script applies, and then
+commits it, so the agent starts on a clean `git status` and cannot mistake the tests for an
+accidental edit of its own and revert them.
+
 ## Reading a run's results
 
     ./analyze.py <experiment>              # the latest run of that name
@@ -212,17 +224,20 @@ that never ran would drag every timing down.
 `tests/` is split by which environment its imports exist in, and the split is not
 cosmetic -- neither half runs in the other's:
 
-* `noop_agent_test.py`, `open_hands_agent_test.py`, `strands_agent_test.py` cover the
-  harness inside the container. They import `swe_agent_server` (and through it
-  `agentcore_rl_toolkit.rollout_session.wire`, openhands, strands), which exist only
-  in the image's `/agent/.venv`. `deploy.py` runs them in the image it just built --
-  see [Rolling a new image](#rolling-a-new-image) -- or `./verify_image.py <image>`
-  runs them against an image you already have.
-* `iam_policy_test.py`, `rollout_batch_test.py` and `rollout_report_test.py` cover the
-  host side -- the execution role (`config`, `iam_policy`) and the eval harness
+* `noop_agent_test.py`, `open_hands_agent_test.py`, `strands_agent_test.py`,
+  `rollout_setup_test.py` cover the harness inside the container. They import
+  `swe_agent_server` (and through it `agentcore_rl_toolkit.rollout_session.wire`,
+  openhands, strands), which exist only in the image's `/agent/.venv`. `deploy.py` runs
+  them in the image it just built -- see [Rolling a new image](#rolling-a-new-image) --
+  or `./verify_image.py <image>` runs them against an image you already have.
+* `iam_policy_test.py`, `preprocess_test.py`, `rollout_batch_test.py` and
+  `rollout_report_test.py` cover the host side -- the execution role (`config`,
+  `iam_policy`), the dataset conversion (`preprocess`) and the eval harness
   (`rollout_batch`, `rollout_report`) -- which needs `config.toml` and the toolkit's own
   dev environment, none of it present in the image. Run them from the toolkit root, named:
-  `uv run pytest examples/openhands_swe_agent/tests/{iam_policy,rollout_batch,rollout_report}_test.py`.
+  `uv run pytest examples/openhands_swe_agent/tests/{iam_policy,preprocess,rollout_batch,rollout_report}_test.py`.
+  `preprocess_test.py` skips itself unless the env also has the `swe-agent` group, which
+  is where `datasets` lives.
 
-Pointing a host-side pytest at the whole directory collects all six and errors on the
-three container ones; that is the split, not a break.
+Pointing a host-side pytest at the whole directory collects both halves and errors on
+the container ones; that is the split, not a break.

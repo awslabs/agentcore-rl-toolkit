@@ -25,6 +25,7 @@ actor_rollout_ref:
 
   rollout:
     tensor_model_parallel_size: 4
+    max_model_len: ${data.max_response_length}
 
     engine_kwargs:
       vllm:
@@ -34,5 +35,5 @@ actor_rollout_ref:
         moe_backend: triton
         max_model_len: ${data.max_response_length}
 
-        # there is capacity for ~5M tokens, which is around 113x44K
-        max_num_seqs: 128
+        # there is capacity for ~5M tokens, which is around 256x20K
+        max_num_seqs: 256

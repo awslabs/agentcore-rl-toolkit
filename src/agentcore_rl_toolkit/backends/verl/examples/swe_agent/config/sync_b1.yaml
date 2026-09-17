@@ -1,0 +1,9 @@
+transfer_queue:
+  enable: true
+
+data:
+  train_batch_size: 16
+
+trainer:
+  v1:
+    trainer_mode: agentcore_sync
