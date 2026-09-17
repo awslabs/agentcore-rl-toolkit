@@ -36,7 +36,7 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.client import RolloutClient, RolloutFuture
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
-from agentcore_rl_toolkit.rollout_session.lifecycle import RolloutSession, require_task_id
+from agentcore_rl_toolkit.rollout_session.lifecycle import RolloutSession
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
 logger = logging.getLogger(__file__)
@@ -98,7 +98,7 @@ def result_location(rollout_output_s3: str, experiment_name: str) -> tuple[str, 
     The agent SDK writes one object per rollout at ``{exp_id}/{input_id}/{session_id}.json``
     in a single bucket, with no notion of a prefix. So a prefix in ``rollout_output_s3`` is
     honoured by folding it into ``exp_id`` -- ``s3://bucket/runs`` with experiment ``exp-1``
-    puts results under ``s3://bucket/runs/exp-1/<task_id>/<session>.json`` -- rather than
+    puts results under ``s3://bucket/runs/exp-1/<uid>/<session>.json`` -- rather than
     being silently dropped at the bucket root. A bare bucket name works too.
     """
     location = rollout_output_s3.strip()
@@ -184,7 +184,7 @@ class AgentCoreS3Session(RolloutSession):
         future = await self._client.invoke_async(
             _require_payload(task),
             session_id=self.session_id,
-            input_id=require_task_id(task),
+            input_id=_require_uid(task),
             base_url=llm["base_url"],
             # LiteLLM-shaped `openai/<name>`; the agent's OpenAI client wants the bare name.
             model_id=str(llm["model"]).split("/")[-1],
@@ -292,6 +292,30 @@ def _require_payload(task: dict) -> dict:
         f"(got {type(task.get('payload')).__name__}). Author dataset rows with a `payload` "
         "column holding the agent's exact invoke payload; the trainer forwards it unchanged."
     )
+
+
+def _require_uid(task: dict) -> str:
+    """The task's prompt-group id, which this session keys its result objects by.
+
+    verl stamps one ``uid`` per prompt, shared by that prompt's n rollouts, and it becomes
+    the ``input_id`` segment of ``{exp_id}/{input_id}/{session_id}.json``. Deliberately no
+    fallback: the row index keys results by position, which shuffles between runs, and the
+    session id is unique per rollout, so either one scatters a group's results instead of
+    grouping them.
+
+    A :class:`RolloutContractError` rather than the subscript's ``KeyError`` because no
+    rollout of a run whose rows lack ``uid`` can succeed. Nothing treats the marker type
+    specially yet -- the agent loop logs it with a traceback and records it in the session's
+    S3 output like any other rollout exception, which is enough to diagnose it.
+    """
+    uid = task.get("uid")
+    if uid is None or (isinstance(uid, str) and not uid.strip()):
+        raise RolloutContractError(
+            f"The task has no usable `uid` (got {uid!r}). It is the prompt-group id the "
+            "trainer stamps on every row, and this session stores each agent result under "
+            "it, so there is nothing to key this rollout's result object by."
+        )
+    return str(uid)
 
 
 def _require_llm(task: dict) -> dict:

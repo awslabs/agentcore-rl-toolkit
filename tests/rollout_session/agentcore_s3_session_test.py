@@ -20,7 +20,6 @@ from agentcore_rl_toolkit.rollout_session.agentcore_s3_session import AgentCoreS
 from agentcore_rl_toolkit.rollout_session.factory import make_session
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
     RolloutSessionBounds,
-    require_task_id,
     run_rollout_with_bounds,
 )
 
@@ -322,12 +321,6 @@ class TaskContractTest(SessionCase):
         with self.assertRaises(ValueError) as caught:
             make(FakeClient(), session_id="short")
         self.assertIn("33", str(caught.exception))
-
-    def test_require_task_id_stringifies_and_rejects_blanks(self):
-        self.assertEqual(require_task_id({"task_id": 17}), "17")
-        for bad in ({}, {"task_id": None}, {"task_id": "  "}):
-            with self.assertRaises(ValueError):
-                require_task_id(bad)
 
 
 class ShutdownTest(SessionCase):

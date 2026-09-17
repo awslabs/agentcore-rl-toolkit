@@ -18,32 +18,7 @@ from agentcore_rl_toolkit.aws_tools.persistent_dict import (
 from agentcore_rl_toolkit.concurrency.priority_assigner import PriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import PrioritySemaphore
 from agentcore_rl_toolkit.concurrency.rate_limiter import RateLimiter
-from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
-
-
-def require_task_id(task: dict) -> str:
-    """The dataset's own id for this task, or a loud error.
-
-    Called by the backends that key their own storage on it -- ``AgentCoreS3Session`` puts
-    each result under ``<experiment>/<task_id>/<session>.json`` -- and by nothing else, so
-    a row without one is a contract violation for those backends only. It is also what an
-    eval of the same dataset stamps, so a training rollout and an eval of one task meet on
-    it in the session store.
-
-    Rollout *grouping* is no longer its job: verl's own ``uid`` is the prompt-group key.
-    There is still deliberately no fallback to the row index -- an index keys results by
-    position, which shuffles between runs, so one task's results land under a different id
-    each run and are misattributed rather than absent.
-    """
-    task_id = task.get("task_id")
-    if task_id is None or (isinstance(task_id, str) and not task_id.strip()):
-        raise RolloutContractError(
-            f"The task has no usable `task_id` (got {task_id!r}). Every dataset row must "
-            "carry one -- the dataset's own name for the task (for SWE datasets, the "
-            "instance slug). A dataset built before this contract has to be rebuilt."
-        )
-    return str(task_id)
 
 
 @runtime_checkable
