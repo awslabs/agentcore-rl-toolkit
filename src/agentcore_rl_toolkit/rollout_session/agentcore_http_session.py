@@ -20,7 +20,7 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
     region_of,
     shared_agentcore_client,
     start_agentcore_session,
-    stop_agentcore_session,
+    stop_agentcore_instance_session,
 )
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.rollout_session.lifecycle import RolloutSession
@@ -104,7 +104,7 @@ class AgentCoreHttpSession(RolloutSession):
         return await start_and_wait_rollout(self.runtime_arn, self.session_id, task, await self._acr())
 
     async def shutdown(self) -> None:
-        await stop_agentcore_session(self.capacity_provider_arn, self.session_id, await self._acr())
+        await stop_agentcore_instance_session(self.capacity_provider_arn, self.session_id, await self._acr())
 
 
 async def invoke_agent(

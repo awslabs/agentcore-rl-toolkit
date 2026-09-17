@@ -39,6 +39,10 @@ LLM = {
 def task(**overrides) -> dict:
     """One per-rollout task dict, as the agent loop builds it."""
     return {
+        # The group of rollouts this one belongs to -- verl's per-prompt `uid`, mapped to the
+        # session layer's own name. Deliberately unlike `task_id` below, so the tests can tell
+        # which of the two the session reads.
+        "group_id": "group-1",
         "task_id": "org/repo",
         "payload": {"prompt": "migrate this", "repo": "org/repo"},
         "sampling_params": {"temperature": 1.0, "top_p": 1.0},
@@ -106,14 +110,22 @@ async def one_ok_chunk():
 
 
 class FakeAcrClient:
-    """The shared ``bedrock-agentcore`` client, recording the warm-ups made on it."""
+    """The shared ``bedrock-agentcore`` client, recording the session calls made on it."""
 
-    def __init__(self):
+    def __init__(self, start_error: Exception | None = None):
         self.started: list[str] = []
+        self.stopped: list[str] = []
+        self.start_error = start_error
 
     async def invoke_agent_runtime_command(self, *, runtimeSessionId, **kwargs):  # noqa: N803 - boto3 spelling
         self.started.append(runtimeSessionId)
+        if self.start_error is not None:
+            raise self.start_error
         return {"stream": one_ok_chunk()}
+
+    async def stop_runtime_session(self, *, agentRuntimeArn, runtimeSessionId):  # noqa: N803 - boto3 spelling
+        assert agentRuntimeArn == RUNTIME_ARN
+        self.stopped.append(runtimeSessionId)
 
 
 class SessionCase(IsolatedAsyncioTestCase):
@@ -230,10 +242,12 @@ class InvokeArgumentsTest(SessionCase):
         # or the trainer would drain an empty session.
         self.assertEqual(invocation["api_key"], SESSION_ID)
 
-    async def test_the_task_id_is_the_input_id_so_results_group_by_task(self):
+    async def test_the_group_id_is_the_input_id_so_one_groups_rollouts_land_together(self):
+        # `input_id` is the middle segment of the result key, so it decides what a listing
+        # of the bucket groups by: the rollout group, not the dataset's name for the task.
         client = FakeClient()
         await run_rollout(client)
-        self.assertEqual(client.invocations[0]["input_id"], "org/repo")
+        self.assertEqual(client.invocations[0]["input_id"], "group-1")
 
     async def test_the_litellm_model_prefix_is_stripped_for_the_agents_client(self):
         client = FakeClient()
@@ -289,19 +303,36 @@ class InvokeArgumentsTest(SessionCase):
 
 
 class TaskContractTest(SessionCase):
-    """The three task fields this session cannot invent, each failing loudly."""
+    """The three task fields this session cannot invent -- ``payload``, ``group_id``, ``llm``
+    -- each failing loudly, and the one (``task_id``) it merely records."""
 
     async def test_a_task_without_a_payload_dict_is_a_config_error(self):
         with self.assertRaises(ValueError) as caught:
             await run_rollout(FakeClient(), task(payload="migrate this"))
         self.assertIn("`payload`", str(caught.exception))
 
-    async def test_a_task_without_a_task_id_is_a_config_error(self):
+    async def test_a_task_without_a_group_id_is_a_config_error(self):
+        # There is deliberately no fallback: `group_id` keys the result object, and inventing
+        # one (the row index, the session id) would scatter a group's results rather than
+        # group them.
         broken = task()
-        del broken["task_id"]
+        del broken["group_id"]
         with self.assertRaises(ValueError) as caught:
             await run_rollout(FakeClient(), broken)
-        self.assertIn("task_id", str(caught.exception))
+        self.assertIn("`group_id`", str(caught.exception))
+
+    async def test_a_blank_group_id_is_rejected_like_a_missing_one(self):
+        for blank in (None, "", "  "):
+            with self.assertRaises(ValueError):
+                await run_rollout(FakeClient(), task(group_id=blank))
+
+    async def test_a_task_without_a_task_id_still_runs(self):
+        # `task_id` is a recorded coordinate, not something this session reads: it stopped
+        # being the result key when `group_id` took over as the input_id.
+        broken = task()
+        del broken["task_id"]
+        dump = await run_rollout(FakeClient(), broken)
+        self.assertTrue(dump.is_successful())
 
     async def test_an_llm_block_without_an_api_key_is_a_config_error(self):
         # The nastiest misconfiguration to debug: the rollout would run to completion and
@@ -335,6 +366,8 @@ class ShutdownTest(SessionCase):
         future = client.futures[0]
         self.assertEqual(future.stops, 1)
         self.assertEqual(future.cancel_calls, 2)
+        # And no second stop beside the future's, which owns this one.
+        self.assertEqual(self.acr.stopped, [])
 
     async def test_shutdown_is_idempotent(self):
         client = FakeClient()
@@ -344,22 +377,63 @@ class ShutdownTest(SessionCase):
         for _ in range(3):
             await session.shutdown()
         self.assertEqual(client.futures[0].stops, 1)
+        self.assertEqual(self.acr.stopped, [])
 
-    async def test_shutdown_before_any_run_is_a_no_op(self):
+    async def test_a_session_only_set_up_is_stopped_rather_than_left_warm(self):
+        # No invoke means no future to ride, but setup started a microVM: unstopped it holds
+        # an ACR session slot until the idle reaper takes it.
         client = FakeClient()
         session = make(client)
         async with session:
             await session.setup(task())
-        await session.shutdown()
         self.assertEqual(client.futures, [])
+        self.assertEqual(self.acr.stopped, [SESSION_ID])
+
+    async def test_a_setup_that_failed_still_stops_the_session_it_may_have_created(self):
+        # The dominant real failure: the warm-up 500s because command dispatch loses a race
+        # with the container's start-up, and the microVM exists all the same.
+        self.acr.start_error = RuntimeError("Received error (500) from runtime")
+        session = make(FakeClient())
+        with self.assertRaises(RuntimeError):
+            async with session:
+                await session.setup(task())
+        self.assertEqual(self.acr.stopped, [SESSION_ID])
+
+    async def test_stopping_a_started_session_twice_is_a_no_op(self):
+        session = make(FakeClient())
+        async with session:
+            await session.setup(task())
+        for _ in range(3):
+            await session.shutdown()
+        self.assertEqual(self.acr.stopped, [SESSION_ID])
+
+    async def test_a_failing_stop_does_not_replace_the_error_that_ended_the_rollout(self):
+        # Teardown runs while the rollout's own exception is in flight; a stop that raised
+        # would take its place and cost the diagnosis.
+        self.acr.start_error = RuntimeError("the real failure")
+        self.acr.stop_runtime_session = mock.AsyncMock(side_effect=RuntimeError("stop denied"))
+        session = make(FakeClient())
+        with self.assertRaises(RuntimeError) as caught:
+            async with session:
+                await session.setup(task())
+        self.assertIn("the real failure", str(caught.exception))
 
     async def test_a_failed_invoke_still_leaves_the_session_shut_down(self):
+        # ACR may have accepted the invoke before it raised, so this stops the session too.
         client = FakeClient(invoke_error=RuntimeError("throttled"))
         session = make(client)
         with self.assertRaises(RuntimeError):
             async with session:
                 await session.run(task())
         self.assertEqual(client.futures, [])
+        self.assertEqual(self.acr.stopped, [SESSION_ID])
+
+    async def test_a_session_that_never_started_is_not_stopped(self):
+        # Nothing to tear down before setup, and a stop call would only spend ACR budget.
+        session = make(FakeClient())
+        async with session:
+            pass
+        self.assertEqual(self.acr.stopped, [])
 
 
 class TimeoutTest(SessionCase):
@@ -408,7 +482,7 @@ class ResultLocationTest(unittest.TestCase):
         self.assertEqual(mod.result_location("s3://results-bucket", "exp-1"), ("results-bucket", "exp-1"))
 
     def test_a_prefix_is_folded_into_the_key_rather_than_dropped(self):
-        # s3://bucket/runs + exp-1 -> s3://bucket/runs/exp-1/<task_id>/<session>.json
+        # s3://bucket/runs + exp-1 -> s3://bucket/runs/exp-1/<uid>/<session>.json
         self.assertEqual(mod.result_location("s3://results-bucket/runs/", "exp-1"), ("results-bucket", "runs/exp-1"))
 
     def test_a_multi_segment_prefix_survives_whole(self):

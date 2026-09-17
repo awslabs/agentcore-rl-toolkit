@@ -228,10 +228,10 @@ class RolloutSessionAgentLoop(AgentLoopBase):
             )
 
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> list[AgentLoopOutput]:  # type: ignore[override]
-        # `uid` is the one field a row must carry: it is verl's own prompt-group id, which the
-        # bounds admit rollouts by. `task_id` is optional here -- recorded as a coordinate when
-        # present, and required only by a backend that keys its own storage on it (see
-        # `require_task_id` in rollout_session/lifecycle.py).
+        # `uid` is the one field a row must carry: it is verl's own prompt-group id, which
+        # `make_task` normalizes to the session layer's `group_id`, and which the bounds admit
+        # rollouts by. `task_id` is optional here -- recorded as a coordinate when present, and
+        # read by no session.
         task = self.make_task(sampling_params, kwargs)
 
         async with self.meta.connection():
@@ -244,7 +244,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                 task_id=str(task.get("task_id", "")),
                 step=int(task.get("global_steps", 0)),
                 # this is required for priority assignment
-                verl_uid=task["uid"],
+                group_id=task["group_id"],
             )
 
             maybe_agent_loop_outputs = await self.run_rollout_session(task)
@@ -277,6 +277,10 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         # tensors the container does not need and that are not JSON-serializable
         task = {k: v for k, v in kwargs.items() if not isinstance(v, (torch.Tensor, np.ndarray))}
         task.update(self.loop_config.task_kwargs)
+        # The session layer groups rollouts by `group_id` and knows nothing about verl; verl's
+        # own name for that is `uid`, one uuid4 per prompt shared by its n rollouts. Raw `uid`
+        # stays in the task too -- the container sees the row as verl built it.
+        task["group_id"] = str(kwargs["uid"])
         task["sampling_params"] = sampling_params
         inference_url = f"{self._gateway.base_url}/v1"
         task["llm"] = build_llm(
@@ -303,7 +307,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
                 rollout = await run_rollout_with_bounds(
                     self.meta,
                     self.bounds,
-                    task["uid"],
+                    task["group_id"],  # the priority key: one group's rollouts admitted together
                     self.rollout_session,
                     task,
                 )

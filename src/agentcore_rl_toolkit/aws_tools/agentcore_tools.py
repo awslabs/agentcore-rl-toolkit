@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
+import backoff
 from botocore.config import Config
 from pydantic import BaseModel
 
@@ -25,6 +26,25 @@ SESSION_CLIENT_CONFIG = Config(
     retries={"max_attempts": 16, "mode": "standard"},
     max_pool_connections=MAX_POOL_CONNECTIONS,
 )
+
+# The warm-up in `start_agentcore_session` races the container's own start-up: ACR creates
+# the microVM and the container does boot, but a command dispatched before the app is serving
+# comes back as `RuntimeClientError: Received error (500) from runtime`. Measured at ~25% of
+# sessions against a heavy (Java toolchain) agent image and ~1% against a light one -- and the
+# container is alive either way, so retrying against it has always succeeded.
+#
+# The retry has to live here rather than in the client's config: `RuntimeClientError` is
+# modelled `httpStatusCode: 424, senderFault: true`, so botocore reads it as the caller's
+# fault and `SESSION_CLIENT_CONFIG`'s `max_attempts` never fires on it. Sized to sit far
+# inside any realistic `container_setup_timeout`: three tries of a ~25s call, 2s apart, where
+# the measured recovery was one retry ~2.4s later.
+START_MAX_TRIES = 3
+START_RETRY_INTERVAL = 2.0
+
+# Only that readiness class is retried. Every other way a start fails is either already
+# retried by botocore (throttling, 5xx *service* errors) or permanent for this rollout
+# (validation, access denied, quota), where more tries would only multiply the burst.
+START_RETRYABLE_ERRORS = frozenset({"RuntimeClientError"})
 
 
 class HttpResponse(BaseModel):
@@ -131,18 +151,58 @@ async def _client_for(arn: str, client: Any | None):
         yield acr
 
 
+def is_runtime_readiness_error(e: BaseException) -> bool:
+    """Whether ``e`` is the runtime-not-ready-yet failure a warm-up may be retried through.
+
+    Matched by error code, which reaches us two ways: as the modelled
+    ``botocore.errorfactory.RuntimeClientError`` when the initial response carries it (what
+    every observed failure was), or wrapped in an ``EventStreamError`` when it arrives as an
+    error event mid-stream. Both are ``ClientError`` subclasses, so the code is on the
+    response; the class-name check covers the first without importing botocore's factory.
+    """
+    if type(e).__name__ in START_RETRYABLE_ERRORS:
+        return True
+    response = getattr(e, "response", None)
+    if not isinstance(response, dict):
+        return False
+    return response.get("Error", {}).get("Code") in START_RETRYABLE_ERRORS
+
+
+@backoff.on_exception(
+    backoff.constant,
+    Exception,
+    giveup=lambda e: not is_runtime_readiness_error(e),
+    # Read through a callable so both are resolved per call, not baked in at decoration:
+    # tests turn the interval off, and nothing has to reach inside the decorator to do it.
+    max_tries=lambda: START_MAX_TRIES,
+    interval=lambda: START_RETRY_INTERVAL,
+    jitter=None,  # the interval is the measured recovery time, not a herd-spreading guess
+    logger=logger,
+)
+async def _warm_up_agentcore_session(runtime_arn: str, session_id: str, acr: Any) -> None:
+    """Run one trivial command in ``session_id``'s microVM, creating it if it does not exist.
+
+    Retried through the readiness race only (see :data:`START_RETRYABLE_ERRORS`), always
+    against the same ``session_id``: the microVM the failed try created is the one that is
+    now warm, so a retry is a cheap second dispatch rather than another cold start.
+    """
+    resp = await acr.invoke_agent_runtime_command(
+        agentRuntimeArn=runtime_arn,
+        runtimeSessionId=session_id,
+        contentType="application/json",
+        accept="application/json",
+        body={"command": "echo hello", "timeout": 60},
+    )
+    last_chunk = None
+    async for chunk in resp["stream"]:
+        last_chunk = chunk
+    assert last_chunk is not None, f"The agent runtime streamed no chunks for {session_id=}"
+    assert last_chunk["chunk"]["contentStop"]["exitCode"] == 0, "Failed to start the agent runtime"
+
+
 async def start_agentcore_session(runtime_arn: str, session_id: str, client: Any | None = None):
     async with _client_for(runtime_arn, client) as acr:
-        resp = await acr.invoke_agent_runtime_command(
-            agentRuntimeArn=runtime_arn,
-            runtimeSessionId=session_id,
-            contentType="application/json",
-            accept="application/json",
-            body={"command": "echo hello", "timeout": 60},
-        )
-        async for chunk in resp["stream"]:
-            last_chunk = chunk
-    assert last_chunk["chunk"]["contentStop"]["exitCode"] == 0, "Failed to start the agent runtime"
+        await _warm_up_agentcore_session(runtime_arn, session_id, acr)
 
 
 async def invoke_agentcore_session(
@@ -156,7 +216,32 @@ async def invoke_agentcore_session(
             return HttpResponse(status_code=resp["statusCode"], body=(await body.read()).decode())
 
 
-async def stop_agentcore_session(capacity_provider_arn: str, session_id: str, client: Any | None = None):
+async def stop_agentcore_microvm_session(runtime_arn: str, session_id: str, client: Any | None = None) -> bool:
+    """End ``session_id``'s microVM through its runtime. Best-effort; returns whether it did.
+
+    The data-plane stop, for a session owned by nothing but the rollout that started it --
+    :func:`stop_agentcore_instance_session` instead releases the session through the *capacity
+    provider* whose instance pool backs it. Never raises: a stop happens on the way out of a
+    rollout, often carrying the error that ended it, and a teardown failure that replaced that
+    error would cost the diagnosis to save a session ACR's idle reaper collects anyway.
+    """
+    try:
+        async with _client_for(runtime_arn, client) as acr:
+            await acr.stop_runtime_session(agentRuntimeArn=runtime_arn, runtimeSessionId=session_id)
+        return True
+    except Exception as e:
+        logger.warning("failed to stop the runtime session %s: %s: %s", session_id, type(e).__name__, e)
+        return False
+
+
+async def stop_agentcore_instance_session(capacity_provider_arn: str, session_id: str, client: Any | None = None):
+    """Release ``session_id`` through the capacity provider whose instance pool backs it.
+
+    For sessions placed on a pooled instance, where the pool -- not the rollout -- owns the
+    slot, so failing to delete the session leaks one instance until its idle timeout.
+    :func:`stop_agentcore_microvm_session` is the plain runtime stop for unpooled sessions.
+    An already-deleted session is not an error; anything else raises.
+    """
     capacity_provider_id = capacity_provider_arn.split("/")[-1]
     try:
         async with _client_for(capacity_provider_arn, client) as acr:
@@ -175,4 +260,4 @@ async def agentcore_session(capacity_provider_arn: str, runtime_arn: str, sessio
     async with _client_for(runtime_arn, client) as acr:
         await start_agentcore_session(runtime_arn, session_id, acr)
         yield
-        await stop_agentcore_session(capacity_provider_arn, session_id, acr)
+        await stop_agentcore_instance_session(capacity_provider_arn, session_id, acr)

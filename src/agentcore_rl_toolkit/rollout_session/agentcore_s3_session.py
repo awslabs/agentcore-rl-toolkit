@@ -14,7 +14,10 @@ What that contract costs, all accepted deliberately:
   all ``setup`` can do is start that session early (a warm-up command, under
   ``container_setup_timeout``) to keep the microVM cold start out of ``agent_run_timeout``.
   Preparing the *task* inside the container has no channel of its own here: whatever the
-  handler does before the agent runs is charged to ``agent_run_timeout``.
+  handler does before the agent runs is charged to ``agent_run_timeout``. That warm-up is
+  also where this backend feels container readiness -- see the retry in
+  :func:`start_agentcore_session` -- and a ``setup`` that fails regardless still stops its
+  session rather than leaving a warm microVM to the idle reaper.
 * **Failure detection is coarse.** There is no status channel, so a container that dies
   without the SDK's error path running (OOM, process death) is noticed only when
   ``agent_run_timeout`` expires. Exceptions raised inside the handler still come back
@@ -32,6 +35,7 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
     region_of,
     shared_agentcore_client,
     start_agentcore_session,
+    stop_agentcore_microvm_session,
 )
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.client import RolloutClient, RolloutFuture
@@ -98,7 +102,7 @@ def result_location(rollout_output_s3: str, experiment_name: str) -> tuple[str, 
     The agent SDK writes one object per rollout at ``{exp_id}/{input_id}/{session_id}.json``
     in a single bucket, with no notion of a prefix. So a prefix in ``rollout_output_s3`` is
     honoured by folding it into ``exp_id`` -- ``s3://bucket/runs`` with experiment ``exp-1``
-    puts results under ``s3://bucket/runs/exp-1/<uid>/<session>.json`` -- rather than
+    puts results under ``s3://bucket/runs/exp-1/<group_id>/<session>.json`` -- rather than
     being silently dropped at the bucket root. A bare bucket name works too.
     """
     location = rollout_output_s3.strip()
@@ -145,14 +149,26 @@ class AgentCoreS3Session(RolloutSession):
         self.session_state = session_state
         self._client = client
         # Set once the invoke returns; `None` means either "not invoked yet" or "already
-        # shut down", and both make shutdown a no-op.
+        # shut down", and shutdown stops the session directly in the first case.
         self._future: RolloutFuture | None = None
+        # Whether an ACR session may exist for this rollout, which is what shutdown has to
+        # act on when there is no future to ride.
+        self._started = False
 
     async def __aenter__(self) -> "AgentCoreS3Session":
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.shutdown()
+
+    async def _acr(self) -> Any:
+        """The shared data-plane client this session's own ACR calls ride on.
+
+        Not ``RolloutClient``'s own boto3 client: that one is synchronous, so hundreds of
+        concurrent setups would queue on the default thread pool. This one is per process,
+        not per rollout.
+        """
+        return await shared_agentcore_client(region_of(self._client.agent_runtime_arn))
 
     async def setup(self, task: dict) -> None:
         """Start the ACR session, and record where this rollout ran.
@@ -173,18 +189,23 @@ class AgentCoreS3Session(RolloutSession):
         )
 
         async with measure_span_persistent("agentcore_setup", self.session_state):
-            # `RolloutClient`'s own boto3 client is synchronous -- blocking hundreds of
-            # concurrent setups on the default thread pool -- so the warm-up rides the
-            # shared async data-plane client, which is one per process, not per rollout.
-            client = await shared_agentcore_client(region_of(runtime_arn))
+            client = await self._acr()
+            # Marked before the call, not after: a warm-up that fails is precisely the case
+            # where the microVM usually *does* exist -- the platform's command dispatch loses
+            # a race with the container's start-up -- and one nobody stops holds a session
+            # slot until ACR's idle reaper eventually takes it.
+            self._started = True
             await start_agentcore_session(runtime_arn, self.session_id, client)
 
     async def run(self, task: dict) -> RolloutDumpResponse:
         llm = _require_llm(task)
+        # An invoke creates the session too if setup did not, so from here on there may be one
+        # to stop even if no future comes back.
+        self._started = True
         future = await self._client.invoke_async(
             _require_payload(task),
             session_id=self.session_id,
-            input_id=_require_uid(task),
+            input_id=_require_group_id(task),
             base_url=llm["base_url"],
             # LiteLLM-shaped `openai/<name>`; the agent's OpenAI client wants the bare name.
             model_id=str(llm["model"]).split("/")[-1],
@@ -198,14 +219,31 @@ class AgentCoreS3Session(RolloutSession):
     async def shutdown(self) -> None:
         """Stop the ACR runtime session. Idempotent, and safe before or after :meth:`run`.
 
-        ``RolloutFuture.cancel_async`` is itself idempotent, so this is a no-op when the
-        result fetch already stopped the session. The one uncovered case is an invoke that
-        raised *after* ACR accepted it (a malformed immediate response): no future exists,
-        so that session is left to ACR's idle reaper.
+        Two paths reach the same session. When :meth:`run` got a future, the stop rides it:
+        ``RolloutFuture.cancel_async`` is itself idempotent, so this is a no-op once the
+        result fetch has stopped the session. When no future exists -- a :meth:`setup` that
+        raised, or an invoke that raised after ACR accepted it -- the stop is made directly
+        against the runtime instead of leaving a warm microVM to ACR's idle reaper. That one
+        is best-effort by construction (see :func:`stop_agentcore_microvm_session`): teardown
+        must not replace the error that ended the rollout.
         """
         future, self._future = self._future, None
+        started, self._started = self._started, False
         if future is not None:
             await future.cancel_async()
+        elif started:
+            await self._stop_started_session()
+
+    async def _stop_started_session(self) -> None:
+        """Stop this rollout's ACR session with no future to ride. Never raises."""
+        try:
+            client = await self._acr()
+        except Exception as e:
+            # Only reachable if the shared client cannot be opened at all, which setup
+            # already did once. Swallowed for the same reason the stop itself is.
+            logger.warning("no data-plane client to stop session %s with: %s", self.session_id, e)
+            return
+        await stop_agentcore_microvm_session(self._client.agent_runtime_arn, self.session_id, client)
 
 
 def to_dump(result: dict) -> RolloutDumpResponse:
@@ -294,28 +332,31 @@ def _require_payload(task: dict) -> dict:
     )
 
 
-def _require_uid(task: dict) -> str:
-    """The task's prompt-group id, which this session keys its result objects by.
+def _require_group_id(task: dict) -> str:
+    """The task's rollout-group id, which this session keys its result objects by.
 
-    verl stamps one ``uid`` per prompt, shared by that prompt's n rollouts, and it becomes
-    the ``input_id`` segment of ``{exp_id}/{input_id}/{session_id}.json``. Deliberately no
-    fallback: the row index keys results by position, which shuffles between runs, and the
-    session id is unique per rollout, so either one scatters a group's results instead of
-    grouping them.
+    It becomes the ``input_id`` segment of ``{exp_id}/{input_id}/{session_id}.json``, so the
+    rollouts sharing a group id land in one S3 prefix. The name is the harness's contract,
+    not any one trainer's: verl's agent loop maps its own ``uid`` onto it, and an evaluator
+    with no notion of groups can use the task's own id, one rollout per group.
+
+    Deliberately no fallback: the row index keys results by position, which shuffles between
+    runs, and the session id is unique per rollout, so either one scatters a group's results
+    instead of grouping them.
 
     A :class:`RolloutContractError` rather than the subscript's ``KeyError`` because no
-    rollout of a run whose rows lack ``uid`` can succeed. Nothing treats the marker type
+    rollout of a run whose tasks lack it can succeed. Nothing treats the marker type
     specially yet -- the agent loop logs it with a traceback and records it in the session's
     S3 output like any other rollout exception, which is enough to diagnose it.
     """
-    uid = task.get("uid")
-    if uid is None or (isinstance(uid, str) and not uid.strip()):
+    group_id = task.get("group_id")
+    if group_id is None or (isinstance(group_id, str) and not group_id.strip()):
         raise RolloutContractError(
-            f"The task has no usable `uid` (got {uid!r}). It is the prompt-group id the "
-            "trainer stamps on every row, and this session stores each agent result under "
+            f"The task has no usable `group_id` (got {group_id!r}). It names the group of "
+            "rollouts this one belongs to, and this session stores each agent result under "
             "it, so there is nothing to key this rollout's result object by."
         )
-    return str(uid)
+    return str(group_id)
 
 
 def _require_llm(task: dict) -> dict:

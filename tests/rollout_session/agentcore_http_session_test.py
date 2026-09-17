@@ -36,7 +36,7 @@ STATUS_REQUEST = InvocationRequest(payload=RolloutStatusRequest()).model_dump_js
 
 
 class ResourceNotFoundException(Exception):
-    """Matched by name, the way ``stop_agentcore_session`` matches it."""
+    """Matched by name, the way ``stop_agentcore_instance_session`` matches it."""
 
 
 class FakeBody:

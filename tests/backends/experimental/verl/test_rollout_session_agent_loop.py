@@ -189,9 +189,11 @@ async def test_turns_are_counted_before_the_session_is_drained():
     assert loop.meta["num_turns"] == 3
 
 
-async def test_the_prompt_group_uid_is_recorded_and_drives_priority():
-    """One uid per prompt, shared by its n rollouts: it is what the bounds admit rollouts by
-    (so a group is not left half-finished), and what joins a session record to its group."""
+async def test_the_prompt_group_uid_becomes_the_group_id_and_drives_priority():
+    """One uid per prompt, shared by its n rollouts. verl's name for it is `uid`; everything
+    below the loop calls it `group_id`, since a session serves evaluators too. It is what the
+    bounds admit rollouts by (so a group is not left half-finished), and what joins a session
+    record to its group."""
     loop = make_loop()
     assigner = loop.bounds.container_priority_assigner
 
@@ -199,7 +201,7 @@ async def test_the_prompt_group_uid_is_recorded_and_drives_priority():
         await run_loop(loop, uid="group-7")
 
     assert spy.await_args.args == ("group-7",)
-    assert loop.meta["verl_uid"] == "group-7"
+    assert loop.meta["group_id"] == "group-7"
 
 
 async def test_task_carries_config_kwargs_but_no_tensors():
@@ -210,7 +212,8 @@ async def test_task_carries_config_kwargs_but_no_tensors():
 
     task = session.tasks[0]
     assert task["dataset"] == "gsm8k"
-    assert task["uid"] == "u1"
+    assert task["group_id"] == "u1"
+    assert task["uid"] == "u1"  # the raw verl field survives too: the container sees the row
     assert "input_ids" not in task  # not JSON-serializable, and the container has no use for it
 
 
