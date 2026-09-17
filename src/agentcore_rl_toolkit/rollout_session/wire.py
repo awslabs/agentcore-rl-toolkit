@@ -59,12 +59,7 @@ class RolloutDumpResponse(BaseModel):
     exception: str | None
 
     def failure_reason(self) -> str | None:
-        """Why this dump does not describe a usable rollout, or None if it does.
-
-        A dump can come back describing a rollout that did not work; the two
-        non-``exception`` branches stand in for a container that failed without saying
-        so. Goes away once a dump implies success.
-        """
+        """Why this dump does not describe a succesfully finished rollout, or None if it does."""
         if self.exception is not None:
             return self.exception
         if self.reward is None:

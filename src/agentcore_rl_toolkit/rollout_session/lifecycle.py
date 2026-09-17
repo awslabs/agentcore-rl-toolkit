@@ -25,11 +25,16 @@ from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 def require_task_id(task: dict) -> str:
     """The dataset's own id for this task, or a loud error.
 
-    Every row must carry ``task_id``: it is what rollouts are grouped by, what lands in
-    the session record, and what an eval of the same dataset stamps too -- so a training
-    rollout and an eval of one task meet on it. There is deliberately no fallback to the
-    row index; an index silently regroups rollouts by position, which shuffles between
-    runs, and the resulting advantages are wrong rather than absent.
+    Called by the backends that key their own storage on it -- ``AgentCoreS3Session`` puts
+    each result under ``<experiment>/<task_id>/<session>.json`` -- and by nothing else, so
+    a row without one is a contract violation for those backends only. It is also what an
+    eval of the same dataset stamps, so a training rollout and an eval of one task meet on
+    it in the session store.
+
+    Rollout *grouping* is no longer its job: verl's own ``uid`` is the prompt-group key.
+    There is still deliberately no fallback to the row index -- an index keys results by
+    position, which shuffles between runs, so one task's results land under a different id
+    each run and are misattributed rather than absent.
     """
     task_id = task.get("task_id")
     if task_id is None or (isinstance(task_id, str) and not task_id.strip()):
