@@ -10,9 +10,11 @@ result contract.
 
 What that contract costs, all accepted deliberately:
 
-* **The setup/run split is vacuous.** ``invoke_async`` both creates the ACR session and
-  starts the rollout, so ``setup`` provisions nothing, ``container_setup_timeout`` bounds
-  nothing, and cold start plus task setup are charged to ``agent_run_timeout``.
+* **The setup/run split is thin.** ``invoke_async`` would create the ACR session itself, so
+  all ``setup`` can do is start that session early (a warm-up command, under
+  ``container_setup_timeout``) to keep the microVM cold start out of ``agent_run_timeout``.
+  Preparing the *task* inside the container has no channel of its own here: whatever the
+  handler does before the agent runs is charged to ``agent_run_timeout``.
 * **Failure detection is coarse.** There is no status channel, so a container that dies
   without the SDK's error path running (OOM, process death) is noticed only when
   ``agent_run_timeout`` expires. Exceptions raised inside the handler still come back
@@ -26,7 +28,11 @@ What that contract costs, all accepted deliberately:
 import logging
 from typing import Any
 
-from agentcore_rl_toolkit.aws_tools.agentcore_tools import start_agentcore_session
+from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
+    region_of,
+    shared_agentcore_client,
+    start_agentcore_session,
+)
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.client import RolloutClient, RolloutFuture
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
@@ -149,14 +155,29 @@ class AgentCoreS3Session(RolloutSession):
         await self.shutdown()
 
     async def setup(self, task: dict) -> None:
+        """Start the ACR session, and record where this rollout ran.
+
+        :meth:`run`'s invoke would create the session itself, but then the microVM cold
+        start would be charged to ``agent_run_timeout``; starting it here puts it under
+        ``container_setup_timeout``, where the other backends' provisioning lives. The
+        recorded coordinates identify where to look when a rollout fails.
+        """
+        runtime_arn = self._client.agent_runtime_arn
         await self.session_state.update(
             {
-                "runtime_arn": self._client.agent_runtime_arn,
+                "runtime_arn": runtime_arn,
+                "result_s3_bucket": self._client.s3_bucket,
+                # The client's exp_id: the experiment name, under the configured prefix.
+                "result_s3_prefix": self._client.exp_id,
             }
         )
 
         async with measure_span_persistent("agentcore_setup", self.session_state):
-            await start_agentcore_session(self.runtime_arn, self.session_id, self._client)
+            # `RolloutClient`'s own boto3 client is synchronous -- blocking hundreds of
+            # concurrent setups on the default thread pool -- so the warm-up rides the
+            # shared async data-plane client, which is one per process, not per rollout.
+            client = await shared_agentcore_client(region_of(runtime_arn))
+            await start_agentcore_session(runtime_arn, self.session_id, client)
 
     async def run(self, task: dict) -> RolloutDumpResponse:
         llm = _require_llm(task)
@@ -240,10 +261,6 @@ def extract_agent_reward(result: dict) -> float | None:
     broken reward code is broken on every rollout, and zeros would flatten every GRPO
     group's advantages instead. The agent loop lets that one out (it absorbs ordinary
     rollout failures, not contract violations), which stops the run.
-
-    A near-copy of ``_extract_agent_reward`` in ``backends/verl/agent_loop.py``, which
-    cannot be imported here: this package must stay verl-free. Change both together until
-    that loop is retired.
     """
     rewards = result.get("rewards")
     if rewards is None:

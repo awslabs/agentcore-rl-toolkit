@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Unit tests for :class:`AgentCoreS3Session` -- the translation between an
 ``AgentCoreRLApp`` result dict and a :class:`RolloutDumpResponse`, the invoke arguments
-that make the trainer's gateway capture the right session, and the teardown guarantees
-(idempotent, and reached through a timeout). Fake client and futures: no AWS.
+that make the trainer's gateway capture the right session, the setup-stage session warm-up,
+and the teardown guarantees (idempotent, and reached through a timeout). Fake client,
+futures and data-plane client: no AWS.
 """
 
 import asyncio
@@ -100,6 +101,37 @@ class FakeClient:
         return future
 
 
+async def one_ok_chunk():
+    """The ``invoke_agent_runtime_command`` stream of a session that started."""
+    yield {"chunk": {"contentStop": {"exitCode": 0}}}
+
+
+class FakeAcrClient:
+    """The shared ``bedrock-agentcore`` client, recording the warm-ups made on it."""
+
+    def __init__(self):
+        self.started: list[str] = []
+
+    async def invoke_agent_runtime_command(self, *, runtimeSessionId, **kwargs):  # noqa: N803 - boto3 spelling
+        self.started.append(runtimeSessionId)
+        return {"stream": one_ok_chunk()}
+
+
+class SessionCase(IsolatedAsyncioTestCase):
+    """Base case: ``setup`` warms the ACR session over the process-wide client, faked here.
+
+    ``RolloutClient`` (``FakeClient`` below) is the agent-invoke path only; the warm-up is a
+    data-plane call on a client this session borrows rather than owns.
+    """
+
+    def setUp(self):
+        self.acr = FakeAcrClient()
+        self.shared_client = mock.AsyncMock(return_value=self.acr)
+        patch = mock.patch.object(mod, "shared_agentcore_client", self.shared_client)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+
 def state(session_id: str = SESSION_ID) -> PersistentDict:
     return PersistentDict(data={"session_id": session_id}, persister=NullPersister())
 
@@ -116,7 +148,7 @@ async def run_rollout(client: FakeClient, task_dict: dict | None = None):
         return await session.run(task_dict or task())
 
 
-class DumpTranslationTest(IsolatedAsyncioTestCase):
+class DumpTranslationTest(SessionCase):
     """A result dict becomes a dump: reward by convention, metrics narrowed to scalars."""
 
     async def test_a_scalar_reward_and_the_numeric_metrics_reach_the_dump(self):
@@ -164,7 +196,7 @@ class DumpTranslationTest(IsolatedAsyncioTestCase):
         self.assertTrue(dump.is_successful())
 
 
-class AgentFailureTest(IsolatedAsyncioTestCase):
+class AgentFailureTest(SessionCase):
     """A handler that raised still saves a result; it must not look like a rollout."""
 
     async def test_a_non_200_status_becomes_the_dumps_exception(self):
@@ -186,7 +218,7 @@ class AgentFailureTest(IsolatedAsyncioTestCase):
         self.assertIn("unknown", dump.exception)
 
 
-class InvokeArgumentsTest(IsolatedAsyncioTestCase):
+class InvokeArgumentsTest(SessionCase):
     """What the container is told, and what makes its trajectory findable afterwards."""
 
     async def test_the_session_id_is_both_the_acr_session_and_the_capture_key(self):
@@ -225,16 +257,26 @@ class InvokeArgumentsTest(IsolatedAsyncioTestCase):
         await run_rollout(client)
         self.assertNotIn("sampling_params", client.invocations[0])
 
-    async def test_setup_records_where_the_rollout_ran_without_provisioning(self):
+    async def test_setup_starts_the_acr_session_and_records_where_it_ran(self):
         client = FakeClient()
         session = make(client)
         async with session:
             await session.setup(task())
-            # Nothing is invoked by setup: the invoke in run() creates the ACR session.
+            # The agent is not invoked yet; setup only starts the session it will run in,
+            # so the microVM cold start is charged to container_setup_timeout.
             self.assertEqual(client.invocations, [])
+            self.assertEqual(self.acr.started, [SESSION_ID])
             self.assertEqual(session.session_state["runtime_arn"], RUNTIME_ARN)
             self.assertEqual(session.session_state["result_s3_bucket"], BUCKET)
             self.assertEqual(session.session_state["result_s3_prefix"], "exp-1")
+            # The start is a measured span, so its cost shows up in the session record.
+            self.assertGreaterEqual(session.session_state["agentcore_setup"], 0)
+
+    async def test_the_warm_up_rides_the_shared_client_of_the_runtimes_region(self):
+        # Not RolloutClient's own boto3 client: that one is synchronous, so hundreds of
+        # concurrent setups would queue on the default thread pool.
+        await run_rollout(FakeClient())
+        self.shared_client.assert_awaited_once_with("us-west-2")
 
     async def test_the_result_key_is_recorded_before_the_wait(self):
         client = FakeClient(delay=0.01)
@@ -247,7 +289,7 @@ class InvokeArgumentsTest(IsolatedAsyncioTestCase):
             await running
 
 
-class TaskContractTest(IsolatedAsyncioTestCase):
+class TaskContractTest(SessionCase):
     """The three task fields this session cannot invent, each failing loudly."""
 
     async def test_a_task_without_a_payload_dict_is_a_config_error(self):
@@ -288,7 +330,7 @@ class TaskContractTest(IsolatedAsyncioTestCase):
                 require_task_id(bad)
 
 
-class ShutdownTest(IsolatedAsyncioTestCase):
+class ShutdownTest(SessionCase):
     """Teardown stops the ACR session once, whether the rollout finished or not."""
 
     async def test_a_finished_rollout_is_stopped_exactly_once(self):
@@ -327,7 +369,7 @@ class ShutdownTest(IsolatedAsyncioTestCase):
         self.assertEqual(client.futures, [])
 
 
-class TimeoutTest(IsolatedAsyncioTestCase):
+class TimeoutTest(SessionCase):
     """A rollout that outlives ``agent_run_timeout`` must not leave a session running."""
 
     @staticmethod
