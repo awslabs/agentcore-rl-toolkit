@@ -100,6 +100,10 @@ If the text prefix or closer check fails, `render_delta()` returns `None`.
 Renderers without `render_delta()` also use this path. If full-history healing fails,
 `linear_on_nonlinear` determines whether to reset, raise, or disable healing.
 
+Each turn renders with the request's `chat_template_kwargs`, overriding renderer defaults.
+Changing kwargs between turns may make healing fail. If healing succeeds, continue
+appending; otherwise, follow `linear_on_nonlinear` (default: reset).
+
 Deciding linearity at the message level (rather than by a raw token-prefix check on the
 client's render) is what keeps the healer in agreement with `TrajectoryManager`. A harness
 may replay a prior tool call with its arguments re-keyed or its JSON re-spaced: the resulting

@@ -265,14 +265,22 @@ class HfTemplateRenderer:
         new_messages: list[dict],
         *,
         tools: list[dict] | None = None,
+        chat_template_kwargs: dict | None = None,
     ) -> tuple[list[int], list[int]] | None:
         """Render real history to text, encoding only its closer and appended tail.
 
         ``prev_messages`` ends with the stored assistant message. Keeping real
         history lets templates use earlier messages when formatting the new tail.
         """
-        before = self._render_text(prev_messages, tools=tools, add_generation_prompt=False)
-        after = self._render_text(prev_messages + new_messages, tools=tools, add_generation_prompt=True)
+        before = self._render_text(
+            prev_messages, tools=tools, add_generation_prompt=False, chat_template_kwargs=chat_template_kwargs
+        )
+        after = self._render_text(
+            prev_messages + new_messages,
+            tools=tools,
+            add_generation_prompt=True,
+            chat_template_kwargs=chat_template_kwargs,
+        )
         if not after.startswith(before):
             return None
 
@@ -283,6 +291,7 @@ class HfTemplateRenderer:
                 prev_messages[:-1] + [{"role": "assistant", "content": body}],
                 tools=tools,
                 add_generation_prompt=False,
+                chat_template_kwargs=chat_template_kwargs,
             )
             for body in (_PROBE_A, _PROBE_B)
         ]

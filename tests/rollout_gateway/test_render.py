@@ -373,6 +373,47 @@ async def test_delta_healing_preserves_multiturn_tokens_and_training_masks(fast_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("incremental", [True, False])
+async def test_healing_uses_current_chat_template_kwargs(fast_tokenizer, incremental):
+    tok = fast_tokenizer
+    tok.chat_template = tok.chat_template.replace("'<|im_end|>\\n'", "(turn_end + '\\n')")
+    defaults = {"turn_end": "<|im_end|>", "enable_thinking": False}
+    renderer = HfTemplateRenderer(tok, chat_template_kwargs=defaults)
+    if not incremental:
+        renderer.render_delta = None
+    healer = LinearHealer(renderer)
+    history = [{"role": "user", "content": "q0"}]
+    served_prefix = []
+    for i, kwargs in enumerate(
+        [
+            {"turn_end": "<extra>", "enable_thinking": True},
+            {"turn_end": "!", "enable_thinking": False},
+            None,  # Request overrides must not persist into later turns.
+        ]
+    ):
+        options = {**defaults, **(kwargs or {})}
+        prompt = await healer.heal("s", history, None, chat_template_kwargs=kwargs)
+        if i == 0:
+            expected = tok.apply_chat_template(
+                history, tokenize=True, add_generation_prompt=True, return_dict=False, **options
+            )
+        else:
+            tail = options["turn_end"] + "\n"
+            tail += f"<|im_start|>user\nq{i}" + options["turn_end"] + "\n<|im_start|>assistant\n"
+            expected = served_prefix + tok.encode(tail, add_special_tokens=False)
+        assert prompt == expected
+        output = tok.encode(f"Actually generated {i}", add_special_tokens=False)
+        response = {"role": "assistant", "content": f"Replayed {i}"}
+        healer.commit(
+            "s", fed_prompt_ids=prompt, output_ids=output, messages=history, response_message=response, tools=None
+        )
+        served_prefix = prompt + output
+        history = history + [response, {"role": "user", "content": f"q{i + 1}"}]
+    assert healer.counters["healed_turns"] == 2
+    assert healer.counters["nonlinear"] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["prefix_changed", "closer_changed"])
 async def test_delta_declines_unsafe_template_and_preserves_fallback(fast_tokenizer, reason):
     tok = fast_tokenizer
@@ -402,6 +443,40 @@ async def test_delta_declines_unsafe_template_and_preserves_fallback(fast_tokeni
     assert results[0] == results[1]
     assert healers[0].counters == healers[1].counters
     assert healers[0].counters["nonlinear"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["prefix_changed", "closer_changed", "history_edited"])
+async def test_healing_reset_uses_current_chat_template_kwargs(fast_tokenizer, reason):
+    tok = fast_tokenizer
+    if reason == "prefix_changed":
+        tok.chat_template = (
+            "{% if incompatible | default(false) %}{{ messages | length }}\n{% endif %}" + tok.chat_template
+        )
+    elif reason == "closer_changed":
+        tok.chat_template = tok.chat_template.replace(
+            "'<|im_end|>\\n'",
+            "('<extra>\\n' if incompatible and m.tool_calls is defined else '<|im_end|>\\n')",
+        )
+    renderer = HfTemplateRenderer(tok)
+    healer = LinearHealer(renderer)
+    prior = [{"role": "user", "content": "q"}]
+    last = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"type": "function", "function": {"name": "x", "arguments": {}}}],
+    }
+    seed = await healer.heal("s", prior, None)
+    healer.commit("s", fed_prompt_ids=seed, output_ids=[42], messages=prior, response_message=last, tools=None)
+    history = prior + [last, {"role": "tool", "content": "result"}]
+    if reason == "history_edited":
+        history[0] = {"role": "user", "content": "edited"}
+    kwargs = {"incompatible": True, "enable_thinking": True}
+    actual = await healer.heal("s", history, None, chat_template_kwargs=kwargs)
+    expected = tok.apply_chat_template(history, tokenize=True, add_generation_prompt=True, return_dict=False, **kwargs)
+    assert actual == expected
+    assert healer.counters["nonlinear"] == 1
+    assert healer.counters["healed_turns"] == 0
 
 
 @pytest.mark.asyncio

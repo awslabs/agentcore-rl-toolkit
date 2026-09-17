@@ -9,6 +9,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from agentcore_rl_toolkit.rollout_gateway.adapters import OpenAIAdapter
+from agentcore_rl_toolkit.rollout_gateway.linear import LinearHealer
 from agentcore_rl_toolkit.rollout_gateway.render import ParsedOutput
 from agentcore_rl_toolkit.rollout_gateway.trajectory import TurnRecord
 
@@ -145,10 +146,16 @@ async def test_bearer_sid_isolates_sessions():
 
 
 @pytest.mark.asyncio
-async def test_chat_template_kwargs_reach_renderer():
+@pytest.mark.parametrize("history_mode", ["tree", "linear"])
+async def test_chat_template_kwargs_reach_renderer(history_mode):
     renderer = FakeRenderer()
     backend = FakeBackend(renderer, replies=["four", "four"])
-    adapter = OpenAIAdapter(backend=backend, renderer=renderer, tokenizer=None)
+    adapter = OpenAIAdapter(
+        backend=backend,
+        renderer=renderer,
+        tokenizer=None,
+        healer=LinearHealer(renderer) if history_mode == "linear" else None,
+    )
 
     server = TestServer(adapter.app)
     client = TestClient(server)

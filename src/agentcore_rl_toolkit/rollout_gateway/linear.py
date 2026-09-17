@@ -118,7 +118,14 @@ class LinearHealer:
 
     # -- public -------------------------------------------------------------
 
-    async def heal(self, sid: str, messages: list[dict], tools: list[dict] | None) -> list[int]:
+    async def heal(
+        self,
+        sid: str,
+        messages: list[dict],
+        tools: list[dict] | None,
+        *,
+        chat_template_kwargs: dict | None = None,
+    ) -> list[int]:
         """Return the token ids to feed the backend for this turn.
 
         For the first turn of a sid (or a passthrough sid) this is just the plain render;
@@ -131,10 +138,11 @@ class LinearHealer:
         # given canonical tokens, we can't compute a message that will render into canonical tokens
         # but if two messages are equal, then we can use canonical tokens as context for the llm
 
+        render_kwargs = {"chat_template_kwargs": chat_template_kwargs} if chat_template_kwargs else {}
         st = self._state.get(sid)
         if st is None or sid in self._disabled:
             # first turn, or healing disabled for this sid: feed the plain render
-            return await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+            return await self.renderer.render(messages, tools=tools, add_generation_prompt=True, **render_kwargs)
 
         # Linearity is decided in MESSAGE space, not token space. st.prev_messages is this
         # session's history before this request (including the last assistant message). The
@@ -147,12 +155,12 @@ class LinearHealer:
         new = self._linear_delta(st, messages, tools)
         if new is None:
             # genuine edit/drop/branch/compaction (or a tools change): re-anchor
-            r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+            r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True, **render_kwargs)
             return self._handle_nonlinear(sid, r_full)
 
         render_delta = getattr(self.renderer, "render_delta", None)
         if render_delta is not None:
-            delta = await render_delta(st.prev_messages, new, tools=st.prev_tools)
+            delta = await render_delta(st.prev_messages, new, tools=st.prev_tools, **render_kwargs)
             if delta is not None:
                 close, tail = delta
                 return self._splice(sid, st, close, tail)
@@ -161,15 +169,19 @@ class LinearHealer:
         # that same stored prefix by only the genuinely-new (non-assistant, drift-free)
         # messages, so r_ext starts with r_prev by construction (identical prefix list and
         # tools) -- the client's re-serialized prior turns never enter the fed tokens.
-        r_prev = await self.renderer.render(st.prev_messages, tools=st.prev_tools, add_generation_prompt=False)
-        r_ext = await self.renderer.render(st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True)
+        r_prev = await self.renderer.render(
+            st.prev_messages, tools=st.prev_tools, add_generation_prompt=False, **render_kwargs
+        )
+        r_ext = await self.renderer.render(
+            st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True, **render_kwargs
+        )
         if r_ext[: len(r_prev)] != r_prev:
             # template glue for the prior turns depends on the appended messages, so we
             # cannot splice the canonical prefix safely; re-anchor rather than emit garbage.
             return self._handle_nonlinear(sid, r_ext)
 
         # close is the token-space marker of the end of the assistant turn
-        close = await self._assistant_close(st.prev_messages, st.prev_tools, r_prev)
+        close = await self._assistant_close(st.prev_messages, st.prev_tools, r_prev, **render_kwargs)
         if close is None:
             # couldn't isolate the assistant-closer (e.g. a template whose glue depends on
             # message type); don't emit a subtly-wrong sequence — fall back.
@@ -277,7 +289,12 @@ class LinearHealer:
         return r_full
 
     async def _assistant_close(
-        self, prev_messages: list[dict], tools: list[dict] | None, r_prev: list[int]
+        self,
+        prev_messages: list[dict],
+        tools: list[dict] | None,
+        r_prev: list[int],
+        *,
+        chat_template_kwargs: dict | None = None,
     ) -> list[int] | None:
         """The template's between-message glue that follows the last assistant message
         (e.g. Qwen's ``<|im_end|>\\n``), returned as token ids (possibly empty).
@@ -295,11 +312,18 @@ class LinearHealer:
         emit a wrong boundary.
         """
         before = prev_messages[:-1]
+        render_kwargs = {"chat_template_kwargs": chat_template_kwargs} if chat_template_kwargs else {}
         ra = await self.renderer.render(
-            before + [{"role": "assistant", "content": _PROBE_A}], tools=tools, add_generation_prompt=False
+            before + [{"role": "assistant", "content": _PROBE_A}],
+            tools=tools,
+            add_generation_prompt=False,
+            **render_kwargs,
         )
         rb = await self.renderer.render(
-            before + [{"role": "assistant", "content": _PROBE_B}], tools=tools, add_generation_prompt=False
+            before + [{"role": "assistant", "content": _PROBE_B}],
+            tools=tools,
+            add_generation_prompt=False,
+            **render_kwargs,
         )
         close = _common_suffix(ra, rb)
         if close and r_prev[-len(close) :] != close:
