@@ -172,19 +172,16 @@ def test_tool_parser_skipped_without_tools_schema():
 
 
 @pytest.mark.asyncio
-async def test_render_forwards_chat_template_kwargs_renderer_default_and_per_call(fast_tokenizer):
+async def test_render_uses_initial_chat_template_kwargs(fast_tokenizer):
     tok = fast_tokenizer
-    r = HfTemplateRenderer(tok, chat_template_kwargs={"enable_thinking": False})
+    config = {"enable_thinking": False}
+    r = HfTemplateRenderer(tok, chat_template_kwargs=config)
+    config["enable_thinking"] = True
     with patch.object(tok, "apply_chat_template", wraps=tok.apply_chat_template) as template:
         await r.render([{"role": "user", "content": "abc"}])
         assert template.call_args.kwargs["enable_thinking"] is False
-        # Request variables override renderer defaults.
-        await r.render([{"role": "user", "content": "abc"}], chat_template_kwargs={"enable_thinking": True, "x": 1})
-        assert template.call_args.kwargs["enable_thinking"] is True
-        assert template.call_args.kwargs["x"] == 1
         await HfTemplateRenderer(tok).render([{"role": "user", "content": "abc"}])
         assert "enable_thinking" not in template.call_args.kwargs
-        assert "x" not in template.call_args.kwargs
 
 
 @pytest.fixture
@@ -211,14 +208,12 @@ def fast_tokenizer():
 @pytest.mark.asyncio
 async def test_native_encoding_matches_hf(fast_tokenizer):
     tok = fast_tokenizer
-    renderer = HfTemplateRenderer(tok, chat_template_kwargs={"enable_thinking": False})
+    renderer = HfTemplateRenderer(tok, chat_template_kwargs={"enable_thinking": True})
     messages = [{"role": "user", "content": "中文🙂 e\u0301 <extra>\r\n" * 100}]
     expected = tok.apply_chat_template(
         messages, tokenize=True, add_generation_prompt=True, return_dict=False, enable_thinking=True
     )
-    outputs = await asyncio.gather(
-        *[renderer.render(messages, chat_template_kwargs={"enable_thinking": True}) for _ in range(16)]
-    )
+    outputs = await asyncio.gather(*[renderer.render(messages) for _ in range(16)])
     assert all(ids == expected for ids in outputs)
 
 
@@ -246,20 +241,19 @@ async def test_native_encoding_matches_hf(fast_tokenizer):
     ],
 )
 async def test_async_render_preserves_hf_options(fast_tokenizer, options):
-    renderer = HfTemplateRenderer(fast_tokenizer)
+    renderer = HfTemplateRenderer(fast_tokenizer, chat_template_kwargs=options)
     messages = [{"role": "user", "content": "中文 <extra> question"}, {"role": "assistant", "content": "prefill"}]
-    kwargs = {"add_generation_prompt": not options.get("continue_final_message"), "chat_template_kwargs": options}
+    add_generation_prompt = not options.get("continue_final_message")
     expected = fast_tokenizer.apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=kwargs["add_generation_prompt"], return_dict=False, **options
+        messages, tokenize=True, add_generation_prompt=add_generation_prompt, return_dict=False, **options
     )
-    actual = await renderer.render(messages, **kwargs)
+    actual = await renderer.render(messages, add_generation_prompt=add_generation_prompt)
     assert actual == expected
     assert all(isinstance(token_id, int) for token_id in actual)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_async_render_uses_each_requests_hf_options(fast_tokenizer):
-    renderer = HfTemplateRenderer(fast_tokenizer, chat_template_kwargs={"max_length": 16, "truncation": True})
+async def test_concurrent_renderers_sharing_tokenizer_use_their_initial_hf_options(fast_tokenizer):
     messages = [{"role": "user", "content": "中文 <extra>" * 20}]
     options = [
         {},
@@ -268,17 +262,19 @@ async def test_concurrent_async_render_uses_each_requests_hf_options(fast_tokeni
         {"padding": "max_length", "max_length": 512},
         {"tokenizer_kwargs": {"split_special_tokens": True}},
     ] * 4
+    configs = [{"max_length": 16, "truncation": True, **kw} for kw in options]
+    renderers = [HfTemplateRenderer(fast_tokenizer, chat_template_kwargs=config) for config in configs]
     expected = [
         fast_tokenizer.apply_chat_template(
             messages,
             tokenize=True,
             add_generation_prompt=True,
             return_dict=False,
-            **{"max_length": 16, "truncation": True, **kw},
+            **config,
         )
-        for kw in options
+        for config in configs
     ]
-    actual = await asyncio.gather(*(renderer.render(messages, chat_template_kwargs=kw) for kw in options))
+    actual = await asyncio.gather(*(renderer.render(messages) for renderer in renderers))
     assert actual == expected
 
 

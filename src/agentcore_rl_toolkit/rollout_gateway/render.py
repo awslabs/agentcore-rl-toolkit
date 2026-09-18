@@ -79,9 +79,7 @@ class ParsedOutput:
 class Renderer(Protocol):
     """The gateway's tokenization seam.
 
-    ``await render``       : canonical chat messages (+ tools) -> prompt ``token_ids``;
-                             ``chat_template_kwargs`` are per-request template variables
-                             (e.g. ``enable_thinking``) from the client's request body
+    ``await render``       : canonical chat messages (+ tools) -> prompt ``token_ids``
     ``get_stop_sequences`` : stop strings / token ids for sampling
     ``parse``              : sampled response ``token_ids`` -> :class:`ParsedOutput`
     """
@@ -92,7 +90,6 @@ class Renderer(Protocol):
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
-        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
         ...
 
@@ -111,6 +108,9 @@ class Renderer(Protocol):
 class HfTemplateRenderer:
     """Default renderer: HF ``apply_chat_template`` for rendering, schema-or-stages
     for derendering.
+
+    ``chat_template_kwargs`` (e.g. ``enable_thinking``) are configured at construction
+    and used for every render. Request bodies cannot override this configuration.
 
     Depends only on a HF tokenizer (``transformers``). Derendering:
 
@@ -182,7 +182,7 @@ class HfTemplateRenderer:
             if schema_name is not None:
                 self._schema = RESPONSE_SCHEMAS[schema_name]
 
-    def _render_text(self, messages, *, tools=None, add_generation_prompt=True, chat_template_kwargs=None) -> str:
+    def _render_text(self, messages, *, tools=None, add_generation_prompt=True) -> str:
         return self.tokenizer.apply_chat_template(
             self._rekey_reasoning(messages),
             tools=tools,
@@ -190,7 +190,7 @@ class HfTemplateRenderer:
             add_generation_prompt=add_generation_prompt,
             return_dict=False,
             **({"chat_template": self._chat_template} if self._chat_template else {}),
-            **{**self._chat_template_kwargs, **(chat_template_kwargs or {})},
+            **self._chat_template_kwargs,
         )
 
     async def _encode(
@@ -238,15 +238,13 @@ class HfTemplateRenderer:
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
-        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
         """Render with HF, then apply its encoding options using native async."""
-        kwargs = {**self._chat_template_kwargs, **(chat_template_kwargs or {})}
+        kwargs = self._chat_template_kwargs
         text = self._render_text(
             messages,
             tools=tools,
             add_generation_prompt=add_generation_prompt,
-            chat_template_kwargs=kwargs,
         )
         tokenizer_kwargs = kwargs.get("tokenizer_kwargs")
         return await self._encode(
@@ -435,10 +433,7 @@ class TinkerRenderer:
         *,
         tools: list[dict] | None = None,
         add_generation_prompt: bool = True,
-        chat_template_kwargs: dict | None = None,
     ) -> list[int]:
-        if chat_template_kwargs:
-            logger.warning("TinkerRenderer ignores chat_template_kwargs %s", sorted(chat_template_kwargs))
         msgs = list(messages)
         if tools:
             # tinker-cookbook tool schemas are ToolSpec dicts {name, description, parameters};

@@ -171,6 +171,7 @@ class BaseAdapter:
         # per-sid turn cap: return 429 to kill the run once exceeded
         self.max_turns_per_sid: int | None = max_turns_per_sid
         self._sid_turn_count: dict[str, int] = {}
+        self._warned_chat_template_kwargs = False
 
         # app may be shared across co-mounted adapters (one aiohttp app, many routes)
         self.app = app if app is not None else web.Application(client_max_size=64 * 1024 * 1024)
@@ -343,9 +344,12 @@ class BaseAdapter:
         """
         body = await request.json()
         self._preprocess_body(body)
-        chat_template_kwargs = body.get("chat_template_kwargs")
-        if chat_template_kwargs is not None and not isinstance(chat_template_kwargs, dict):
-            return web.Response(status=400, text="chat_template_kwargs must be an object")
+        if body.get("chat_template_kwargs") and not self._warned_chat_template_kwargs:
+            self.logger.warning(
+                "Request-level chat_template_kwargs are ignored. "
+                "Configure chat_template_kwargs when initializing the gateway renderer."
+            )
+            self._warned_chat_template_kwargs = True
         sid = self._session_id(request, body)
         if sid in self.closed:  # session drained; refuse stragglers
             self.logger.debug("[%s] sid=%s request after session closed", self.log_prefix, sid)
@@ -369,7 +373,6 @@ class BaseAdapter:
                     translated,
                     tools=tools_schema,
                     add_generation_prompt=True,
-                    **({"chat_template_kwargs": chat_template_kwargs} if chat_template_kwargs else {}),
                 )
 
             if sid in self.closed:
