@@ -109,9 +109,6 @@ class HfTemplateRenderer:
     """Default renderer: HF ``apply_chat_template`` for rendering, schema-or-stages
     for derendering.
 
-    ``chat_template_kwargs`` (e.g. ``enable_thinking``) are configured at construction
-    and used for every render. Request bodies cannot override this configuration.
-
     Depends only on a HF tokenizer (``transformers``). Derendering:
 
     * **Schema path (default when the chat template is recognized).** The tokenizer's
