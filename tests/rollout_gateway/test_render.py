@@ -373,21 +373,18 @@ async def test_delta_healing_preserves_multiturn_tokens_and_training_masks(fast_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("incremental", [True, False])
-async def test_healing_uses_current_chat_template_kwargs(fast_tokenizer, incremental):
+async def test_healing_uses_current_chat_template_kwargs(fast_tokenizer):
     tok = fast_tokenizer
     tok.chat_template = tok.chat_template.replace("'<|im_end|>\\n'", "(turn_end + '\\n')")
     defaults = {"turn_end": "<|im_end|>", "enable_thinking": False}
     renderer = HfTemplateRenderer(tok, chat_template_kwargs=defaults)
-    if not incremental:
-        renderer.render_delta = None
     healer = LinearHealer(renderer)
     history = [{"role": "user", "content": "q0"}]
     served_prefix = []
     for i, kwargs in enumerate(
         [
-            {"turn_end": "<extra>", "enable_thinking": True},
-            {"turn_end": "!", "enable_thinking": False},
+            {"turn_end": "<|im_end|>", "enable_thinking": True},
+            {"turn_end": "<|im_end|>", "enable_thinking": False},
             None,  # Request overrides must not persist into later turns.
         ]
     ):
@@ -405,11 +402,111 @@ async def test_healing_uses_current_chat_template_kwargs(fast_tokenizer, increme
         output = tok.encode(f"Actually generated {i}", add_special_tokens=False)
         response = {"role": "assistant", "content": f"Replayed {i}"}
         healer.commit(
-            "s", fed_prompt_ids=prompt, output_ids=output, messages=history, response_message=response, tools=None
+            "s",
+            fed_prompt_ids=prompt,
+            output_ids=output,
+            messages=history,
+            response_message=response,
+            tools=None,
+            chat_template_kwargs=kwargs,
         )
         served_prefix = prompt + output
         history = history + [response, {"role": "user", "content": f"q{i + 1}"}]
     assert healer.counters["healed_turns"] == 2
+    assert healer.counters["nonlinear"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "previous,current,history_renders",
+    [
+        ({"enable_thinking": True}, {"enable_thinking": True}, 1),
+        (None, {"enable_thinking": False}, 1),
+        ({"unused": 1}, {"unused": 2}, 2),
+    ],
+)
+async def test_healing_only_rerenders_old_config_when_kwargs_change(fast_tokenizer, previous, current, history_renders):
+    renderer = HfTemplateRenderer(fast_tokenizer, chat_template_kwargs={"enable_thinking": False})
+    healer = LinearHealer(renderer)
+    prior = [{"role": "user", "content": "q"}]
+    last = {"role": "assistant", "content": "replayed"}
+    seed = await healer.heal("s", prior, None, chat_template_kwargs=previous)
+    healer.commit(
+        "s",
+        fed_prompt_ids=seed,
+        output_ids=[42],
+        messages=prior,
+        response_message=last,
+        tools=None,
+        chat_template_kwargs=previous,
+    )
+    history = prior + [last]
+    with patch.object(renderer, "_render_text", wraps=renderer._render_text) as render_text:
+        prompt = await healer.heal(
+            "s", history + [{"role": "user", "content": "next"}], None, chat_template_kwargs=current
+        )
+    assert sum(call.args[0] == history for call in render_text.call_args_list) == history_renders
+    assert prompt[: len(seed) + 1] == seed + [42]
+    assert healer.counters["nonlinear"] == 0
+    assert healer.counters["healed_turns"] == 1
+
+
+@pytest.mark.asyncio
+async def test_changed_history_kwargs_reset(fast_tokenizer):
+    tok = fast_tokenizer
+    tok.chat_template = "{{ settings.mode }}\n" + tok.chat_template
+    renderer = HfTemplateRenderer(tok)
+    healer = LinearHealer(renderer)
+    prior = [{"role": "user", "content": "q"}]
+    last = {"role": "assistant", "content": "replayed"}
+    kwargs = {"settings": {"mode": "A"}}
+    seed = await healer.heal("s", prior, None, chat_template_kwargs=kwargs)
+    healer.commit(
+        "s",
+        fed_prompt_ids=seed,
+        output_ids=[42],
+        messages=prior,
+        response_message=last,
+        tools=None,
+        chat_template_kwargs=kwargs,
+    )
+    kwargs = {"settings": {"mode": "B"}}
+    history = prior + [last, {"role": "user", "content": "next"}]
+    prompt = await healer.heal("s", history, None, chat_template_kwargs=kwargs)
+    expected = tok.apply_chat_template(history, tokenize=True, add_generation_prompt=True, return_dict=False, **kwargs)
+    assert prompt == expected
+    assert healer.counters["nonlinear"] == 1
+    assert healer.counters["healed_turns"] == 0
+
+
+@pytest.mark.asyncio
+async def test_history_kwargs_are_isolated_by_session_and_only_advance_on_commit(fast_tokenizer):
+    tok = fast_tokenizer
+    tok.chat_template = "{{ mode }}\n" + tok.chat_template
+    renderer = HfTemplateRenderer(tok)
+    healer = LinearHealer(renderer)
+    prior = [{"role": "user", "content": "q"}]
+    last = {"role": "assistant", "content": "replayed"}
+    seeds = {}
+    for sid in ("A", "B"):
+        seeds[sid] = await healer.heal(sid, prior, None, chat_template_kwargs={"mode": sid})
+        healer.commit(
+            sid,
+            fed_prompt_ids=seeds[sid],
+            output_ids=[42],
+            messages=prior,
+            response_message=last,
+            tools=None,
+            chat_template_kwargs={"mode": sid},
+        )
+    history = prior + [last, {"role": "user", "content": "next"}]
+    # An uncommitted turn must not replace A's saved kwargs with this unused override.
+    await healer.heal("A", history, None, chat_template_kwargs={"mode": "A", "unused": True})
+    with patch.object(renderer, "_render_text", wraps=renderer._render_text) as render_text:
+        for sid in ("A", "B"):
+            prompt = await healer.heal(sid, history, None, chat_template_kwargs={"mode": sid})
+            assert prompt[: len(seeds[sid]) + 1] == seeds[sid] + [42]
+    assert render_text.call_count == 8  # Four normal renders per sid; no old-config render.
     assert healer.counters["nonlinear"] == 0
 
 
@@ -446,32 +543,16 @@ async def test_delta_declines_unsafe_template_and_preserves_fallback(fast_tokeni
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reason", ["prefix_changed", "closer_changed", "history_edited"])
-async def test_healing_reset_uses_current_chat_template_kwargs(fast_tokenizer, reason):
+async def test_edited_history_reset_uses_current_chat_template_kwargs(fast_tokenizer):
     tok = fast_tokenizer
-    if reason == "prefix_changed":
-        tok.chat_template = (
-            "{% if incompatible | default(false) %}{{ messages | length }}\n{% endif %}" + tok.chat_template
-        )
-    elif reason == "closer_changed":
-        tok.chat_template = tok.chat_template.replace(
-            "'<|im_end|>\\n'",
-            "('<extra>\\n' if incompatible and m.tool_calls is defined else '<|im_end|>\\n')",
-        )
     renderer = HfTemplateRenderer(tok)
     healer = LinearHealer(renderer)
     prior = [{"role": "user", "content": "q"}]
-    last = {
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [{"type": "function", "function": {"name": "x", "arguments": {}}}],
-    }
+    last = {"role": "assistant", "content": "replayed"}
     seed = await healer.heal("s", prior, None)
     healer.commit("s", fed_prompt_ids=seed, output_ids=[42], messages=prior, response_message=last, tools=None)
-    history = prior + [last, {"role": "tool", "content": "result"}]
-    if reason == "history_edited":
-        history[0] = {"role": "user", "content": "edited"}
-    kwargs = {"incompatible": True, "enable_thinking": True}
+    history = [{"role": "user", "content": "edited"}, last, {"role": "user", "content": "next"}]
+    kwargs = {"enable_thinking": True}
     actual = await healer.heal("s", history, None, chat_template_kwargs=kwargs)
     expected = tok.apply_chat_template(history, tokenize=True, add_generation_prompt=True, return_dict=False, **kwargs)
     assert actual == expected

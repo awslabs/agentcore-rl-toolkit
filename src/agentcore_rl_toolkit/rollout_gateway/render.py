@@ -259,6 +259,24 @@ class HfTemplateRenderer:
             **(tokenizer_kwargs if tokenizer_kwargs is not None else {}),
         )
 
+    def render_history(
+        self,
+        messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+        chat_template_kwargs: dict | None = None,
+        previous_chat_template_kwargs: dict | None = None,
+    ) -> str | None:
+        """Return current history text, or None if changing kwargs changed it."""
+        current = {**self._chat_template_kwargs, **(chat_template_kwargs or {})}
+        previous = {**self._chat_template_kwargs, **(previous_chat_template_kwargs or {})}
+        history = self._render_text(messages, tools=tools, add_generation_prompt=False, chat_template_kwargs=current)
+        if current != previous:
+            old = self._render_text(messages, tools=tools, add_generation_prompt=False, chat_template_kwargs=previous)
+            if old != history:
+                return None
+        return history
+
     async def render_delta(
         self,
         prev_messages: list[dict],
@@ -266,15 +284,18 @@ class HfTemplateRenderer:
         *,
         tools: list[dict] | None = None,
         chat_template_kwargs: dict | None = None,
+        history_text: str | None = None,
     ) -> tuple[list[int], list[int]] | None:
         """Render real history to text, encoding only its closer and appended tail.
 
         ``prev_messages`` ends with the stored assistant message. Keeping real
         history lets templates use earlier messages when formatting the new tail.
         """
-        before = self._render_text(
-            prev_messages, tools=tools, add_generation_prompt=False, chat_template_kwargs=chat_template_kwargs
-        )
+        before = history_text
+        if before is None:
+            before = self._render_text(
+                prev_messages, tools=tools, add_generation_prompt=False, chat_template_kwargs=chat_template_kwargs
+            )
         after = self._render_text(
             prev_messages + new_messages,
             tools=tools,

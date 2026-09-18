@@ -445,6 +445,7 @@ class BaseAdapter:
                     messages=translated,
                     response_message=reply.manager_message,
                     tools=tools_schema,
+                    chat_template_kwargs=chat_template_kwargs,
                 )
 
             self.manager.record_turn(

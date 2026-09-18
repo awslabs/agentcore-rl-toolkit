@@ -149,7 +149,7 @@ async def test_bearer_sid_isolates_sessions():
 @pytest.mark.parametrize("history_mode", ["tree", "linear"])
 async def test_chat_template_kwargs_reach_renderer(history_mode):
     renderer = FakeRenderer()
-    backend = FakeBackend(renderer, replies=["four", "four"])
+    backend = FakeBackend(renderer, replies=["four", "four", "four"])
     adapter = OpenAIAdapter(
         backend=backend,
         renderer=renderer,
@@ -170,9 +170,20 @@ async def test_chat_template_kwargs_reach_renderer(history_mode):
         assert resp.status == 200
         assert renderer.render_kwargs == [None, {"enable_thinking": False}]
 
+        body["messages"] = msgs + [
+            {"role": "assistant", "content": "four"},
+            {"role": "user", "content": "and again?"},
+        ]
+        resp = await client.post("/v1/chat/completions", json=body, headers=headers)
+        assert resp.status == 200
+        # The committed kwargs match: all renders use them, with no old-config probe.
+        assert renderer.render_kwargs[2:]
+        assert all(kw == body["chat_template_kwargs"] for kw in renderer.render_kwargs[2:])
+        render_count = len(renderer.render_kwargs)
+
         body["chat_template_kwargs"] = "no"
         resp = await client.post("/v1/chat/completions", json=body, headers=headers)
         assert resp.status == 400
-        assert len(renderer.render_kwargs) == 2  # rejected before render
+        assert len(renderer.render_kwargs) == render_count  # rejected before render
     finally:
         await client.close()

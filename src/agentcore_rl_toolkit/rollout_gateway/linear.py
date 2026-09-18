@@ -80,6 +80,7 @@ class _State:
     served_prefix: list[int]
     prev_messages: list[dict]
     prev_tools: list[dict] | None
+    prev_chat_template_kwargs: dict
 
 
 class LinearHealer:
@@ -158,9 +159,29 @@ class LinearHealer:
             r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True, **render_kwargs)
             return self._handle_nonlinear(sid, r_full)
 
+        kwargs_changed = st.prev_chat_template_kwargs != (chat_template_kwargs or {})
+        render_history = getattr(self.renderer, "render_history", None)
+        history_text = None
+        if kwargs_changed and render_history is not None:
+            history_text = render_history(
+                st.prev_messages,
+                tools=st.prev_tools,
+                chat_template_kwargs=chat_template_kwargs,
+                previous_chat_template_kwargs=st.prev_chat_template_kwargs,
+            )
+            if history_text is None:
+                r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True, **render_kwargs)
+                return self._handle_nonlinear(sid, r_full)
+
         render_delta = getattr(self.renderer, "render_delta", None)
         if render_delta is not None:
-            delta = await render_delta(st.prev_messages, new, tools=st.prev_tools, **render_kwargs)
+            delta = await render_delta(
+                st.prev_messages,
+                new,
+                tools=st.prev_tools,
+                **render_kwargs,
+                **({"history_text": history_text} if history_text is not None else {}),
+            )
             if delta is not None:
                 close, tail = delta
                 return self._splice(sid, st, close, tail)
@@ -175,6 +196,16 @@ class LinearHealer:
         r_ext = await self.renderer.render(
             st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True, **render_kwargs
         )
+        if kwargs_changed and render_history is None:
+            # Renderers without a text path compare the same history in token space.
+            r_old = await self.renderer.render(
+                st.prev_messages,
+                tools=st.prev_tools,
+                add_generation_prompt=False,
+                **({"chat_template_kwargs": st.prev_chat_template_kwargs} if st.prev_chat_template_kwargs else {}),
+            )
+            if r_old != r_prev:
+                return self._handle_nonlinear(sid, r_ext)
         if r_ext[: len(r_prev)] != r_prev:
             # template glue for the prior turns depends on the appended messages, so we
             # cannot splice the canonical prefix safely; re-anchor rather than emit garbage.
@@ -231,6 +262,7 @@ class LinearHealer:
         messages: list[dict],
         response_message: dict | None,
         tools: list[dict] | None,
+        chat_template_kwargs: dict | None = None,
     ) -> None:
         """Advance per-sid state after a turn that was actually recorded.
 
@@ -244,6 +276,7 @@ class LinearHealer:
             served_prefix=list(fed_prompt_ids) + list(output_ids),
             prev_messages=list(messages) + [asst],
             prev_tools=list(tools) if tools else None,
+            prev_chat_template_kwargs=chat_template_kwargs or {},
         )
 
     #: every counter key this healer can emit; ``pop_stats`` returns all of them (with
