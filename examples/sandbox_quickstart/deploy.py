@@ -27,7 +27,7 @@ def main():
     agentcore_client = BedrockAgentCoreClient(region=agentcore_config["region"])
 
     # The sandbox container needs no env vars — unlike the agent examples,
-    # the image only runs the sandboxd contract shim.
+    # the image only runs the sandboxd daemon.
     response = agentcore_client.create_agent(
         agent_name=agentcore_config["agent_name"],
         deployment_type="container",

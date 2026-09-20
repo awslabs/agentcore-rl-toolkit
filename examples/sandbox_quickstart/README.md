@@ -2,14 +2,15 @@
 
 Run shell commands in an arbitrary Docker image deployed as a Bedrock AgentCore
 Runtime sandbox. This example wraps a plain `debian:bookworm-slim` image with the
-`agentcore-sandboxd` health shim and drives it with the sync sandbox client
+`agentcore-sandboxd` daemon and drives it with the sync sandbox client
 (`agentcore_rl_toolkit.sandbox.SandboxClient`).
 
 How it works: `agentcore-sandboxd` (a tiny Go binary, source in
 [`sandboxd/`](../../sandboxd/)) satisfies AgentCore Runtime's container contract
 (`/ping`, `/invocations` on port 8080) and manages the Healthy/HealthyBusy session
-state. Command execution uses AgentCore Runtime's native
-`InvokeAgentRuntimeCommand` API — no exec daemon runs inside the image.
+state. Commands use RIP `start/get` over `InvokeAgentRuntime`; the daemon owns
+execution and saves results independently of the client connection. Rebuild the
+image when upgrading from the older health-only daemon.
 
 > **Note:** The base image must contain a shell (`/bin/sh`): commands are executed
 > as shell commands inside the container. `scratch`/distroless images will not work.
@@ -66,7 +67,6 @@ runtime ARN when the endpoint is ready. Like `build_and_push.sh`, it is temporar
 scaffolding — a future phase moves provisioning into the SDK (`SandboxClient.create()`).
 
 The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`,
-`bedrock-agentcore:InvokeAgentRuntimeCommand`, and
 `bedrock-agentcore:StopRuntimeSession` on the runtime.
 
 ## 3. Run the demo
@@ -90,6 +90,30 @@ Sandbox terminated.
 Failing commands are results, not exceptions — `sb.exec("exit 3")` returns
 `ExecResult(exit_code=3, ...)`. Timeouts likewise: `result.timed_out` is `True`
 and any partial output is retained.
+
+## Background commands and recovery
+
+```python
+with client.start() as sb:
+    handle = sb.exec("pytest -q", timeout=900, background=True)
+    # Save sb.session_id and handle.invocation_id to transfer to another client.
+    recovered = client.attach(sb.session_id).get_exec(handle.invocation_id)
+    result = recovered.result(timeout=1200)
+```
+
+Exiting the context terminates the session, including unfinished commands. Use
+explicit `start()`/`terminate()` when transferring ownership beyond this scope.
+A local result-wait timeout leaves the command running. An ambiguous initial
+connection failure raises `ExecError`, whose `.handle` can query the same execution.
+The default local records are lost on compute replacement. Output retains the
+first 256 KiB of each stream and marks truncation explicitly.
+
+An environment-gated ACR smoke test is available from the repo root, against an
+image rebuilt with the new daemon:
+
+```bash
+SANDBOX_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/... uv run pytest tests/sandbox/test_live.py -v
+```
 
 ## Local smoke test (no AWS needed)
 

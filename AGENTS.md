@@ -34,7 +34,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/backends/verl/` | verl backend: `AgentCoreAgentLoop` plugged into verl's standard main_ppo entrypoint via the rollout gateway |
 | `src/agentcore_rl_toolkit/backends/experimental/slime/` | Experimental slime backend: `generate` + `normalize_episode_rewards` hooks for slime's `--custom-generate-function-path` / `--custom-reward-post-process-path` (see [Experimental slime backend](#experimental-slime-backend-backendsexperimentalslime)) |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
-| `sandboxd/` | Go health shim (`agentcore-sandboxd`) that makes arbitrary Docker images satisfy the ACR container contract |
+| `sandboxd/` | Go daemon (`agentcore-sandboxd`) for session health and recoverable command execution |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
@@ -294,46 +294,52 @@ See `examples/math_agent/SETUP.md` for the full walkthrough.
 (e.g. SWE-bench-style coding environments) deployed as ACR runtimes — the substrate for
 coding-agent evaluation and RL rollouts.
 
-**How it works.** Most coding-environment images are not HTTP agent servers, but ACR
-requires containers to expose `/ping` and `/invocations` on port 8080. The bridge is
-`agentcore-sandboxd` (Go, stdlib-only, source in `sandboxd/`): a health shim added to the
-image that manages the Healthy/HealthyBusy ping state. Command execution does NOT go
-through the shim — the client uses ACR's native `InvokeAgentRuntimeCommand` API, which
-runs shell commands in the same session/container and streams back stdout/stderr/exit code.
+See [Sandbox SDK design](designs/sandbox_sdk.md) for API boundaries, process
+ownership, transport decisions, and the current implementation scope.
+
+**How it works.** `agentcore-sandboxd` (Go, stdlib-only, source in `sandboxd/`)
+serves `/ping` and `/invocations` on port 8080. The SDK sends versioned RIP
+`start/get` requests through `InvokeAgentRuntime`. One process manager owns both
+foreground and background commands, their process groups, and persisted results.
 
 ```python
 from agentcore_rl_toolkit.sandbox import SandboxClient
 
 client = SandboxClient(runtime_arn="arn:aws:bedrock-agentcore:...:runtime/...")
-with client.start() as sb:                      # session starts, ping -> HealthyBusy
-    result = sb.exec("cd /app && pytest -q", timeout=900)
-    result.exit_code, result.stdout, result.stderr, result.timed_out
-# __exit__ -> terminate(): ping -> Healthy, then StopRuntimeSession
-sb = client.attach(session_id)                  # reconnect to a live session
+with client.start() as sb:
+    result = sb.exec("pytest -q", timeout=900)
+    handle = sb.exec("pytest -q", timeout=900, background=True)
+    recovered = client.attach(sb.session_id).get_exec(handle.invocation_id)
+    result = recovered.result(timeout=1200)
+# Context exit terminates the session, including any unfinished commands.
 ```
 
 **Key semantics:**
 
-- **Nonzero exit and timeout are data, not exceptions** (`ExecResult.exit_code`,
-  `ExecResult.timed_out` with partial output). Exceptions are reserved for infrastructure
-  failures: `ClientError`/`EventStreamError` propagate; `SandboxProtocolError` means the
-  deployed container isn't behaving like sandboxd (wrong image) or the stream was invalid.
-- **Commands are stateless** — each `exec()` runs in a fresh process. `cwd=`/`env=` params
-  are composed into the command string per call (`cd ... && export ... && <command>`).
-- **The command API does not invoke a shell itself** (it word-splits argv-style), so the
-  client wraps every command in `<shell> -c '...'` on the wire — default `/bin/sh` for
-  arbitrary-image portability, overridable via `SandboxClient(shell=...)`/`exec(shell=...)`.
-  Users just write shell strings; pipes, `;`, and `$VAR` work.
-- **Verbs**: `start`/`attach`/`terminate` are the per-session data plane. `create` is
-  reserved for future control-plane provisioning (`CreateAgentRuntime` from an ECR image).
-- `terminate()` is idempotent and best-effort: it flips the ping to Healthy first so the
-  idle reaper collects the session even if `StopRuntimeSession` fails.
-- The base image must contain a shell (`InvokeAgentRuntimeCommand` executes shell
-  commands); scratch/distroless images won't work.
-- Sync-only today. Planned next phases: TTL leak protection + async client (aiobotocore),
-  then detached exec (`spawn`/`ExecHandle`), interactive shells, file transfer.
+- Nonzero exit and execution timeout are `ExecResult` data. `ExecError` represents
+  submission/recovery/execution infrastructure failures and retains `.handle`;
+  original submission transport errors are chained as `__cause__`.
+- `exec(timeout=...)` is the remote execution deadline (1–3600 seconds, default
+  300). `handle.result(timeout=...)` only stops local polling, never the command
+  or session. In-flight AWS calls retain the client's socket/retry settings.
+- Commands run in a fresh shell (default `/bin/sh`), with `cwd`/`env` composed
+  into the command per call. The daemon starts that shell directly; no Command
+  API tokenizer wrapper is needed.
+- Client-generated invocation IDs are reused for retries. `get` cannot execute
+  work. Status is `in_progress`, `completed`, `interrupted`, or `not_found`.
+- The configurable local store survives requests/daemon restarts, not compute
+  replacement. Start-only records without an owner are interrupted, not rerun.
+- stdout/stderr are captured without a connected client, capped at 256 KiB each
+  with explicit truncation flags. This version returns final output only.
+- `start`/`attach`/`terminate` remain session operations. A session hold is separate
+  from active commands; commands remain busy through terminal publication.
+  `terminate()` releases the hold then calls `StopRuntimeSession`, best-effort.
+- Rebuild the sandbox image when upgrading from the health-only daemon. There is
+  no automatic fallback to native command execution, which would bypass RIP.
+- Sync-only. Managed-storage recovery, real-time output, native Interactive Shell
+  wrapping, async APIs, file transfer, and session TTL policy remain deferred.
 
-**Building the shim binary** (static, cross-compiled; works on x86 hosts, falls back to a
+**Building the daemon binary** (static, cross-compiled; works on x86 hosts, falls back to a
 golang container if Go isn't installed):
 
 ```bash

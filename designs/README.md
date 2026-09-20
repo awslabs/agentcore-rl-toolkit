@@ -26,7 +26,8 @@ changes.
 | --- | --- | --- |
 | [Linear-history mode for the rollout gateway](./gateway_linear.md) | Accepted | Shipped |
 | [Stable optimizer-step batching for variable-row verl rollouts](./verl_variable_trajectory_batching.md) | Accepted | Shipped |
-| [Runtime Invocation Protocol](./runtime_invocation_protocol.md) | Proposed | Not started |
+| [Runtime Invocation Protocol](./runtime_invocation_protocol.md) | Proposed | In progress |
+| [Sandbox SDK](./sandbox_sdk.md) | Accepted | In progress |
 | [Dynamic Sandbox Environments on AgentCore](./sandbox_dynamic_environments.md) | Proposed | Not started |
 
 ## Lifecycle

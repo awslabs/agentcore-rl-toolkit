@@ -3,7 +3,7 @@
 import pytest
 
 from agentcore_rl_toolkit.sandbox import ExecResult
-from agentcore_rl_toolkit.sandbox.client import _compose_command, _wrap_in_shell
+from agentcore_rl_toolkit.sandbox.client import _compose_command
 
 
 class TestExecResult:
@@ -70,31 +70,3 @@ class TestComposeCommand:
     def test_env_key_injection_raises(self):
         with pytest.raises(ValueError):
             _compose_command("cmd", env={"X; rm -rf /": "x"})
-
-
-class TestWrapInShell:
-    def test_simple_command(self):
-        assert _wrap_in_shell("echo hi") == "/bin/sh -c 'echo hi'"
-
-    def test_shell_metacharacters_preserved(self):
-        assert _wrap_in_shell("echo one; echo two | wc -l") == "/bin/sh -c 'echo one; echo two | wc -l'"
-
-    def test_double_quotes_ok(self):
-        assert _wrap_in_shell('echo "a b"') == "/bin/sh -c 'echo \"a b\"'"
-
-    def test_single_quote_switches_to_double_quote_wrapper(self):
-        # The docs pattern: single quotes ride inside a double-quoted wrapper.
-        assert _wrap_in_shell("echo it's fine") == '/bin/sh -c "echo it\'s fine"'
-
-    def test_double_quote_wrapper_escapes_double_quotes(self):
-        assert _wrap_in_shell("echo 'a' \"b\"") == '/bin/sh -c "echo \'a\' \\"b\\""'
-
-    def test_double_quote_wrapper_escapes_backslashes(self):
-        # Tokenizer consumes one escaping level in double quotes: \\ -> \.
-        assert _wrap_in_shell(r"echo 'a\tb'") == "/bin/sh -c \"echo 'a\\\\tb'\""
-
-    def test_custom_shell(self):
-        assert _wrap_in_shell("echo hi", shell="/bin/bash") == "/bin/bash -c 'echo hi'"
-
-    def test_custom_shell_double_quote_path(self):
-        assert _wrap_in_shell("echo it's", shell="/bin/bash") == '/bin/bash -c "echo it\'s"'

@@ -18,6 +18,12 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      - name: Set up Go for Sandbox SDK contract tests
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+
       - name: Install dependencies
         run: uv sync --extra dev
 
