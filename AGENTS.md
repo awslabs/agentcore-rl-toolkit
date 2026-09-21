@@ -348,7 +348,8 @@ sandboxd/build.sh --stage examples/sandbox_quickstart   # also copy into a build
 ```
 
 See `examples/sandbox_quickstart/` for the full walkthrough (wrap image → push to ECR →
-create runtime → run). Python tests: `tests/sandbox/` (boto3 fully mocked). Go tests:
+create runtime → run). Python tests: `tests/sandbox/` (mocked SDK tests, local
+daemon integration, and live ACR tests enabled by `SANDBOX_RUNTIME_ARN`). Go tests:
 `cd sandboxd && go test -race ./...` (CI: `.github/workflows/sandboxd.yml`).
 
 ### Migration Guide (basic_app → rl_app)

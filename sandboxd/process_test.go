@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -284,9 +286,13 @@ func TestOutputFailureWithNonzeroExit(t *testing.T) {
 	output := &outputFile{file: full, remaining: outputLimit}
 	cmd := exec.Command("/bin/sh", "-c", "printf data; exit 3")
 	cmd.Stdout = output
-	_ = cmd.Run()
-	if _, err := output.finish(); err == nil {
-		t.Fatal("disk-full error was lost behind the nonzero exit")
+	var exitErr *exec.ExitError
+	if err := cmd.Run(); !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
+		t.Fatalf("expected command exit 3, got %v", err)
+	}
+	// Sync on /dev/full also fails, but that must not mask the original ENOSPC.
+	if _, err := output.finish(); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("expected the original disk-full write error, got %v", err)
 	}
 }
 
@@ -317,17 +323,33 @@ func TestSessionHoldSurvivesCommandCompletion(t *testing.T) {
 
 func TestForegroundPublicationFailure(t *testing.T) {
 	_, s := newTestServer(t)
-	req := request("foreground-failure", "sleep 0.1", false)
-	_, run, err := s.processes.start(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scratch := t.TempDir()
+	marker, release := filepath.Join(scratch, "started"), filepath.Join(scratch, "release")
+	req := request("foreground-failure", fmt.Sprintf(
+		"echo started > %q; while [ ! -e %q ]; do sleep 0.01; done", marker, release,
+	), false)
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.handleExecution(recorder, httptest.NewRequest("POST", "/invocations", nil), req)
+	}()
+	// The request must register and launch the command before publication fails.
+	waitFor(t, func() bool {
+		_, err := os.Stat(marker)
+		return err == nil
+	})
 	if err := os.Mkdir(filepath.Join(s.processes.store.dir("foreground-failure"), "result.json"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	recorder := httptest.NewRecorder()
-	s.handleExecution(recorder, httptest.NewRequest("POST", "/invocations", nil), req)
-	<-run.done
+	if err := os.WriteFile(release, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("foreground request did not finish after command release")
+	}
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("publication failure returned HTTP %d", recorder.Code)
 	}

@@ -12,10 +12,10 @@ The Sandbox SDK runs commands in arbitrary images deployed on AgentCore Runtime.
 The Python client owns the user-facing session and command APIs;
 `agentcore-sandboxd` owns command execution inside the container.
 
-The current change adds recoverable command execution: foreground and background
+The SDK supports recoverable command execution: foreground and background
 commands share one process manager, persist their results, and can be addressed
-after the initial client connection is lost. It does not add interactive shells,
-live output subscriptions, or a complete environment-management API.
+after the initial client connection is lost. Interactive shells, live output
+subscriptions, and a complete environment-management API have not been implemented.
 
 This document records Sandbox-specific API and implementation decisions.
 [Runtime Invocation Protocol (RIP)](./runtime_invocation_protocol.md) defines the
@@ -34,9 +34,13 @@ persistence guarantees. Those semantics remain authoritative in RIP.
 RIP applies to individual command executions. Sandbox session management, terminal
 interaction, files, and image adaptation have their own responsibilities.
 [Dynamic Sandbox Environments](./sandbox_dynamic_environments.md) remains a
-separate proposal for loading task filesystems; it is not part of this change.
+separate proposal for loading task filesystems.
 
 ## Architecture
+
+sandboxd builds independently as a static Go binary that can be added to any
+image with a shell; the Python SDK runs on the client and is not required in
+the sandbox image.
 
 ```text
 Python Sandbox SDK
@@ -83,9 +87,13 @@ with client.start() as sandbox:
 
     handle = sandbox.exec("pytest -q", cwd="/app", timeout=900, background=True)
     # These two IDs can also be saved and passed to another client process.
-    recovered = client.attach(handle.session_id).get_exec(handle.invocation_id)
-    result = recovered.result(timeout=1200)
+    existing_handle = client.attach(handle.session_id).get_exec(handle.invocation_id)
+    result = existing_handle.result(timeout=1200)
 ```
+
+`existing_handle` is a new local `ExecHandle` referring to the same execution.
+Constructing it makes no network request and does not verify that the execution
+exists. Calling `.result()` queries the daemon and waits for an `ExecResult`.
 
 Exiting the context terminates the session, including unfinished commands.
 Callers transferring a sandbox beyond that context use explicit `start()` and
@@ -136,10 +144,11 @@ PID reconnection alone does not supply that contract. See
 
 ### AgentCore API selection
 
-The initial implementation selects `InvokeAgentRuntime` for both command `start`
+The SDK uses `InvokeAgentRuntime` for both command `start`
 and `get`. sandboxd already serves `/invocations`, so this path can carry
 structured requests directly to its manager without an additional helper process.
-Live ACR validation remains necessary before treating the transport as settled.
+This path has been validated on a deployed AgentCore runtime, including recovery
+after a foreground HTTP read timeout; see [validation below](#implementation-and-validation).
 
 Previously, `exec()` used `InvokeAgentRuntimeCommand` directly. That API provides
 native streaming stdout/stderr and an exit event, but does not expose the
@@ -150,8 +159,8 @@ does not silently fall back to direct command execution.
 Transport is an internal choice per capability. A future interactive-shell
 surface should wrap AgentCore's native `InvokeAgentRuntimeCommandShell`, which
 already provides persistent terminal state and reconnection. A shell ID identifies
-the terminal, not every command typed into it. This boundary does not commit this
-change to implementing a `shell()` API or routing terminal traffic through RIP.
+the terminal, not every command typed into it. An interactive-shell API has not
+been implemented in the SDK.
 
 ## Process ownership, storage, and output
 
@@ -167,14 +176,14 @@ and atomically publishes a terminal result after collecting output. The start
 record excludes command text and environment values. Output still contains
 whatever the workload prints.
 
-The root is configurable with `--state-dir`. The initial local store survives
+The root is configurable with `--state-dir`. The local store survives
 requests and daemon restarts, not compute replacement. After daemon loss,
 start-only records with no registered owner are `interrupted`; the new daemon
 does not adopt or rerun old processes. Store loss loses result and deduplication
-history. Managed-storage stop/resume is not validated, and automatic retention
-is outside this change.
+history. Managed-storage stop/resume has not been validated. An automatic record
+retention policy has not been implemented.
 
-### Capture output now; expose live output separately
+### Output capture and live delivery
 
 Output collection continues whether or not a client is waiting. Each stdout/stderr
 file retains its first **256 KiB**. Later bytes are drained and discarded, and the
@@ -187,40 +196,31 @@ from process ownership and result persistence. A later output subscription can
 attach to the same execution without making that connection own its lifecycle;
 its buffering and replay contract will need a separate design decision.
 
-## Source layout
-
-Keep the daemon as the independent Go module at `sandboxd/`, alongside the Python
-SDK at `src/agentcore_rl_toolkit/sandbox/`. The static binary can be added to an
-arbitrary image without installing Python or this SDK inside it.
-
-Within the SDK, `client.py` keeps `SandboxClient`, `Sandbox`, `ExecHandle`, and
-`ExecError` together because session and command handles share request handling.
-`types.py` contains the independent `ExecResult` and `SandboxProtocolError`
-definitions and does not import the client.
-
-Within the daemon, `main.go` handles HTTP/session dispatch, `process.go` owns
-execution, and `store.go` owns invocation records. No repository-wide package
-reorganization or shared cross-language framework is needed for this scope.
-The [sandboxd README](../sandboxd/README.md) documents the wire envelope, file
-layout, build commands, and local smoke tests.
-
 ## Implementation and validation
 
-The working implementation covers session holds, managed foreground/background
+The SDK and daemon implement session holds, managed foreground/background
 commands, local records, process-group deadlines, bounded output, `ExecHandle`,
-and recovery by session/invocation ID. This delivers the Sandbox portion of RIP;
-it does not require the app-handler or Rollout migration to land first.
+and recovery by session/invocation ID. These capabilities implement RIP's process
+adapter.
 
 Go process/HTTP tests cover concurrent duplicate starts, distinct IDs, disconnect
 survival, timeout cleanup, output limits, persistence failures, and recovery from
 records. Python tests cover the SDK API and real botocore HTTP requests to a local
 daemon, including foreground connection loss followed by result retrieval.
 
-An environment-gated test in `tests/sandbox/test_live.py` uses
-`SANDBOX_RUNTIME_ARN` against a rebuilt image. Local tests have passed; live ACR
-validation has not been run for this change. Service routing and lifecycle
-behavior therefore remain to be verified.
+The environment-gated tests in [tests/sandbox/test_live.py](../tests/sandbox/test_live.py)
+use `SANDBOX_RUNTIME_ARN` against a rebuilt image. On 2026-09-20, all three live
+tests passed against an isolated AgentCore runtime in `us-west-2`, using
+`debian:bookworm-slim` plus the current static ARM64 sandboxd binary. The client
+loaded the SDK directly from this checkout.
+
+Live coverage includes foreground stdout/stderr and nonzero exit, background
+reattachment from another client, duplicate-ID retrieval, execution deadlines,
+foreground HTTP read-timeout recovery without duplicate execution, local wait
+timeout followed by successful retrieval, `cwd`/`env` quoting, and truncation of
+both output streams at 256 KiB. All three test sessions received successful
+`StopRuntimeSession` responses during context-manager cleanup.
 
 Real-time output, interactive shells, async APIs, public command cancellation,
 file transfer, session TTL policy, managed-storage recovery, and S3 adapters
-remain outside this implementation.
+have not been implemented in the SDK.

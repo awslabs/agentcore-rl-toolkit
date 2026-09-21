@@ -34,6 +34,10 @@ For the SDK architecture and design decisions, see
 }
 ```
 
+`version` identifies the RIP request/response format shared by the SDK and daemon.
+Both currently support only version `1`; the daemon rejects other versions.
+SDK or daemon releases that keep the same protocol format keep this value.
+
 Use the same envelope with `operation: "get"`, without command input, to retrieve
 status and the final result. IDs are 1–128 characters, start with an ASCII letter
 or digit, and contain only letters, digits, `.`, `_`, and `-`.

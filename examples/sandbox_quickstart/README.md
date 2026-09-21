@@ -108,13 +108,6 @@ connection failure raises `ExecError`, whose `.handle` can query the same execut
 The default local records are lost on compute replacement. Output retains the
 first 256 KiB of each stream and marks truncation explicitly.
 
-An environment-gated ACR smoke test is available from the repo root, against an
-image rebuilt with the new daemon:
-
-```bash
-SANDBOX_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/... uv run pytest tests/sandbox/test_live.py -v
-```
-
 ## Local smoke test (no AWS needed)
 
 The server is plain HTTP, so you can exercise the contract locally:

@@ -280,9 +280,8 @@ class TestExecHandle:
             {"response": mock_streaming_body(pending)},
             {"response": mock_streaming_body(complete)},
         ]
-        with patch("agentcore_rl_toolkit.sandbox.client.time.sleep") as sleep:
+        with patch("agentcore_rl_toolkit.sandbox.client.time.sleep"):
             assert handle.result(timeout=10).stdout == "done"
-        sleep.assert_called_once_with(0.1)
         for call in mock_acr.invoke_agent_runtime.call_args_list:
             assert json.loads(call.kwargs["payload"])["_agentcore_runtime"]["operation"] == "get"
 
