@@ -14,8 +14,7 @@ The Python client owns the user-facing session and command APIs;
 
 The SDK supports recoverable command execution: foreground and background
 commands share one process manager, persist their results, and can be addressed
-after the initial client connection is lost. Interactive shells, live output
-subscriptions, and a complete environment-management API have not been implemented.
+after the initial client connection is lost.
 
 This document records Sandbox-specific API and implementation decisions.
 [Runtime Invocation Protocol (RIP)](./runtime_invocation_protocol.md) defines the
@@ -61,9 +60,7 @@ session `start` holds the environment available between commands; a RIP `start`
 creates or addresses one command execution within it.
 
 The SDK generates an invocation ID before submission and sends the same ID on
-network retries. The process manager records the invocation before starting the
-command, owns it independently of the HTTP request, and publishes the terminal
-result before reporting completion.
+network retries.
 
 ## Public API
 
@@ -125,8 +122,7 @@ the caller already holds the handle and can retry that read.
 ### Execution, waiting, and session lifetime
 
 - `exec(timeout=...)` limits remote command execution: default 300 seconds, range
-  1–3600, including output waiting after shell exit. On expiry, the daemon kills
-  only the direct process and stops reading output.
+  1–3600, including output waiting after shell exit.
 - `handle.result(timeout=...)` limits local polling. A wait timeout leaves the
   command and session running and raises Python's built-in `TimeoutError`;
   the handle remains usable for a later wait. `ExecTimeoutError` represents a
@@ -142,7 +138,8 @@ the caller already holds the handle and can retry that read.
 
 Both modes use the same command arguments, process ownership, invocation records,
 and result format. Foreground waits on the initial request; background returns
-after registration. Disconnecting a foreground request only stops that wait.
+after registration and closes the response. Disconnecting a foreground request
+only stops that wait.
 
 E2B's envd is a useful precedent for independent process ownership: both modes
 start the same managed process, and its SDK decides whether to wait on the handle.
@@ -157,20 +154,16 @@ PID reconnection alone does not supply that contract. See
 The SDK uses `InvokeAgentRuntime` for both command `start`
 and `get`. sandboxd already serves `/invocations`, so this path can carry
 structured requests directly to its manager without an additional helper process.
-This path has been validated on a deployed AgentCore runtime, including recovery
-after a foreground HTTP read timeout; see [validation below](#implementation-and-validation).
 
-Previously, `exec()` used `InvokeAgentRuntimeCommand` directly. That API provides
-native streaming stdout/stderr and an exit event, but does not expose the
-persisted per-command retrieval and client-generated identity required by RIP.
-Rebuild deployed images when upgrading from the old health-only sandboxd. The SDK
-does not silently fall back to direct command execution.
+`InvokeAgentRuntimeCommand` provides native streaming stdout/stderr and an exit
+event, but does not expose the persisted per-command retrieval and client-generated
+identity required by RIP.
+Falling back to direct command execution would bypass RIP.
 
 Transport is an internal choice per capability. A future interactive-shell
 surface should wrap AgentCore's native `InvokeAgentRuntimeCommandShell`, which
 already provides persistent terminal state and reconnection. A shell ID identifies
-the terminal, not every command typed into it. An interactive-shell API has not
-been implemented in the SDK.
+the terminal, not every command typed into it.
 
 ## Process ownership, storage, and output
 
@@ -183,8 +176,7 @@ Like envd's ordinary command path, completion waits for both shell exit and EOF
 on stdout/stderr. Descendants can keep those pipes open after the shell exits;
 the execution deadline still bounds that wait. Expiry kills only the direct
 process and closes the output readers. The result retains captured output and
-sets `timed_out=true`, even if the shell already exited with code 0. The SDK
-raises `ExecTimeoutError` carrying this result.
+sets `timed_out=true`, even if the shell already exited with code 0.
 
 The daemon does not kill descendants on completion or timeout. A background
 service with redirected output can continue running for later commands to use.
@@ -216,35 +208,7 @@ from process ownership and result persistence. A later output subscription can
 attach to the same execution without making that connection own its lifecycle;
 its buffering and replay contract will need a separate design decision.
 
-## Implementation and validation
-
-The SDK and daemon implement session holds, managed foreground/background
-commands, local records, execution deadlines, bounded output, `ExecHandle`,
-and recovery by session/invocation ID. These capabilities implement RIP's process
-adapter.
-
-Go process/HTTP tests cover concurrent duplicate starts, distinct IDs, disconnect
-survival, descendant output and lifetime, execution deadlines, output limits,
-persistence failures, and recovery from records. Python tests cover the SDK API
-and real botocore HTTP requests to a local daemon, including foreground connection
-loss followed by result retrieval and timeout while waiting for descendant output.
-
-The environment-gated tests in [tests/sandbox/test_live.py](../tests/sandbox/test_live.py)
-use `SANDBOX_RUNTIME_ARN` against a rebuilt image. On 2026-09-22, all five live
-tests passed against an isolated AgentCore runtime in `us-west-2`, using
-`debian:bookworm-slim` plus the current static ARM64 sandboxd binary. The client
-loaded the SDK directly from this checkout.
-
-Live coverage includes foreground stdout/stderr and nonzero exit, background
-reattachment from another client, duplicate-ID retrieval, execution deadlines,
-foreground HTTP read-timeout recovery without duplicate execution, local wait
-timeout followed by successful retrieval, `cwd`/`env` quoting, and truncation of
-both output streams at 256 KiB. Tests also cover failed `cwd`/environment setup,
-complete descendant output after shell exit, execution timeout exceptions with
-the shell's exit code and partial output preserved, reattachment to timed-out
-invocations, and child survival after completion or timeout.
-All five test sessions received successful `StopRuntimeSession` responses during
-context-manager cleanup.
+## Implementation status
 
 Real-time output, interactive shells, async APIs, public command cancellation,
 file transfer, session TTL policy, managed-storage recovery, and S3 adapters

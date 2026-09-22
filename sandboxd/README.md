@@ -61,16 +61,10 @@ published before reporting completion. Persistence failures never report success
 
 Commands run as `<shell> -c <command>`, defaulting to `/bin/sh`, with inherited
 container environment and working directory. Completion waits for the shell to
-exit and stdout/stderr to reach EOF, including output from descendants.
-The execution deadline defaults to 300 seconds (range 1–3600) and also bounds
-output waiting after shell exit. On expiry, the daemon kills only the direct
-process, closes the output readers, and returns `timed_out=true` with captured
-output. The shell's exit code is preserved if it already exited.
-
-Descendants are not killed on completion or timeout. For example,
-`sleep 5 & printf done` waits for the inherited output pipes to close, while
-`sleep 5 >/dev/null 2>&1 & printf done` completes with `sleep` still running.
-Remaining processes are cleaned up when the Runtime session terminates.
+exit and stdout/stderr to reach EOF. The execution deadline defaults to 300 seconds
+(range 1–3600), including output waiting. On expiry, only the direct process is
+killed and output readers are closed; the result has `timed_out=true` and captured
+output. Descendants may survive completion or timeout until session termination.
 
 Output is drained independently of HTTP clients. The first **256 KiB per stream**
 is saved to disk; subsequent bytes are discarded and explicitly marked truncated.
@@ -87,12 +81,13 @@ OS temporary directory, which honors `TMPDIR`). One daemon owns one root:
   result.json
 ```
 
-The start record excludes command text and environment values. Output itself may
-contain whatever the command prints. Records are retained until the store is
-removed; there is no automatic retention policy yet. The default local store
-survives requests and daemon restarts, **not compute replacement**. Store loss
-also loses deduplication history. Managed-storage stop/resume is not validated.
+Records are retained until the store is removed. The local store survives requests
+and daemon restarts, **not compute replacement**; store loss also loses deduplication
+history. Managed-storage stop/resume is not validated.
 Code inside the sandbox can access these files; they are not a security boundary.
+
+See [process ownership, storage, and output](../designs/sandbox_sdk.md#process-ownership-storage-and-output)
+for the lifecycle and persistence decisions.
 
 ## Build and test
 
@@ -106,8 +101,6 @@ go test -race ./...
 
 Requires Go ≥1.21 or Docker (the build script can use a Go container).
 The binary is static and the sandbox image needs only the binary and a shell.
-Keep this independent Go module at `sandboxd/`; `process.go` owns execution,
-`store.go` owns records, and `main.go` handles HTTP/session dispatch.
 
 ## Local smoke test
 

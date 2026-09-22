@@ -56,9 +56,9 @@ implementation of phases 1 and 3; the app-handler and Rollout migration remain
 pending.
 
 The Sandbox design owns its public APIs, AgentCore transport choice, process
-management, output policy, and validation status. This document remains the
-shared invocation contract and does not require consumers to use one transport
-or one implementation language.
+management, and output policy. This document remains the shared invocation
+contract and does not require consumers to use one transport or one implementation
+language.
 
 ## Motivation: the missing invocation lifecycle
 

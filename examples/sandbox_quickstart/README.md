@@ -63,8 +63,7 @@ uv run python deploy.py
 ```
 
 `deploy.py` creates (or updates) the runtime from the pushed image and prints the
-runtime ARN when the endpoint is ready. Like `build_and_push.sh`, it is temporary
-scaffolding — a future phase moves provisioning into the SDK (`SandboxClient.create()`).
+runtime ARN when the endpoint is ready.
 
 The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`,
 `bedrock-agentcore:StopRuntimeSession` on the runtime.
@@ -106,31 +105,20 @@ with client.start() as sb:
 
 ```python
 with client.start() as sb:
-    handle = sb.exec("pytest -q", timeout=900, background=True)
+    handle = sb.exec("sleep 2; printf done", background=True)
     # Save sb.session_id and handle.invocation_id to transfer to another client.
-    recovered = client.attach(sb.session_id).get_exec(handle.invocation_id)
-    result = recovered.result(timeout=1200)
+    existing_handle = client.attach(sb.session_id).get_exec(handle.invocation_id)
+    result = existing_handle.result(timeout=30)
+    print(result.stdout)  # done
 ```
 
 Exiting the context terminates the session, including unfinished commands. Use
 explicit `start()`/`terminate()` when transferring ownership beyond this scope.
 A local result-wait timeout raises `TimeoutError` and leaves the command running.
-Reading a persisted execution timeout raises `ExecTimeoutError` again with the
-same result. An ambiguous initial connection failure raises `ExecError`, whose
-`.handle` can query the same execution.
-The default local records are lost on compute replacement. Output retains the
-first 256 KiB of each stream and marks truncation explicitly.
+See the [SDK design](../../designs/sandbox_sdk.md) for recovery, error handling,
+and storage/output limits.
 
 ## Local smoke test (no AWS needed)
 
-The server is plain HTTP, so you can exercise the contract locally:
-
-```bash
-../../sandboxd/build.sh --arch amd64        # match your host arch
-../../sandboxd/dist/agentcore-sandboxd-linux-amd64 &
-curl -s localhost:8080/ping                                          # {"status":"Healthy"}
-curl -s -XPOST localhost:8080/invocations -d '{"action":"start"}'    # {"status":"ok","state":"busy"}
-curl -s localhost:8080/ping                                          # {"status":"HealthyBusy"}
-curl -s -XPOST localhost:8080/invocations -d '{"action":"stop"}'
-kill %1
-```
+Follow the [daemon's local smoke test](../../sandboxd/README.md#local-smoke-test)
+to exercise session actions and command execution over plain HTTP.

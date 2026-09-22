@@ -290,72 +290,36 @@ See `examples/math_agent/SETUP.md` for the full walkthrough.
 
 ### Sandbox SDK
 
-`src/agentcore_rl_toolkit/sandbox/` runs shell commands in **arbitrary Docker images**
-(e.g. SWE-bench-style coding environments) deployed as ACR runtimes — the substrate for
-coding-agent evaluation and RL rollouts.
+The Sandbox SDK runs shell commands in arbitrary images on AgentCore Runtime.
+The Python client calls an independent Go daemon inside each sandbox.
 
-See [Sandbox SDK design](designs/sandbox_sdk.md) for API boundaries, process
-ownership, transport decisions, and the current implementation scope.
+**Code entry points:**
 
-**How it works.** `agentcore-sandboxd` (Go, stdlib-only, source in `sandboxd/`)
-serves `/ping` and `/invocations` on port 8080. The SDK sends versioned RIP
-`start/get` requests through `InvokeAgentRuntime`. One process manager owns both
-foreground and background commands, their output capture, and persisted results.
+- `src/agentcore_rl_toolkit/sandbox/`: `client.py` owns session and execution handles;
+  `types.py` defines result types.
+- `sandboxd/main.go`: HTTP/session dispatch; `process.go`: execution; `store.go`: records.
 
-```python
-from agentcore_rl_toolkit.sandbox import SandboxClient
+**Key constraints:**
 
-client = SandboxClient(runtime_arn="arn:aws:bedrock-agentcore:...:runtime/...")
-with client.start() as sb:
-    result = sb.exec("pytest -q", timeout=900)
-    handle = sb.exec("pytest -q", timeout=900, background=True)
-    recovered = client.attach(sb.session_id).get_exec(handle.invocation_id)
-    result = recovered.result(timeout=1200)
-# Context exit terminates the session, including any unfinished commands.
-```
+- Execution ownership is independent of HTTP connections. Retries reuse invocation
+  IDs, `get` never executes work, and terminal results are persisted before completion.
+- Completion waits for shell exit and output EOF. Execution timeout kills only the
+  direct process; descendants may survive until session termination.
+- Execution timeout raises `ExecTimeoutError` with the persisted result. Local
+  `ExecHandle.result(timeout=...)` timeout raises `TimeoutError` and leaves work running.
 
-**Key semantics:**
-
-- Nonzero exits return `ExecResult`. Execution timeouts raise `ExecTimeoutError`,
-  an `ExecError` subclass with the persisted result in `.result` and execution
-  identity in `.handle`. Reading after reattachment raises `ExecTimeoutError`
-  with the same result. Other `ExecError` cases cover submission/recovery/execution failures;
-  original submission transport errors are chained as `__cause__`.
-- `exec(timeout=...)` is the remote execution deadline (1–3600 seconds, default
-  300), including output waiting after shell exit. Expiry kills only the direct
-  process and closes output readers; descendants can survive until session
-  termination. Normal completion does not kill descendants.
-  `handle.result(timeout=...)` only stops local polling, never the command or
-  session. In-flight AWS calls retain the client's socket/retry settings.
-- Commands run in a fresh shell (default `/bin/sh`), with `cwd`/`env` composed
-  into the command per call. The daemon starts that shell directly; no Command
-  API tokenizer wrapper is needed.
-- Client-generated invocation IDs are reused for retries. `get` cannot execute
-  work. Status is `in_progress`, `completed`, `interrupted`, or `not_found`.
-- The configurable local store survives requests/daemon restarts, not compute
-  replacement. Start-only records without an owner are interrupted, not rerun.
-- stdout/stderr are captured without a connected client, capped at 256 KiB each
-  with explicit truncation flags. This version returns final output only.
-- `start`/`attach`/`terminate` remain session operations. A session hold is separate
-  from active commands; commands remain busy through terminal publication.
-  `terminate()` releases the hold then calls `StopRuntimeSession`, best-effort.
-- Rebuild the sandbox image when upgrading from the health-only daemon. There is
-  no automatic fallback to native command execution, which would bypass RIP.
-- Sync-only. Managed-storage recovery, real-time output, native Interactive Shell
-  wrapping, async APIs, file transfer, and session TTL policy remain deferred.
-
-**Building the daemon binary** (static, cross-compiled; works on x86 hosts, falls back to a
-golang container if Go isn't installed):
+See the [SDK design](designs/sandbox_sdk.md) for API semantics and decisions,
+the [daemon README](sandboxd/README.md) for wire format and configuration, and
+the [quickstart](examples/sandbox_quickstart/README.md) for deployment and usage.
 
 ```bash
-sandboxd/build.sh                 # -> sandboxd/dist/agentcore-sandboxd-linux-arm64
-sandboxd/build.sh --stage examples/sandbox_quickstart   # also copy into a build context
+sandboxd/build.sh --stage examples/sandbox_quickstart
+uv run pytest tests/sandbox/
+(cd sandboxd && go test -race ./...)
 ```
 
-See `examples/sandbox_quickstart/` for the full walkthrough (wrap image → push to ECR →
-create runtime → run). Python tests: `tests/sandbox/` (mocked SDK tests, local
-daemon integration, and live ACR tests enabled by `SANDBOX_RUNTIME_ARN`). Go tests:
-`cd sandboxd && go test -race ./...` (CI: `.github/workflows/sandboxd.yml`).
+Live ACR tests require `SANDBOX_RUNTIME_ARN`. Go CI runs in
+`.github/workflows/sandboxd.yml`.
 
 ### Migration Guide (basic_app → rl_app)
 
