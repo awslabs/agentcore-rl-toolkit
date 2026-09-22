@@ -563,7 +563,7 @@ delivery choices over the same managed execution. Both claim the invocation ID,
 track liveness, and persist the terminal result before reporting completion.
 
 The [Sandbox SDK design](./sandbox_sdk.md) specifies the concrete daemon, API
-mapping, process-group lifecycle, and output policy. Those choices implement RIP
+mapping, process lifecycle, and output policy. Those choices implement RIP
 without becoming requirements for an app-handler adapter or an upstream service
 implementation.
 

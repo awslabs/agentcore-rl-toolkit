@@ -49,7 +49,7 @@ Python Sandbox SDK
             -> session actions: start / stop / status
             -> RIP operations: start / get
                  -> process manager
-                      -> shell process group
+                      -> shell process
                       -> local invocation records and output
 
 AgentCore /ping
@@ -106,8 +106,14 @@ different IDs permit intentionally identical commands.
 ### Results and errors
 
 `ExecResult` contains `exit_code`, `stdout`, `stderr`, `timed_out`, and per-stream
-truncation flags. Nonzero exit codes and execution timeouts are normal result
-data, preserving the existing evaluation/training interface.
+truncation flags. Nonzero exit codes are returned as normal result data.
+
+An execution deadline raises `ExecTimeoutError`, a subclass of `ExecError`.
+Its `.result` contains the persisted `ExecResult`, including partial output and
+the shell's exit code; `.handle` identifies the completed invocation. Foreground
+`exec()` and `ExecHandle.result()` raise the same exception when they read a
+timed-out result, including after reattachment or a duplicate-ID start.
+The daemon still stores and returns the terminal result with `timed_out=true`.
 
 An ambiguous submission or foreground connection failure raises `ExecError`.
 Its `.handle` retains the execution identity so the caller can query the original
@@ -119,10 +125,14 @@ the caller already holds the handle and can retry that read.
 ### Execution, waiting, and session lifetime
 
 - `exec(timeout=...)` limits remote command execution: default 300 seconds, range
-  1–3600. The daemon kills the command's process group on expiry.
+  1–3600, including output waiting after shell exit. On expiry, the daemon kills
+  only the direct process and stops reading output.
 - `handle.result(timeout=...)` limits local polling. A wait timeout leaves the
-  command and session running. An in-flight AWS request remains subject to the
-  client's socket timeout and retry configuration.
+  command and session running and raises Python's built-in `TimeoutError`;
+  the handle remains usable for a later wait. `ExecTimeoutError` represents a
+  terminal execution timeout and is separate from this local wait timeout.
+  An in-flight AWS request remains subject to the client's socket timeout and
+  retry configuration.
 - Session termination affects every command in that environment and is separate
   from either completing a command or stopping a wait.
 
@@ -166,10 +176,20 @@ been implemented in the SDK.
 
 Commands run in a fresh shell, defaulting to `/bin/sh`, with the container's
 environment and working directory. The SDK composes per-call `cwd` and `env`
-settings into the shell command. The daemon owns the command's process group,
-enforces its deadline, and cleans up remaining group members on exit. Processes
-that escape the group are outside this cleanup mechanism; Runtime remains the
-isolation boundary.
+settings into the shell command; if either setup step fails, the shell exits
+before running the command.
+
+Like envd's ordinary command path, completion waits for both shell exit and EOF
+on stdout/stderr. Descendants can keep those pipes open after the shell exits;
+the execution deadline still bounds that wait. Expiry kills only the direct
+process and closes the output readers. The result retains captured output and
+sets `timed_out=true`, even if the shell already exited with code 0. The SDK
+raises `ExecTimeoutError` carrying this result.
+
+The daemon does not kill descendants on completion or timeout. A background
+service with redirected output can continue running for later commands to use.
+Remaining processes are cleaned up when the Runtime session terminates; Runtime
+remains the isolation boundary.
 
 One daemon owns one local store root. It writes a start record before execution
 and atomically publishes a terminal result after collecting output. The start
@@ -199,17 +219,18 @@ its buffering and replay contract will need a separate design decision.
 ## Implementation and validation
 
 The SDK and daemon implement session holds, managed foreground/background
-commands, local records, process-group deadlines, bounded output, `ExecHandle`,
+commands, local records, execution deadlines, bounded output, `ExecHandle`,
 and recovery by session/invocation ID. These capabilities implement RIP's process
 adapter.
 
 Go process/HTTP tests cover concurrent duplicate starts, distinct IDs, disconnect
-survival, timeout cleanup, output limits, persistence failures, and recovery from
-records. Python tests cover the SDK API and real botocore HTTP requests to a local
-daemon, including foreground connection loss followed by result retrieval.
+survival, descendant output and lifetime, execution deadlines, output limits,
+persistence failures, and recovery from records. Python tests cover the SDK API
+and real botocore HTTP requests to a local daemon, including foreground connection
+loss followed by result retrieval and timeout while waiting for descendant output.
 
 The environment-gated tests in [tests/sandbox/test_live.py](../tests/sandbox/test_live.py)
-use `SANDBOX_RUNTIME_ARN` against a rebuilt image. On 2026-09-20, all three live
+use `SANDBOX_RUNTIME_ARN` against a rebuilt image. On 2026-09-22, all five live
 tests passed against an isolated AgentCore runtime in `us-west-2`, using
 `debian:bookworm-slim` plus the current static ARM64 sandboxd binary. The client
 loaded the SDK directly from this checkout.
@@ -218,8 +239,12 @@ Live coverage includes foreground stdout/stderr and nonzero exit, background
 reattachment from another client, duplicate-ID retrieval, execution deadlines,
 foreground HTTP read-timeout recovery without duplicate execution, local wait
 timeout followed by successful retrieval, `cwd`/`env` quoting, and truncation of
-both output streams at 256 KiB. All three test sessions received successful
-`StopRuntimeSession` responses during context-manager cleanup.
+both output streams at 256 KiB. Tests also cover failed `cwd`/environment setup,
+complete descendant output after shell exit, execution timeout exceptions with
+the shell's exit code and partial output preserved, reattachment to timed-out
+invocations, and child survival after completion or timeout.
+All five test sessions received successful `StopRuntimeSession` responses during
+context-manager cleanup.
 
 Real-time output, interactive shells, async APIs, public command cancellation,
 file transfer, session TTL policy, managed-storage recovery, and S3 adapters

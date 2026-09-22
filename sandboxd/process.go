@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -158,25 +158,45 @@ func (m *processManager) execute(ctx context.Context, id string, req invocationR
 		shell = "/bin/sh"
 	}
 	cmd := exec.CommandContext(ctx, shell, "-c", req.Command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	defer stdoutPipe.Close()
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	defer stderrPipe.Close()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start command: %w", err)
+	}
+
+	outCtx, outCancel := context.WithCancel(ctx)
+	defer outCancel()
+	var readers sync.WaitGroup
+	copyOutput := func(dst *outputFile, src io.Reader) {
+		defer readers.Done()
+		if _, err := io.Copy(dst, src); err != nil && !errors.Is(err, os.ErrClosed) {
+			dst.err = err
 		}
-		return err
 	}
-	// A shell may exit while descendants still hold its output pipes.
-	cmd.WaitDelay = time.Second
-	err = cmd.Run()
-	timedOut := err != nil && ctx.Err() == context.DeadlineExceeded
-	if cmd.Process != nil {
-		// Managed commands own a process group, including children left by a shell.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	readers.Add(2)
+	go copyOutput(stdout, stdoutPipe)
+	go copyOutput(stderr, stderrPipe)
+	go func() {
+		readers.Wait()
+		outCancel()
+	}()
+
+	// Descendants may hold the pipes after the shell exits. Wait for EOF or
+	// cancellation before Wait closes the readers and reaps the direct process.
+	<-outCtx.Done()
+	err = cmd.Wait()
+	readers.Wait()
+	timedOut := ctx.Err() == context.DeadlineExceeded
 	var exitErr *exec.ExitError
-	if err != nil && !errors.As(err, &exitErr) {
+	if err != nil && !errors.As(err, &exitErr) && !errors.Is(err, ctx.Err()) {
 		return nil, fmt.Errorf("execute command: %w", err)
 	}
 	out, err := stdout.finish()

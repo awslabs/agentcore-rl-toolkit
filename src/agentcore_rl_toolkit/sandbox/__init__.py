@@ -4,7 +4,7 @@ Pairs with ``agentcore-sandboxd`` (see ``sandboxd/`` at the repo root), which
 owns foreground/background commands and their persisted results.
 """
 
-from .client import ExecError, ExecHandle, Sandbox, SandboxClient
+from .client import ExecError, ExecHandle, ExecTimeoutError, Sandbox, SandboxClient
 from .types import ExecResult, SandboxProtocolError
 
 __all__ = [
@@ -13,5 +13,6 @@ __all__ = [
     "ExecResult",
     "ExecHandle",
     "ExecError",
+    "ExecTimeoutError",
     "SandboxProtocolError",
 ]

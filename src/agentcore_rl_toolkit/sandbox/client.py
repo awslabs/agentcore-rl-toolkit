@@ -58,16 +58,15 @@ def _compose_command(command: str, cwd: str = None, env: dict = None) -> str:
         ValueError: If an env key is not a valid shell identifier.
     """
     prefix = ""
+    # Exit before any part of the user command can run if setup fails.
     if cwd is not None:
-        prefix += f"cd {shlex.quote(cwd)} && "
+        prefix += f"cd {shlex.quote(cwd)} || exit $?; "
     if env:
         for key in env:
             if not _ENV_KEY_RE.match(key):
                 raise ValueError(f"Invalid environment variable name: {key!r}")
         exports = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
-        # && (not ;) so a failed cd cannot fall through to running the command
-        # in the wrong directory with a clean exit code.
-        prefix += f"export {exports} && "
+        prefix += f"export {exports} || exit $?; "
     return prefix + command
 
 
@@ -223,12 +222,15 @@ class Sandbox:
         """Run a managed command, waiting by default or returning a background handle.
 
         Commands run in a fresh shell (default /bin/sh). ``cwd`` and ``env`` are
-        established per call. Nonzero exits and execution timeouts are result
-        data, including partial output. Each output stream retains its first
-        256 KiB; the result explicitly marks truncation.
+        established per call. Nonzero exits return an ``ExecResult``. Execution
+        timeouts raise ``ExecTimeoutError`` with the captured result in ``.result``
+        and the execution handle in ``.handle``. Each output stream retains its
+        first 256 KiB; the result explicitly marks truncation.
 
         ``timeout`` is the daemon-enforced execution deadline in seconds
         (1–3600, default 300), independent of ``ExecHandle.result(timeout=...)``.
+        It includes output waiting after shell exit. Expiry kills only the
+        direct process and stops reading output; child processes may survive.
         ``invocation_id`` defaults to a UUID generated before the request. Reuse
         it to address an existing execution; a repeated start ignores the new
         command while its record survives. Foreground and background executions
@@ -367,6 +369,8 @@ class ExecHandle:
         The deadline is checked between requests. In-flight AWS requests remain
         subject to the client's socket timeout and retry configuration.
         ``TimeoutError`` leaves this handle usable for a later wait.
+        A completed execution that exceeded its deadline raises
+        ``ExecTimeoutError`` with the persisted result in ``.result``.
         """
         if timeout is not None and timeout < 0:
             raise ValueError("timeout must be nonnegative")
@@ -394,7 +398,10 @@ class ExecHandle:
         if "error" in response:
             error = response["error"]
             raise ExecError(f"{error['code']}: {error['message']}", self)
-        return ExecResult(**response["result"])
+        result = ExecResult(**response["result"])
+        if result.timed_out:
+            raise ExecTimeoutError(self, result)
+        return result
 
 
 class ExecError(RuntimeError):
@@ -408,3 +415,16 @@ class ExecError(RuntimeError):
     def __init__(self, message: str, handle: ExecHandle):
         super().__init__(f"Invocation {handle.invocation_id}: {message}")
         self.handle = handle
+
+
+class ExecTimeoutError(ExecError):
+    """The execution deadline expired, including while waiting for output.
+
+    ``result`` retains captured output, the exit code, and truncation flags.
+    ``handle`` identifies the completed invocation; reading it again raises
+    this exception with the same persisted result.
+    """
+
+    def __init__(self, handle: ExecHandle, result: ExecResult):
+        super().__init__("execution timed out", handle)
+        self.result = result

@@ -300,7 +300,7 @@ ownership, transport decisions, and the current implementation scope.
 **How it works.** `agentcore-sandboxd` (Go, stdlib-only, source in `sandboxd/`)
 serves `/ping` and `/invocations` on port 8080. The SDK sends versioned RIP
 `start/get` requests through `InvokeAgentRuntime`. One process manager owns both
-foreground and background commands, their process groups, and persisted results.
+foreground and background commands, their output capture, and persisted results.
 
 ```python
 from agentcore_rl_toolkit.sandbox import SandboxClient
@@ -316,12 +316,17 @@ with client.start() as sb:
 
 **Key semantics:**
 
-- Nonzero exit and execution timeout are `ExecResult` data. `ExecError` represents
-  submission/recovery/execution infrastructure failures and retains `.handle`;
+- Nonzero exits return `ExecResult`. Execution timeouts raise `ExecTimeoutError`,
+  an `ExecError` subclass with the persisted result in `.result` and execution
+  identity in `.handle`. Reading after reattachment raises `ExecTimeoutError`
+  with the same result. Other `ExecError` cases cover submission/recovery/execution failures;
   original submission transport errors are chained as `__cause__`.
 - `exec(timeout=...)` is the remote execution deadline (1–3600 seconds, default
-  300). `handle.result(timeout=...)` only stops local polling, never the command
-  or session. In-flight AWS calls retain the client's socket/retry settings.
+  300), including output waiting after shell exit. Expiry kills only the direct
+  process and closes output readers; descendants can survive until session
+  termination. Normal completion does not kill descendants.
+  `handle.result(timeout=...)` only stops local polling, never the command or
+  session. In-flight AWS calls retain the client's socket/retry settings.
 - Commands run in a fresh shell (default `/bin/sh`), with `cwd`/`env` composed
   into the command per call. The daemon starts that shell directly; no Command
   API tokenizer wrapper is needed.

@@ -7,7 +7,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from agentcore_rl_toolkit.sandbox import ExecError, ExecHandle, Sandbox, SandboxClient, SandboxProtocolError
+from agentcore_rl_toolkit.sandbox import (
+    ExecError,
+    ExecHandle,
+    ExecResult,
+    ExecTimeoutError,
+    Sandbox,
+    SandboxClient,
+    SandboxProtocolError,
+)
 
 FAKE_ARN = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/sandbox-test"
 FAKE_SESSION_ID = "a" * 40
@@ -158,8 +166,8 @@ class TestExec:
         assert payload["_agentcore_runtime"]["invocation_id"]
         mock_acr.invoke_agent_runtime_command.assert_not_called()
 
-    @pytest.mark.parametrize("exit_code,timed_out", [(3, False), (-1, True)])
-    def test_nonzero_and_timeout_are_data(self, exit_code, timed_out):
+    @pytest.mark.parametrize("exit_code", [3, -1])
+    def test_nonzero_exits_are_data(self, exit_code):
         client, mock_acr = make_client_and_mock()
         set_execution_response(
             mock_acr,
@@ -167,17 +175,35 @@ class TestExec:
                 "exit_code": exit_code,
                 "stdout": "partial",
                 "stderr": "",
-                "timed_out": timed_out,
+                "timed_out": False,
                 "stdout_truncated": True,
                 "stderr_truncated": False,
             },
         )
         result = client.attach(FAKE_SESSION_ID).exec("cmd")
         assert result.exit_code == exit_code
-        assert result.timed_out is timed_out
+        assert not result.timed_out
         assert result.stdout == "partial"
         assert result.stdout_truncated is True
         assert result.stderr_truncated is False
+
+    @pytest.mark.parametrize("exit_code", [0, -1])
+    def test_execution_timeout_retains_result_and_handle(self, exit_code):
+        client, mock_acr = make_client_and_mock()
+        result = {
+            "exit_code": exit_code,
+            "stdout": "partial",
+            "stderr": "warning",
+            "timed_out": True,
+            "stdout_truncated": True,
+            "stderr_truncated": False,
+        }
+        set_execution_response(mock_acr, result=result)
+        with pytest.raises(ExecTimeoutError, match="execution timed out") as caught:
+            client.attach(FAKE_SESSION_ID).exec("cmd", invocation_id="deadline")
+        assert caught.value.result == ExecResult(**result)
+        assert caught.value.handle.invocation_id == "deadline"
+        assert caught.value.handle.session_id == FAKE_SESSION_ID
 
     def test_cwd_env_shell_and_timeout(self):
         client, mock_acr = make_client_and_mock()
@@ -186,7 +212,7 @@ class TestExec:
             "printf '%s' \"$FOO\"", timeout=600, cwd="/app", env={"FOO": "a b"}, shell="/bin/bash"
         )
         payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
-        assert payload["command"] == "cd /app && export FOO='a b' && printf '%s' \"$FOO\""
+        assert payload["command"] == "cd /app || exit $?; export FOO='a b' || exit $?; printf '%s' \"$FOO\""
         assert payload["shell"] == "/bin/bash"
         assert payload["timeout"] == 600
 

@@ -60,12 +60,17 @@ published before reporting completion. Persistence failures never report success
 ## Process and storage scope
 
 Commands run as `<shell> -c <command>`, defaulting to `/bin/sh`, with inherited
-container environment and working directory. Each command owns a process group.
-The execution deadline defaults to 300 seconds (range 1–3600). Deadline expiry
-kills the group and returns `timed_out=true` with partial output. The manager
-also cleans up remaining group members when the command exits. Commands that
-escape their process group are outside this mechanism; this is not another
-isolation boundary inside the Runtime session.
+container environment and working directory. Completion waits for the shell to
+exit and stdout/stderr to reach EOF, including output from descendants.
+The execution deadline defaults to 300 seconds (range 1–3600) and also bounds
+output waiting after shell exit. On expiry, the daemon kills only the direct
+process, closes the output readers, and returns `timed_out=true` with captured
+output. The shell's exit code is preserved if it already exited.
+
+Descendants are not killed on completion or timeout. For example,
+`sleep 5 & printf done` waits for the inherited output pipes to close, while
+`sleep 5 >/dev/null 2>&1 & printf done` completes with `sleep` still running.
+Remaining processes are cleaned up when the Runtime session terminates.
 
 Output is drained independently of HTTP clients. The first **256 KiB per stream**
 is saved to disk; subsequent bytes are discarded and explicitly marked truncated.

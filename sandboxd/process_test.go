@@ -173,23 +173,84 @@ func TestDisconnectDoesNotCancelExecution(t *testing.T) {
 	}
 }
 
-func TestExecutionTimeoutKillsProcessGroup(t *testing.T) {
-	srv, _ := newTestServer(t)
-	req := request("timeout", "echo before; sleep 30 & echo $!; wait", false)
-	timeout := 1
-	req.Timeout = &timeout
-	result := call(t, srv.URL, req).Result
-	if result == nil || !result.TimedOut || result.ExitCode != -1 || !strings.HasPrefix(result.Stdout, "before\n") {
-		t.Fatalf("timeout result: %+v", result)
+func TestWaitsForDescendantOutput(t *testing.T) {
+	for _, exitCode := range []int{0, 7} {
+		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
+			srv, _ := newTestServer(t)
+			command := fmt.Sprintf(
+				"(sleep 2; printf late; printf warning >&2) & printf parent-done; exit %d", exitCode,
+			)
+			result := call(t, srv.URL, request("output-wait", command, false)).Result
+			if result == nil || result.ExitCode != exitCode || result.TimedOut ||
+				result.Stdout != "parent-donelate" || result.Stderr != "warning" {
+				t.Fatalf("lost descendant output or shell exit code: %+v", result)
+			}
+		})
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(result.Stdout, "before\n")))
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestChildSurvivesCompletionAndTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		command  string
+		exitCode int
+		timedOut bool
+	}{
+		{"redirected-output", "sleep 30 >/dev/null 2>&1 & echo $!", 0, false},
+		{"timeout-running-shell", "sleep 30 & echo $!; wait", -1, true},
+		{"timeout-after-shell-exit", "sleep 30 & echo $!; exit 7", 7, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newTestServer(t)
+			req := request(tc.name, "printf partial >&2; "+tc.command, false)
+			timeout := 2
+			req.Timeout = &timeout
+			start := time.Now()
+			result := call(t, srv.URL, req).Result
+			if result == nil {
+				t.Fatal("expected an execution result")
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(result.Stdout))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+			if result.TimedOut != tc.timedOut || result.ExitCode != tc.exitCode || result.Stderr != "partial" {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+			if time.Since(start) > 5*time.Second {
+				t.Fatal("output wait exceeded the execution deadline")
+			}
+			// kill(pid, 0) also succeeds for zombies; verify the child is still alive.
+			stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+			if err != nil || strings.Contains(string(stat), ") Z ") {
+				t.Fatalf("child did not survive: %s, %v", stat, err)
+			}
+		})
 	}
-	// A killed grandchild may briefly remain a zombie until its parent reaps it.
-	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err == nil && !strings.Contains(string(stat), ") Z ") {
-		t.Fatalf("child is still running: %s", stat)
+}
+
+func TestOutputEOFBeforeProcessExit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		command  string
+		exitCode int
+		timedOut bool
+	}{
+		{"normal-exit", "sleep 0.1; exit 7", 7, false},
+		{"timeout", "exec sleep 30", -1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newTestServer(t)
+			req := request(tc.name, "printf before; exec 1>&- 2>&-; "+tc.command, false)
+			timeout := 1
+			req.Timeout = &timeout
+			result := call(t, srv.URL, req).Result
+			if result == nil || result.ExitCode != tc.exitCode || result.TimedOut != tc.timedOut ||
+				result.Stdout != "before" {
+				t.Fatalf("unexpected result after output EOF: %+v", result)
+			}
+		})
 	}
 }
 

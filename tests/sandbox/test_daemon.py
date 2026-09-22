@@ -18,7 +18,7 @@ import pytest
 from botocore import UNSIGNED
 from botocore.config import Config
 
-from agentcore_rl_toolkit.sandbox import ExecError, SandboxClient
+from agentcore_rl_toolkit.sandbox import ExecError, ExecTimeoutError, SandboxClient
 
 ARN = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/local-test"
 
@@ -134,3 +134,30 @@ def test_sdk_foreground_connection_loss_is_recoverable(sdk):
     handle = caught.value.handle
     recovered = sdk().attach(handle.session_id).get_exec(handle.invocation_id).result(timeout=5)
     assert recovered.stdout == "recovered"
+
+
+@pytest.mark.parametrize("background", [False, True])
+def test_sdk_execution_timeout_survives_reattachment_and_retry(sdk, tmp_path, background):
+    sandbox = sdk().start()
+    with pytest.raises(ExecTimeoutError) as caught:
+        handle = sandbox.exec(
+            "printf x >> count; printf early; printf warning >&2; (sleep 2; printf late) & exit 0",
+            timeout=1,
+            cwd=str(tmp_path),
+            background=background,
+        )
+        handle.result(timeout=5)
+
+    error = caught.value
+    assert error.result.timed_out
+    assert (error.result.exit_code, error.result.stdout, error.result.stderr) == (0, "early", "warning")
+    assert error.handle.status() == "completed"
+    recovered = sdk().attach(error.handle.session_id).get_exec(error.handle.invocation_id)
+    with pytest.raises(ExecTimeoutError) as reread:
+        recovered.result()
+    assert reread.value.result == error.result
+    assert reread.value.handle is recovered
+    with pytest.raises(ExecTimeoutError) as retry:
+        sandbox.exec("printf rerun >> count", cwd=str(tmp_path), invocation_id=error.handle.invocation_id)
+    assert retry.value.result == error.result
+    assert (tmp_path / "count").read_text() == "x"

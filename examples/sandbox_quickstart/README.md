@@ -87,9 +87,20 @@ stdout: hi from /tmp
 Sandbox terminated.
 ```
 
-Failing commands are results, not exceptions — `sb.exec("exit 3")` returns
-`ExecResult(exit_code=3, ...)`. Timeouts likewise: `result.timed_out` is `True`
-and any partial output is retained.
+Nonzero exits return results: `sb.exec("exit 3")` returns
+`ExecResult(exit_code=3, ...)`. Execution timeouts raise `ExecTimeoutError`;
+its `.result` retains partial output and the exit code, and `.handle` identifies
+the execution.
+
+```python
+from agentcore_rl_toolkit.sandbox import ExecTimeoutError
+
+with client.start() as sb:
+    try:
+        result = sb.exec("printf before; sleep 5", timeout=1)
+    except ExecTimeoutError as error:
+        print(error.result.stdout)  # before
+```
 
 ## Background commands and recovery
 
@@ -103,8 +114,10 @@ with client.start() as sb:
 
 Exiting the context terminates the session, including unfinished commands. Use
 explicit `start()`/`terminate()` when transferring ownership beyond this scope.
-A local result-wait timeout leaves the command running. An ambiguous initial
-connection failure raises `ExecError`, whose `.handle` can query the same execution.
+A local result-wait timeout raises `TimeoutError` and leaves the command running.
+Reading a persisted execution timeout raises `ExecTimeoutError` again with the
+same result. An ambiguous initial connection failure raises `ExecError`, whose
+`.handle` can query the same execution.
 The default local records are lost on compute replacement. Output retains the
 first 256 KiB of each stream and marks truncation explicitly.
 

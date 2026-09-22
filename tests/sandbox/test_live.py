@@ -5,7 +5,7 @@ import os
 import pytest
 from botocore.exceptions import ReadTimeoutError
 
-from agentcore_rl_toolkit.sandbox import ExecError, SandboxClient
+from agentcore_rl_toolkit.sandbox import ExecError, ExecTimeoutError, SandboxClient
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("SANDBOX_RUNTIME_ARN"), reason="set SANDBOX_RUNTIME_ARN for live ACR coverage"
@@ -25,9 +25,10 @@ def test_live_managed_execution():
         assert recovered.exit_code == 0
         assert other.exec("echo must-not-run", invocation_id=handle.invocation_id) == recovered
 
-        timed_out = sandbox.exec("printf partial; sleep 30", timeout=1)
-        assert timed_out.timed_out
-        assert timed_out.stdout == "partial"
+        with pytest.raises(ExecTimeoutError) as caught:
+            sandbox.exec("printf partial; sleep 30", timeout=1)
+        assert caught.value.result.timed_out
+        assert caught.value.result.stdout == "partial"
 
 
 def test_live_foreground_disconnect():
@@ -66,3 +67,51 @@ def test_live_output_and_local_wait():
         assert result.stdout == "x" * (256 * 1024)
         assert result.stderr == "y" * (256 * 1024)
         assert result.stdout_truncated and result.stderr_truncated
+
+        for kwargs in ({"cwd": "/missing-directory"}, {"shell": "/bin/bash", "env": {"SHELLOPTS": "readonly"}}):
+            failed = sandbox.exec("printf must-not-run; touch /app/setup-ran", **kwargs)
+            assert failed.exit_code != 0
+            assert failed.stdout == ""
+        assert sandbox.exec("test ! -e /app/setup-ran").exit_code == 0
+
+
+def test_live_descendant_output():
+    client = SandboxClient(runtime_arn=os.environ["SANDBOX_RUNTIME_ARN"])
+    with client.start() as sandbox:
+        command = "printf parent-done; (sleep 2; printf late; printf warning >&2) & exit 7"
+        result = sandbox.exec(command, timeout=10)
+        assert (result.stdout, result.stderr, result.exit_code) == ("parent-donelate", "warning", 7)
+        assert not result.timed_out
+
+        handle = sandbox.exec("(sleep 5; printf late) & printf early; exit 0", timeout=1, background=True)
+        with pytest.raises(ExecTimeoutError) as caught:
+            handle.result(timeout=30)
+        result = caught.value.result
+        assert result.timed_out
+        assert (result.exit_code, result.stdout) == (0, "early")
+        assert caught.value.handle is handle
+        other = SandboxClient(runtime_arn=client.runtime_arn).attach(sandbox.session_id)
+        with pytest.raises(ExecTimeoutError) as reread:
+            other.get_exec(handle.invocation_id).result()
+        assert reread.value.result == result
+
+
+def test_live_child_lifetime():
+    client = SandboxClient(runtime_arn=os.environ["SANDBOX_RUNTIME_ARN"])
+    with client.start() as sandbox:
+        for command, exit_code, timed_out in (
+            ("sleep 30 >/dev/null 2>&1 & echo $!", 0, False),
+            ("sleep 30 & echo $!; wait", -1, True),
+            ("sleep 30 & echo $!; exit 7", 7, True),
+        ):
+            if timed_out:
+                with pytest.raises(ExecTimeoutError) as caught:
+                    sandbox.exec(command, timeout=1)
+                result = caught.value.result
+            else:
+                result = sandbox.exec(command, timeout=1)
+            assert (result.exit_code, result.timed_out) == (exit_code, timed_out)
+            pid = int(result.stdout)
+            # A successful kill(pid, 0) also includes zombies; check the state.
+            alive = sandbox.exec(f'read -r pid comm state rest < /proc/{pid}/stat && test "$state" != Z')
+            assert alive.exit_code == 0
