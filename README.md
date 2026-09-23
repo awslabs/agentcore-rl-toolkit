@@ -271,6 +271,10 @@ This architecture enables parallel and highly efficient rollouts with secure exe
 - [rLLM](https://github.com/rllm-org/rllm) — supports multiple backends (veRL, Tinker, and more)
   - [Math Agent](examples/strands_math_agent/): [Tinker](https://github.com/rllm-org/rllm/blob/main/examples/agentcore_math/train_agentcore_math_tinker.sh)
 
+For a self-hosted Tinker-compatible training and sampling endpoint, see the
+[SkyRL EC2 deployment example](src/agentcore_rl_toolkit/backends/tinker_api/skyrl/).
+It uses SkyPilot to deploy Qwen3.5-4B on one P4d.
+
 ### Prepare Your Agent Container
 
 ACR deploys agents as Docker containers. Most Dockerfiles can be auto-generated with the [AgentCore CLI](https://aws.github.io/bedrock-agentcore-starter-toolkit/api-reference/cli.html). Example command:

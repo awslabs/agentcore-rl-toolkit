@@ -1,0 +1,23 @@
+# deploy.sh supplies the selected subnet's zone and a private SkyPilot config.
+name: skyrl-tinker-endpoint
+
+resources:
+  infra: aws/us-west-2/us-west-2c
+  instance_type: p4d.24xlarge
+  image_id: ami-07e48b17b73736ba3
+  disk_size: 200
+
+num_nodes: 1
+workdir: .
+
+envs:
+  SKYRL_COMMIT: f4ecdd09c2df6085db92e2d08d5ec366e9ba8506
+  MODEL_ID: Qwen/Qwen3.5-4B
+  MODEL_REVISION: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  TINKER_PORT: "18080"
+
+setup: |
+  bash setup.sh
+
+run: |
+  bash serve.sh
