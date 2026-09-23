@@ -19,8 +19,6 @@ On the machine running the launcher:
 - Linux, Python 3.12 via [uv](https://docs.astral.sh/uv/), Git, SSH, and rsync.
 - AWS credentials with SkyPilot's EC2 provisioning permissions and the scoped IAM
   permissions below. Set `AWS_PROFILE` if using a named profile.
-- A writable local `TMPDIR` for the client environment, caches, and generated
-  deployment files. The launcher preserves existing `TMPDIR`, `TMP`, and `TEMP`.
 - A network route to an existing private subnet in `us-west-2`. The subnet must
   have a unique `Name` tag in the region, because SkyPilot selects it by name.
 - Enough P4d quota and capacity, or a matching accessible capacity reservation.
@@ -41,7 +39,6 @@ From this directory:
 
 ```bash
 export AWS_PROFILE=my-profile
-export TMPDIR=/path/to/local/scratch
 
 ./deploy.sh \
   --cluster skyrl-tinker-endpoint \
@@ -70,9 +67,14 @@ The command:
 Existing security-group rules are preserved. Revoke obsolete client access
 explicitly if you change the allowed CIDR for an example-created group.
 
+The launcher automatically selects local scratch space: existing `TMPDIR`, then
+`TMP` or `TEMP`, otherwise `/tmp`. Set `TMPDIR` only if you want to choose a
+different location for the client environment and caches, for example a larger
+local disk. This does not affect storage paths on the GPU instance.
+
 The result prints the private endpoint URL and SDK `base_model` path. Generated
-configuration and `deployment.json` live under
-`$TMPDIR/skyrl-endpoints/CLUSTER/`; use `--state-dir PATH` to select another local
+configuration and `deployment.json` live in `skyrl-endpoints/CLUSTER/` under the
+selected scratch directory; use `--state-dir PATH` to select another local
 location. Keep this directory for repeat deployments. Your global SkyPilot
 configuration and local AWS credential files are not modified or uploaded to EC2.
 
