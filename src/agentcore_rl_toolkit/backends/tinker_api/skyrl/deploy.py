@@ -19,12 +19,12 @@ from aws_setup import (
     client_network,
     ensure_profile,
     ensure_security_group,
+    resolve_image,
     resolve_subnet,
     verify_instance_network,
 )
 
 HERE = Path(__file__).resolve().parent
-REGION = "us-west-2"
 
 
 def write_json(path, value):
@@ -54,14 +54,15 @@ def wait_healthy(sky, cluster, job_id, endpoint, timeout):
 
 
 def run(args, state_dir):
-    session = boto3.Session(region_name=REGION)
+    session = boto3.Session(region_name=args.region)
     account = session.client("sts").get_caller_identity()["Account"]
     policy_path = state_dir / "deployer-iam-policy.json"
     write_json(policy_path, bootstrap_policy(account))
     ec2 = session.client("ec2")
     subnet, subnet_name = resolve_subnet(ec2, args.subnet_id)
     task = yaml.safe_load((HERE / "endpoint.yaml").read_text())
-    task["resources"]["infra"] = f"aws/{REGION}/{subnet['AvailabilityZone']}"
+    task["resources"]["infra"] = f"aws/{args.region}/{subnet['AvailabilityZone']}"
+    task["resources"]["image_id"] = resolve_image(ec2, args.image_id)
     task["workdir"] = str(HERE)
     base_model = "/home/ubuntu/skyrl/models/" + task["envs"]["MODEL_ID"].rsplit("/", 1)[-1]
     desired = {
@@ -131,7 +132,7 @@ def run(args, state_dir):
     manifest = {
         "desired": desired,
         "cluster": args.cluster,
-        "region": REGION,
+        "region": args.region,
         "security_group_id": group_id,
         "instance_profile": "skypilot-v1",
         "base_model": base_model,
@@ -161,13 +162,15 @@ def run(args, state_dir):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cluster", default="skyrl-tinker-endpoint")
-    parser.add_argument("--subnet-id", required=True, help="Existing private subnet in us-west-2")
+    parser.add_argument("--region", default="us-west-2", help="AWS region (default: us-west-2)")
+    parser.add_argument("--image-id", help="Override the default DLAMI with an AMI in the selected region")
+    parser.add_argument("--subnet-id", required=True, help="Existing private subnet in the selected region")
     parser.add_argument("--client-cidr", required=True, type=client_network)
     parser.add_argument("--reservation", help="Optional matching targeted capacity reservation")
     parser.add_argument("--security-group-id", help="Reuse a preconfigured SG without changing it")
     parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--timeout", type=int, default=3600, help="Seconds to wait for HTTP readiness")
-    parser.add_argument("--plan", action="store_true", help="Resolve subnet and print plan; no AWS writes")
+    parser.add_argument("--plan", action="store_true", help="Resolve subnet/AMI and print plan; no AWS writes")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", args.cluster):
         parser.error("--cluster must be a lowercase SkyPilot name, at most 40 characters")

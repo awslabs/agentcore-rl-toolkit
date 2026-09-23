@@ -1,10 +1,10 @@
-# deploy.sh supplies the selected subnet's zone and a private SkyPilot config.
+# Use deploy.sh: it supplies the region, subnet's zone, regional AMI ID and
+# private SkyPilot config.
 name: skyrl-tinker-endpoint
 
 resources:
-  infra: aws/us-west-2/us-west-2c
+  infra: aws
   instance_type: p4d.24xlarge
-  image_id: ami-07e48b17b73736ba3
   disk_size: 200
 
 num_nodes: 1

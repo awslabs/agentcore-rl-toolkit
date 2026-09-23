@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 
 PROFILE = "skypilot-v1"
 OWNER_TAG = "skyrl-tinker-endpoint"
+DEFAULT_AMI_NAME = "Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04) 20260922"
 TRUST = {
     "Version": "2012-10-17",
     "Statement": [
@@ -108,6 +109,30 @@ def resolve_subnet(ec2, subnet_id):
     if len(matches) != 1 or matches[0]["SubnetId"] != subnet_id:
         raise ValueError("The subnet Name tag must identify exactly one subnet in the region")
     return subnet, name
+
+
+def resolve_image(ec2, image_id=None):
+    """Resolve the same official DLAMI release in the client's AWS region."""
+    if image_id:
+        images = ec2.describe_images(ImageIds=[image_id])["Images"]
+    else:
+        images = ec2.describe_images(
+            Owners=["amazon"],
+            Filters=[
+                {"Name": "name", "Values": [DEFAULT_AMI_NAME]},
+                {"Name": "state", "Values": ["available"]},
+                {"Name": "architecture", "Values": ["x86_64"]},
+            ],
+        )["Images"]
+    if len(images) != 1:
+        raise ValueError(
+            "Could not resolve exactly one AMI in the selected region. "
+            "Provide --image-id for a compatible Ubuntu 22.04/CUDA 13 DLAMI."
+        )
+    image = images[0]
+    if image["State"] != "available" or image["Architecture"] != "x86_64" or image["RootDeviceType"] != "ebs":
+        raise ValueError("The AMI must be available, x86_64, and EBS-backed")
+    return image["ImageId"]
 
 
 def verify_instance_network(ec2, cloud_cluster_name, subnet_id, group_id):

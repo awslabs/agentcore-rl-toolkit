@@ -19,7 +19,7 @@ On the machine running the launcher:
 - Linux, Python 3.12 via [uv](https://docs.astral.sh/uv/), Git, SSH, and rsync.
 - AWS credentials with SkyPilot's EC2 provisioning permissions and the scoped IAM
   permissions below. Set `AWS_PROFILE` if using a named profile.
-- A network route to an existing private subnet in `us-west-2`. The subnet must
+- A network route to an existing private subnet in the selected AWS region. The subnet must
   have a unique `Name` tag in the region, because SkyPilot selects it by name.
 - Enough P4d quota and capacity, or a matching accessible capacity reservation.
   The subnet needs outbound HTTPS access for public packages and model weights.
@@ -41,18 +41,34 @@ From this directory:
 export AWS_PROFILE=my-profile
 
 ./deploy.sh \
+  --region us-west-2 \
   --cluster skyrl-tinker-endpoint \
   --subnet-id subnet-YOUR_PRIVATE_SUBNET \
   --client-cidr 10.0.1.10/32
 ```
 
-Optionally add `--reservation cr-YOUR_RESERVATION` for a targeted P4d reservation
-in the selected subnet's AZ. The example pins a CUDA 13 Deep Learning Base
-Ubuntu 22.04 AMI in `us-west-2`; region changes require a matching AMI and retesting.
+`--region` defaults to `us-west-2`; the subnet and optional
+`--reservation cr-YOUR_RESERVATION` must belong to that region, with the
+reservation in the subnet's AZ.
+Use a new cluster name when deploying in another region; an existing EC2
+instance and its EBS volume are not moved between regions by this command.
+
+The launcher finds the official AWS **Deep Learning Base OSS Nvidia Driver GPU
+AMI (Ubuntu 22.04), release 20260922** in the selected region. AMI IDs are regional:
+the same release has a different ID in each region. The release is fixed for
+reproducibility; users do not need to look up or supply its regional ID.
+
+Optionally pass `--image-id ami-YOUR_IMAGE` to override it. A compatible image must
+provide Ubuntu 22.04 with user `ubuntu`, CUDA 13.0 at `/usr/local/cuda-13.0`, an
+NVIDIA driver supporting CUDA 13 (580 or newer), and DLAMI's instance-store mount
+at `/opt/dlami/nvme`. Choosing another image requires validating these assumptions.
+The full endpoint has been exercised in `us-west-2`; matching AMI resolution has
+also been checked in `us-east-1`.
 
 The command:
 
-1. Resolves the subnet and writes an account-scoped IAM policy for the deployer.
+1. Resolves the subnet and regional AMI, and writes an account-scoped IAM policy
+   for the deployer.
 2. Creates the EC2 role and instance profile `skypilot-v1` if missing, then binds
    them. The new role trusts EC2 and has **no AWS resource-access policies**.
 3. Creates a dedicated security group allowing TCP 22 and 18080 from the supplied
@@ -92,7 +108,7 @@ profiles. Preview the deployment without AWS writes:
 
 ```bash
 ./deploy.sh --subnet-id subnet-YOUR_PRIVATE_SUBNET \
-  --client-cidr 10.0.1.10/32 --plan
+  --region us-west-2 --client-cidr 10.0.1.10/32 --plan
 ```
 
 This writes `deployer-iam-policy.json`. Have an administrator create a **customer
@@ -178,5 +194,6 @@ Customer-provided network resources and IAM resources are never deleted; the
 example-created security group also remains for reuse and can be deleted after
 all attached instances are terminated.
 
-SkyRL and model revisions are pinned in `endpoint.yaml`; the standalone
-deployment client depends only on SkyPilot and is locked in `uv.lock`.
+SkyRL and model revisions are pinned in `endpoint.yaml`, and the default DLAMI
+release name is in `aws_setup.py`. The standalone deployment client depends only
+on SkyPilot and is locked in `uv.lock`.
