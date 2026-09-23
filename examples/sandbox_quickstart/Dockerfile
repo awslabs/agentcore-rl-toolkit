@@ -1,6 +1,5 @@
 # A shell IS required in the base image: the sandbox SDK runs commands via
-# AgentCore Runtime's InvokeAgentRuntimeCommand API, which executes shell
-# commands inside this container (scratch/distroless images would break exec).
+# sandboxd process manager, which executes shell commands inside this container (scratch/distroless images would break exec).
 FROM public.ecr.aws/docker/library/debian:bookworm-slim
 
 # Prebuilt static binary — build it first with: ../../sandboxd/build.sh --stage .

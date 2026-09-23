@@ -1,10 +1,9 @@
 """Sync client for running shell commands in AgentCore Runtime sandbox sessions.
 
 A "sandbox" is an AgentCore Runtime session whose container runs the
-``agentcore-sandboxd`` health shim (see ``sandboxd/`` at the repo root). The
-shim only manages the Healthy/HealthyBusy ping state; command execution goes
-through AgentCore Runtime's native ``InvokeAgentRuntimeCommand`` API, which runs
-shell commands inside the same session/container.
+``agentcore-sandboxd`` daemon (see ``sandboxd/`` at the repo root). Commands
+use Runtime Invocation Protocol start/get requests through InvokeAgentRuntime.
+The daemon owns execution and persists results independently of the connection.
 
 Usage:
     from agentcore_rl_toolkit.sandbox import SandboxClient
@@ -15,10 +14,13 @@ Usage:
         print(result.exit_code, result.stdout)
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
 import shlex
+import time
 import uuid
 
 import boto3
@@ -35,44 +37,10 @@ _SESSION_ID_MAX_LEN = 256
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def _wrap_in_shell(command: str, shell: str = "/bin/sh") -> str:
-    """Wrap a shell command string for InvokeAgentRuntimeCommand.
-
-    The command API does NOT interpret the command through a shell — it
-    word-splits argv-style, passing ``;``, ``|``, ``$VAR`` etc. through as
-    literal arguments (verified against the live service; every example in the
-    official docs likewise wraps commands, in ``/bin/bash -c "..."``:
-    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-execute-command.html).
-    Shell semantics therefore require an explicit ``<shell> -c`` wrapper.
-
-    We default to ``/bin/sh`` rather than the docs' ``/bin/bash`` because the
-    sandbox use case targets arbitrary images: POSIX sh exists in any image
-    with a shell at all (including busybox/alpine), while bash is often absent
-    from minimal images.
-
-    Wrapper quoting, per the service tokenizer's semantics (live-verified):
-
-    - Single-quoted args pass through fully verbatim (backslashes untouched),
-      but POSIX quote concatenation (``'it'"'"'s'``) is NOT supported — so the
-      single-quote wrapper only fits commands without single quotes.
-    - Double-quoted args support ``\\"`` and ``\\\\`` escapes, and the tokenizer
-      does NOT expand ``$`` or backticks (they reach the inner shell, which
-      expands them — the semantics we want). Escaping ``\\`` and ``"`` therefore
-      round-trips any command exactly.
-
-    Both forms keep the wire format human-readable — the service logs the input
-    command to the runtime's CloudWatch log group for auditing.
-    """
-    if "'" not in command:
-        return f"{shell} -c '{command}'"
-    escaped = command.replace("\\", "\\\\").replace('"', '\\"')
-    return f'{shell} -c "{escaped}"'
-
-
 def _compose_command(command: str, cwd: str = None, env: dict = None) -> str:
     """Compose cwd/env into a shell command string.
 
-    Commands are stateless — each ``InvokeAgentRuntimeCommand`` runs in a fresh
+    Commands are stateless — each invocation runs in a fresh
     shell, so working directory and environment variables must be re-established
     per call. The user command is appended raw (it is already a shell string);
     only ``cwd`` and env values are quoted.
@@ -90,16 +58,15 @@ def _compose_command(command: str, cwd: str = None, env: dict = None) -> str:
         ValueError: If an env key is not a valid shell identifier.
     """
     prefix = ""
+    # Exit before any part of the user command can run if setup fails.
     if cwd is not None:
-        prefix += f"cd {shlex.quote(cwd)} && "
+        prefix += f"cd {shlex.quote(cwd)} || exit $?; "
     if env:
         for key in env:
             if not _ENV_KEY_RE.match(key):
                 raise ValueError(f"Invalid environment variable name: {key!r}")
         exports = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
-        # && (not ;) so a failed cd cannot fall through to running the command
-        # in the wrong directory with a clean exit code.
-        prefix += f"export {exports} && "
+        prefix += f"export {exports} || exit $?; "
     return prefix + command
 
 
@@ -171,7 +138,7 @@ class SandboxClient:
         )
         self._client = boto3.client("bedrock-agentcore", region_name=self.region, config=config)
 
-    def start(self, session_id: str = None) -> "Sandbox":
+    def start(self, session_id: str = None) -> Sandbox:
         """Start a new sandbox session and flip its ping state to HealthyBusy.
 
         Sends ``{"action": "start"}`` to the runtime's ``/invocations`` endpoint.
@@ -209,7 +176,7 @@ class SandboxClient:
         logger.info(f"Started sandbox session {session_id[:8]}...")
         return Sandbox(self, session_id)
 
-    def attach(self, session_id: str) -> "Sandbox":
+    def attach(self, session_id: str) -> Sandbox:
         """Attach to a live sandbox session without invoking the runtime.
 
         Args:
@@ -224,7 +191,7 @@ class SandboxClient:
         """
         if not (_SESSION_ID_MIN_LEN <= len(session_id) <= _SESSION_ID_MAX_LEN):
             raise ValueError(
-                f"session_id must be {_SESSION_ID_MIN_LEN}-{_SESSION_ID_MAX_LEN} characters, " f"got {len(session_id)}"
+                f"session_id must be {_SESSION_ID_MIN_LEN}-{_SESSION_ID_MAX_LEN} characters, got {len(session_id)}"
             )
         return Sandbox(self, session_id)
 
@@ -242,103 +209,109 @@ class Sandbox:
         self._terminated = False
 
     def exec(
-        self, command: str, timeout: int = None, cwd: str = None, env: dict = None, shell: str = None
-    ) -> ExecResult:
-        """Run a shell command in the sandbox and wait for it to complete.
+        self,
+        command: str,
+        timeout: int = None,
+        cwd: str = None,
+        env: dict = None,
+        shell: str = None,
+        *,
+        background: bool = False,
+        invocation_id: str = None,
+    ) -> ExecResult | ExecHandle:
+        """Run a managed command, waiting by default or returning a background handle.
 
-        Nonzero exit codes and timeouts are returned as data on ``ExecResult``,
-        never raised. Infrastructure failures raise: ``botocore`` ``ClientError``
-        (throttling, session not found) from the call itself,
-        ``EventStreamError`` if botocore surfaces an in-stream error event as an
-        exception, or ``SandboxProtocolError`` if an error event arrives as a
-        stream member or the stream ends without a result.
+        Commands run in a fresh shell (default /bin/sh). ``cwd`` and ``env`` are
+        established per call. Nonzero exits return an ``ExecResult``. Execution
+        timeouts raise ``ExecTimeoutError`` with the captured result in ``.result``
+        and the execution handle in ``.handle``. Each output stream retains its
+        first 256 KiB; the result explicitly marks truncation.
 
-        Commands are stateless — each call runs in a fresh shell. Use ``cwd``
-        and ``env`` to re-establish state per call; they are composed into the
-        command string (``cd ... && export ... && <command>``).
+        ``timeout`` is the daemon-enforced execution deadline in seconds
+        (1–3600, default 300), independent of ``ExecHandle.result(timeout=...)``.
+        It includes output waiting after shell exit. Expiry kills only the
+        direct process and stops reading output; child processes may survive.
+        ``invocation_id`` defaults to a UUID generated before the request. Reuse
+        it to address an existing execution; a repeated start ignores the new
+        command while its record survives. Foreground and background executions
+        use the same manager and persist the same result.
 
-        The command is interpreted by a shell (default ``/bin/sh``): pipes,
-        ``;``, variable expansion and command substitution all work. (On the
-        wire the SDK wraps it in ``<shell> -c`` because the command API itself
-        does not invoke a shell — see ``_wrap_in_shell``.)
-
-        Args:
-            command: Shell command string to execute.
-            timeout: Server-enforced timeout in seconds (1-3600, service default
-                300). On expiry the command is terminated and the result has
-                ``timed_out=True`` with any partial output.
-            cwd: Working directory for the command.
-            env: Environment variables for the command. Keys must be valid shell
-                identifiers.
-            shell: Shell for this command. Defaults to the client's ``shell``
-                (``/bin/sh`` unless configured otherwise).
-
-        Returns:
-            An ``ExecResult`` with exit code, accumulated stdout/stderr, and the
-            timeout flag.
-
-        Raises:
-            RuntimeError: If the sandbox has been terminated. (After
-                ``StopRuntimeSession`` the session id remains valid, so an
-                unguarded exec would silently provision a fresh microVM and run
-                against empty state instead of failing.)
+        ``ExecError.handle`` permits recovery after an ambiguous submission or
+        foreground connection failure. Session termination remains explicit
+        (including context-manager exit). Requires a RIP-capable sandboxd image.
         """
+        self._ensure_active()
+        handle = self.get_exec(invocation_id if invocation_id is not None else str(uuid.uuid4()))
+        body = {
+            "command": _compose_command(command, cwd=cwd, env=env),
+            "shell": shell or self._client.shell,
+        }
+        if timeout is not None:
+            body["timeout"] = timeout
+        try:
+            response = self._invoke_execution("start", handle.invocation_id, background=background, **body)
+        except Exception as exc:
+            raise ExecError("start/wait failed; use this handle to recover the execution", handle) from exc
+        if background:
+            return handle
+        if response["status"] == "in_progress":
+            return handle.result()
+        return handle._result_from_state(response)
+
+    def get_exec(self, invocation_id: str) -> ExecHandle:
+        """Reconstruct a command handle without a network call or starting work."""
+        self._ensure_active()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", invocation_id):
+            raise ValueError(
+                "invocation_id must be 1–128 letters, digits, dots, underscores or hyphens, starting alphanumeric"
+            )
+        return ExecHandle(self, invocation_id)
+
+    def _ensure_active(self):
         if self._terminated:
             raise RuntimeError(
                 f"Sandbox {self.session_id[:8]}... is terminated; use SandboxClient.start() for a new session"
             )
-        composed = _compose_command(command, cwd=cwd, env=env)
-        body = {"command": _wrap_in_shell(composed, shell=shell or self._client.shell)}
-        if timeout is not None:
-            body["timeout"] = timeout
 
-        response = self._client._client.invoke_agent_runtime_command(
+    def _invoke_execution(self, operation: str, invocation_id: str, **body) -> dict:
+        self._ensure_active()
+        config = {"version": 1, "operation": operation, "invocation_id": invocation_id}
+        if operation == "start":
+            config["background"] = body.pop("background")
+        response = self._client._client.invoke_agent_runtime(
             agentRuntimeArn=self._client.runtime_arn,
             runtimeSessionId=self.session_id,
             qualifier=self._client.qualifier,
-            body=body,
+            payload=json.dumps({"_agentcore_runtime": config, **body}),
         )
-
-        stdout_parts = []
-        stderr_parts = []
-        exit_code = None
-        status = None
-        for event in response["stream"]:
-            chunk = event.get("chunk")
-            if chunk is None:
-                # Error events (throttlingException, runtimeClientError, ...) can
-                # arrive as stream members; botocore may instead raise
-                # EventStreamError, which propagates from the iteration above.
-                raise SandboxProtocolError(f"Error event in command stream: {event!r}")
-            if "contentDelta" in chunk:
-                delta = chunk["contentDelta"]
-                if delta.get("stdout"):
-                    stdout_parts.append(delta["stdout"])
-                if delta.get("stderr"):
-                    stderr_parts.append(delta["stderr"])
-            elif "contentStop" in chunk:
-                exit_code = chunk["contentStop"]["exitCode"]
-                status = chunk["contentStop"]["status"]
-            # contentStart: ignore
-
-        if exit_code is None:
-            raise SandboxProtocolError("Command stream ended without a result (no contentStop event)")
-
-        return ExecResult(
-            exit_code=exit_code,
-            stdout="".join(stdout_parts),
-            stderr="".join(stderr_parts),
-            timed_out=(status == "TIMED_OUT"),
-        )
+        stream = response["response"]
+        try:
+            raw = stream.read()
+        finally:
+            stream.close()
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise SandboxProtocolError(f"Non-JSON execution response: {raw[:500]!r}") from None
+        if (
+            not isinstance(result, dict)
+            or result.get("version") != 1
+            or result.get("invocation_id") != invocation_id
+            or result.get("status") not in {"in_progress", "completed", "interrupted", "not_found"}
+        ):
+            raise SandboxProtocolError(
+                f"Unexpected execution response (rebuild the image with a RIP-capable sandboxd): {raw[:500]!r}"
+            )
+        return result
 
     def terminate(self):
         """Terminate the sandbox session (idempotent, best-effort).
 
-        Two steps, both best-effort: flip the ping state back to Healthy via
-        ``{"action": "stop"}`` (so that even if the subsequent stop call fails,
-        the idle reaper collects the session within the idle timeout), then call
-        ``StopRuntimeSession``. Failures are logged as warnings, never raised —
-        this must be safe to call from ``__exit__``.
+        Two steps, both best-effort: release the session hold via
+        ``{"action": "stop"}``, then call ``StopRuntimeSession``. If the stop API
+        fails, the daemon becomes Healthy once active commands finish publishing
+        results, allowing idle reaping. Failures are logged as warnings, never
+        raised — this must be safe to call from ``__exit__``.
         """
         if self._terminated:
             return
@@ -366,8 +339,92 @@ class Sandbox:
         except Exception as e:
             logger.warning(f"Failed to stop runtime session {self.session_id[:8]}...: {e}")
 
-    def __enter__(self) -> "Sandbox":
+    def __enter__(self) -> Sandbox:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.terminate()
+
+
+class ExecHandle:
+    """One command, identified by its sandbox session and invocation ID.
+
+    Save both IDs to recover with ``client.attach(session_id).get_exec(invocation_id)``.
+    Records survive only while the daemon's configured filesystem survives.
+    """
+
+    def __init__(self, sandbox: Sandbox, invocation_id: str):
+        self._sandbox = sandbox
+        self.invocation_id = invocation_id
+        self.session_id = sandbox.session_id
+
+    def status(self) -> str:
+        """Return in_progress, completed, interrupted, or not_found."""
+        return self._sandbox._invoke_execution("get", self.invocation_id)["status"]
+
+    def result(self, timeout: float | None = None) -> ExecResult:
+        """Poll until a terminal result is available.
+
+        ``timeout`` limits local waiting; it never stops the command or session.
+        The deadline is checked between requests. In-flight AWS requests remain
+        subject to the client's socket timeout and retry configuration.
+        ``TimeoutError`` leaves this handle usable for a later wait.
+        A completed execution that exceeded its deadline raises
+        ``ExecTimeoutError`` with the persisted result in ``.result``.
+        """
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be nonnegative")
+        deadline = None if timeout is None else time.monotonic() + timeout
+        interval = 0.1
+        while True:
+            response = self._sandbox._invoke_execution("get", self.invocation_id)
+            if response["status"] != "in_progress":
+                return self._result_from_state(response)
+            delay = interval
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"Invocation {self.invocation_id} is still running")
+                delay = min(delay, remaining)
+            time.sleep(delay)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError(f"Invocation {self.invocation_id} is still running")
+            interval = min(interval * 2, 2.0)
+
+    def _result_from_state(self, response: dict) -> ExecResult:
+        status = response["status"]
+        if status != "completed":
+            raise ExecError(status, self)
+        if "error" in response:
+            error = response["error"]
+            raise ExecError(f"{error['code']}: {error['message']}", self)
+        result = ExecResult(**response["result"])
+        if result.timed_out:
+            raise ExecTimeoutError(self, result)
+        return result
+
+
+class ExecError(RuntimeError):
+    """Execution could not be submitted, recovered, or completed by sandboxd.
+
+    ``handle`` retains the invocation identity, including when an initial network
+    failure leaves submission ambiguous. The original transport error, if any,
+    is available as ``__cause__``. Nonzero command exits remain ``ExecResult`` data.
+    """
+
+    def __init__(self, message: str, handle: ExecHandle):
+        super().__init__(f"Invocation {handle.invocation_id}: {message}")
+        self.handle = handle
+
+
+class ExecTimeoutError(ExecError):
+    """The execution deadline expired, including while waiting for output.
+
+    ``result`` retains captured output, the exit code, and truncation flags.
+    ``handle`` identifies the completed invocation; reading it again raises
+    this exception with the same persisted result.
+    """
+
+    def __init__(self, handle: ExecHandle, result: ExecResult):
+        super().__init__("execution timed out", handle)
+        self.result = result

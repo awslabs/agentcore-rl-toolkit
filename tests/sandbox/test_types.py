@@ -3,7 +3,7 @@
 import pytest
 
 from agentcore_rl_toolkit.sandbox import ExecResult
-from agentcore_rl_toolkit.sandbox.client import _compose_command, _wrap_in_shell
+from agentcore_rl_toolkit.sandbox.client import _compose_command
 
 
 class TestExecResult:
@@ -22,31 +22,40 @@ class TestComposeCommand:
         assert _compose_command("pytest -q") == "pytest -q"
 
     def test_cwd_only(self):
-        assert _compose_command("pytest -q", cwd="/app") == "cd /app && pytest -q"
+        assert _compose_command("pytest -q", cwd="/app") == "cd /app || exit $?; pytest -q"
 
     def test_env_only(self):
-        assert _compose_command("run.sh", env={"FOO": "bar"}) == "export FOO=bar && run.sh"
+        assert _compose_command("run.sh", env={"FOO": "bar"}) == "export FOO=bar || exit $?; run.sh"
 
     def test_cwd_and_env(self):
         composed = _compose_command("pytest -q", cwd="/app", env={"FOO": "bar"})
-        assert composed == "cd /app && export FOO=bar && pytest -q"
+        assert composed == "cd /app || exit $?; export FOO=bar || exit $?; pytest -q"
 
-    def test_failed_cd_never_falls_through_to_command(self):
-        """The whole prefix chains with && — a failed cd must not run the command."""
+    @pytest.mark.parametrize(
+        "shell,kwargs",
+        [
+            ("/bin/sh", {"cwd": "missing"}),
+            ("/bin/bash", {"env": {"SHELLOPTS": "readonly"}}),
+        ],
+    )
+    def test_failed_setup_never_executes_command(self, tmp_path, shell, kwargs):
+        """Neither part of a compound command may run after setup fails."""
         import subprocess
 
-        composed = _compose_command("echo LEAKED", cwd="/nonexistent-dir-xyz", env={"FOO": "bar"})
-        proc = subprocess.run(["/bin/sh", "-c", composed], capture_output=True, text=True)
+        # SHELLOPTS is readonly in Bash, so exporting it fails.
+        composed = _compose_command("echo FIRST; touch executed", **kwargs)
+        proc = subprocess.run([shell, "-c", composed], cwd=tmp_path, capture_output=True, text=True)
         assert proc.returncode != 0
-        assert "LEAKED" not in proc.stdout
+        assert proc.stdout == ""
+        assert not (tmp_path / "executed").exists()
 
     def test_multiple_env_vars(self):
         composed = _compose_command("cmd", env={"A": "1", "B": "2"})
-        assert composed == "export A=1 B=2 && cmd"
+        assert composed == "export A=1 B=2 || exit $?; cmd"
 
     def test_quoting_value_with_spaces(self):
         composed = _compose_command("cmd", env={"MSG": "hello world"})
-        assert composed == "export MSG='hello world' && cmd"
+        assert composed == "export MSG='hello world' || exit $?; cmd"
 
     def test_quoting_value_with_single_quote(self):
         composed = _compose_command("cmd", env={"MSG": "it's"})
@@ -54,14 +63,14 @@ class TestComposeCommand:
         # shlex.quote produces a shell-safe form; exact escaping is delegated
         import shlex
 
-        assert shlex.split(composed.removeprefix("export ").removesuffix(" && cmd"))[0] == "MSG=it's"
+        assert shlex.split(composed.removeprefix("export ").removesuffix(" || exit $?; cmd"))[0] == "MSG=it's"
 
     def test_quoting_cwd_with_spaces(self):
         composed = _compose_command("ls", cwd="/tmp/my dir")
-        assert composed == "cd '/tmp/my dir' && ls"
+        assert composed == "cd '/tmp/my dir' || exit $?; ls"
 
     def test_non_string_env_value_coerced(self):
-        assert _compose_command("cmd", env={"N": 3}) == "export N=3 && cmd"
+        assert _compose_command("cmd", env={"N": 3}) == "export N=3 || exit $?; cmd"
 
     def test_invalid_env_key_raises(self):
         with pytest.raises(ValueError, match="Invalid environment variable name"):
@@ -70,31 +79,3 @@ class TestComposeCommand:
     def test_env_key_injection_raises(self):
         with pytest.raises(ValueError):
             _compose_command("cmd", env={"X; rm -rf /": "x"})
-
-
-class TestWrapInShell:
-    def test_simple_command(self):
-        assert _wrap_in_shell("echo hi") == "/bin/sh -c 'echo hi'"
-
-    def test_shell_metacharacters_preserved(self):
-        assert _wrap_in_shell("echo one; echo two | wc -l") == "/bin/sh -c 'echo one; echo two | wc -l'"
-
-    def test_double_quotes_ok(self):
-        assert _wrap_in_shell('echo "a b"') == "/bin/sh -c 'echo \"a b\"'"
-
-    def test_single_quote_switches_to_double_quote_wrapper(self):
-        # The docs pattern: single quotes ride inside a double-quoted wrapper.
-        assert _wrap_in_shell("echo it's fine") == '/bin/sh -c "echo it\'s fine"'
-
-    def test_double_quote_wrapper_escapes_double_quotes(self):
-        assert _wrap_in_shell("echo 'a' \"b\"") == '/bin/sh -c "echo \'a\' \\"b\\""'
-
-    def test_double_quote_wrapper_escapes_backslashes(self):
-        # Tokenizer consumes one escaping level in double quotes: \\ -> \.
-        assert _wrap_in_shell(r"echo 'a\tb'") == "/bin/sh -c \"echo 'a\\\\tb'\""
-
-    def test_custom_shell(self):
-        assert _wrap_in_shell("echo hi", shell="/bin/bash") == "/bin/bash -c 'echo hi'"
-
-    def test_custom_shell_double_quote_path(self):
-        assert _wrap_in_shell("echo it's", shell="/bin/bash") == '/bin/bash -c "echo it\'s"'

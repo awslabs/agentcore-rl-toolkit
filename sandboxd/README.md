@@ -1,46 +1,116 @@
 # agentcore-sandboxd
 
-A minimal (stdlib-only) Go server that makes arbitrary Docker images satisfy the
-[Bedrock AgentCore Runtime container contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html)
-so they can be used as command-execution sandboxes.
+A small, stdlib-only Go daemon that makes arbitrary images satisfy the
+[AgentCore Runtime container contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html).
+It owns shell commands and their results independently of client connections.
+The Python Sandbox SDK calls it through `InvokeAgentRuntime`.
 
-It does exactly one thing: hold a busy/healthy flag.
+For the SDK architecture and design decisions, see
+[Sandbox SDK design](../designs/sandbox_sdk.md).
 
-- `GET /ping` → `{"status": "Healthy" | "HealthyBusy"}`. While `HealthyBusy`, AgentCore
-  keeps the runtime session alive past its idle timeout.
-- `POST /invocations` with `{"action": "start"}` → flips to busy; `{"action": "stop"}` →
-  flips back to healthy; `{"action": "status"}` → reports without changing state.
-  Unknown JSON fields are ignored (forward compatibility).
+## Session and execution lifecycle
 
-Command execution is **not** handled here — the sandbox SDK
-(`agentcore_rl_toolkit.sandbox`) uses AgentCore Runtime's native
-`InvokeAgentRuntimeCommand` API, which runs shell commands in the container
-independently of this server.
+- `GET /ping` reports `HealthyBusy` while the session is explicitly held or a
+  command is executing/publishing its result; otherwise it reports `Healthy`.
+- `POST /invocations` with `{"action":"start"}` holds the session;
+  `{"action":"stop"}` releases the hold; `{"action":"status"}` reads it.
+  Releasing the hold does not cancel running commands. The SDK separately calls
+  `StopRuntimeSession` to terminate the environment.
+- Versioned RIP `start/get` requests manage individual executions. Foreground
+  requests wait for completion; background requests return immediately after
+  registration. Both modes use the same process manager and persisted result.
 
-## Build
-
-```bash
-./build.sh                       # arm64 (AgentCore's platform), -> dist/agentcore-sandboxd-linux-arm64
-./build.sh --arch amd64          # for local testing on x86 hosts
-./build.sh --stage ../examples/sandbox_quickstart   # also copy into a Docker build context
+```json
+{
+  "_agentcore_runtime": {
+    "version": 1,
+    "operation": "start",
+    "invocation_id": "command-123",
+    "background": true
+  },
+  "command": "pytest -q",
+  "shell": "/bin/sh",
+  "timeout": 900
+}
 ```
 
-Requires either a local Go toolchain (≥1.21) or Docker (the script falls back to
-building inside a `golang` container — no qemu needed, Go cross-compiles natively).
+`version` identifies the RIP request/response format shared by the SDK and daemon.
+Both currently support only version `1`; the daemon rejects other versions.
+SDK or daemon releases that keep the same protocol format keep this value.
 
-## Test
+Use the same envelope with `operation: "get"`, without command input, to retrieve
+status and the final result. IDs are 1–128 characters, start with an ASCII letter
+or digit, and contain only letters, digits, `.`, `_`, and `-`.
+
+A response contains `version`, `invocation_id`, and `status`:
+
+- `in_progress`: a registered execution still owns the command.
+- `completed`: `result` contains `exit_code`, `stdout`, `stderr`, `timed_out`,
+  `stdout_truncated`, and `stderr_truncated`; infrastructure execution failures
+  instead contain an `error` with `code` and `message`.
+- `interrupted`: a start record survives but there is no tracked execution or
+  terminal result. The daemon does not adopt or rerun orphaned processes.
+- `not_found`: no invocation record exists in this store.
+
+Reusing an invocation ID addresses its existing execution and ignores the newly
+supplied command. Identical commands with different IDs execute independently.
+A start record is written before launching work. Terminal state is atomically
+published before reporting completion. Persistence failures never report success.
+
+## Process and storage scope
+
+Commands run as `<shell> -c <command>`, defaulting to `/bin/sh`, with inherited
+container environment and working directory. Completion waits for the shell to
+exit and stdout/stderr to reach EOF. The execution deadline defaults to 300 seconds
+(range 1–3600), including output waiting. On expiry, only the direct process is
+killed and output readers are closed; the result has `timed_out=true` and captured
+output. Descendants may survive completion or timeout until session termination.
+
+Output is drained independently of HTTP clients. The first **256 KiB per stream**
+is saved to disk; subsequent bytes are discarded and explicitly marked truncated.
+There is no real-time output subscription or replay API in this version.
+
+`--state-dir` selects the store root (default: `agentcore-sandboxd` beneath the
+OS temporary directory, which honors `TMPDIR`). One daemon owns one root:
+
+```text
+<state-dir>/<invocation-id>/
+  started.json
+  stdout
+  stderr
+  result.json
+```
+
+Records are retained until the store is removed. The local store survives requests
+and daemon restarts, **not compute replacement**; store loss also loses deduplication
+history. Managed-storage stop/resume is not validated.
+Code inside the sandbox can access these files; they are not a security boundary.
+
+See [process ownership, storage, and output](../designs/sandbox_sdk.md#process-ownership-storage-and-output)
+for the lifecycle and persistence decisions.
+
+## Build and test
 
 ```bash
+./build.sh                       # arm64 -> dist/agentcore-sandboxd-linux-arm64
+./build.sh --arch amd64          # local x86 testing
+./build.sh --stage ../examples/sandbox_quickstart
+
 go test -race ./...
 ```
+
+Requires Go ≥1.21 or Docker (the build script can use a Go container).
+The binary is static and the sandbox image needs only the binary and a shell.
 
 ## Local smoke test
 
 ```bash
-go run . &
-curl -s localhost:8080/ping                                            # {"status":"Healthy"}
-curl -s -XPOST localhost:8080/invocations -d '{"action":"start"}'      # {"status":"ok","state":"busy"}
-curl -s localhost:8080/ping                                            # {"status":"HealthyBusy"}
-curl -s -XPOST localhost:8080/invocations -d '{"action":"stop"}'       # {"status":"ok","state":"healthy"}
-curl -s localhost:8080/ping                                            # {"status":"Healthy"}
+go run . --state-dir "$TMPDIR/sandboxd-records" &
+curl -s localhost:8080/ping
+curl -s -X POST localhost:8080/invocations -d '{"action":"start"}'
+curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"demo","background":true},"command":"sleep 1; echo done"}'
+curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":1,"operation":"get","invocation_id":"demo"}}'
 ```
+
+The HTTP address defaults to `0.0.0.0:8080`; `--listen` permits an alternate local
+test address. AgentCore deployments must keep port 8080.

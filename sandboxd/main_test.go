@@ -11,9 +11,14 @@ import (
 
 func newTestServer(t *testing.T) (*httptest.Server, *serverState) {
 	t.Helper()
-	s := &serverState{}
+	manager, err := newProcessManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &serverState{processes: manager}
 	srv := httptest.NewServer(newMux(s))
 	t.Cleanup(srv.Close)
+	t.Cleanup(manager.close)
 	return srv, s
 }
 

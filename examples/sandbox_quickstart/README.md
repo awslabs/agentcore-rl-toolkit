@@ -2,14 +2,15 @@
 
 Run shell commands in an arbitrary Docker image deployed as a Bedrock AgentCore
 Runtime sandbox. This example wraps a plain `debian:bookworm-slim` image with the
-`agentcore-sandboxd` health shim and drives it with the sync sandbox client
+`agentcore-sandboxd` daemon and drives it with the sync sandbox client
 (`agentcore_rl_toolkit.sandbox.SandboxClient`).
 
 How it works: `agentcore-sandboxd` (a tiny Go binary, source in
 [`sandboxd/`](../../sandboxd/)) satisfies AgentCore Runtime's container contract
 (`/ping`, `/invocations` on port 8080) and manages the Healthy/HealthyBusy session
-state. Command execution uses AgentCore Runtime's native
-`InvokeAgentRuntimeCommand` API — no exec daemon runs inside the image.
+state. Commands use RIP `start/get` over `InvokeAgentRuntime`; the daemon owns
+execution and saves results independently of the client connection. Rebuild the
+image when upgrading from the older health-only daemon.
 
 > **Note:** The base image must contain a shell (`/bin/sh`): commands are executed
 > as shell commands inside the container. `scratch`/distroless images will not work.
@@ -62,11 +63,9 @@ uv run python deploy.py
 ```
 
 `deploy.py` creates (or updates) the runtime from the pushed image and prints the
-runtime ARN when the endpoint is ready. Like `build_and_push.sh`, it is temporary
-scaffolding — a future phase moves provisioning into the SDK (`SandboxClient.create()`).
+runtime ARN when the endpoint is ready.
 
 The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`,
-`bedrock-agentcore:InvokeAgentRuntimeCommand`, and
 `bedrock-agentcore:StopRuntimeSession` on the runtime.
 
 ## 3. Run the demo
@@ -87,20 +86,39 @@ stdout: hi from /tmp
 Sandbox terminated.
 ```
 
-Failing commands are results, not exceptions — `sb.exec("exit 3")` returns
-`ExecResult(exit_code=3, ...)`. Timeouts likewise: `result.timed_out` is `True`
-and any partial output is retained.
+Nonzero exits return results: `sb.exec("exit 3")` returns
+`ExecResult(exit_code=3, ...)`. Execution timeouts raise `ExecTimeoutError`;
+its `.result` retains partial output and the exit code, and `.handle` identifies
+the execution.
+
+```python
+from agentcore_rl_toolkit.sandbox import ExecTimeoutError
+
+with client.start() as sb:
+    try:
+        result = sb.exec("printf before; sleep 5", timeout=1)
+    except ExecTimeoutError as error:
+        print(error.result.stdout)  # before
+```
+
+## Background commands and recovery
+
+```python
+with client.start() as sb:
+    handle = sb.exec("sleep 2; printf done", background=True)
+    # Save sb.session_id and handle.invocation_id to transfer to another client.
+    existing_handle = client.attach(sb.session_id).get_exec(handle.invocation_id)
+    result = existing_handle.result(timeout=30)
+    print(result.stdout)  # done
+```
+
+Exiting the context terminates the session, including unfinished commands. Use
+explicit `start()`/`terminate()` when transferring ownership beyond this scope.
+A local result-wait timeout raises `TimeoutError` and leaves the command running.
+See the [SDK design](../../designs/sandbox_sdk.md) for recovery, error handling,
+and storage/output limits.
 
 ## Local smoke test (no AWS needed)
 
-The server is plain HTTP, so you can exercise the contract locally:
-
-```bash
-../../sandboxd/build.sh --arch amd64        # match your host arch
-../../sandboxd/dist/agentcore-sandboxd-linux-amd64 &
-curl -s localhost:8080/ping                                          # {"status":"Healthy"}
-curl -s -XPOST localhost:8080/invocations -d '{"action":"start"}'    # {"status":"ok","state":"busy"}
-curl -s localhost:8080/ping                                          # {"status":"HealthyBusy"}
-curl -s -XPOST localhost:8080/invocations -d '{"action":"stop"}'
-kill %1
-```
+Follow the [daemon's local smoke test](../../sandboxd/README.md#local-smoke-test)
+to exercise session actions and command execution over plain HTTP.
