@@ -1,15 +1,16 @@
-"""``TinkerSdkBackend`` — in-process sampling via the Tinker SDK (no HTTP).
+"""``TinkerSdkBackend`` — token sampling through the Tinker SDK.
 
 Wraps a Tinker ``SamplingClient``: rendering is done by the gateway (Tinker cannot
-render itself — see :class:`TinkerRenderer`), and this backend only samples token_ids
+render itself — use :class:`HfTemplateRenderer`), and this backend only samples token_ids
 -> token_ids + logprobs.
 
-``tinker`` is imported lazily so the core stays torch-free. Install ``tinker`` manually
-(it requires Python >=3.11) to use this backend.
+Install the ``tinker_api`` or ``tinker_skyrl`` extra to use this backend.
 """
 
 import logging
 from typing import Any
+
+import tinker
 
 from ..trajectory import TurnRecord
 
@@ -38,14 +39,12 @@ class TinkerSdkBackend:
         image_data: Any = None,
         video_data: Any = None,
     ) -> TurnRecord:
-        import tinker  # lazy: pulls torch via tinker; only when this backend is used
-
         model_input = tinker.ModelInput.from_ints(list(prompt_ids))
         sp = tinker.SamplingParams(
             max_tokens=int(sampling_params.get("max_new_tokens", 4096)),
             temperature=sampling_params.get("temperature", 1.0),
             top_p=sampling_params.get("top_p", 1.0),
-            stop=sampling_params.get("stop") or [],
+            stop=sampling_params.get("stop"),
         )
         result = await self.sampling_client.sample_async(prompt=model_input, num_samples=1, sampling_params=sp)
         seq = result.sequences[0]
