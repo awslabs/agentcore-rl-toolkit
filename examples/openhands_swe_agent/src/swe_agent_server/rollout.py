@@ -7,20 +7,16 @@ import tempfile
 
 from swe_agent_server.observability import configure_openhands_tracing
 
-from agentcore_rl_toolkit.rollout_session.wire import (
-    RolloutDumpResponse,
-    RolloutSetupRequest,
-    RolloutStartRequest,
-)
+from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
 
-def run_rollout(payload: RolloutStartRequest) -> RolloutDumpResponse:
+def run_rollout(task_input: dict) -> RolloutDumpResponse:
     """Dispatch a rollout to the requested agent backend.
 
     Backends are imported lazily so a deployment only needs the SDK for the ones it
     actually runs.
     """
-    match payload.task_input["agent"]:
+    match task_input["agent"]:
         case "openhands":
             # Must precede the import, which initialises OpenHands' tracing layer.
             configure_openhands_tracing()
@@ -34,15 +30,15 @@ def run_rollout(payload: RolloutStartRequest) -> RolloutDumpResponse:
             from swe_agent_server.noop_agent import rollout
         case unknown:
             raise ValueError(f"Unknown agent backend: {unknown!r}")
-    return rollout(payload)
+    return rollout(task_input)
 
 
-def run_setup(request: RolloutSetupRequest):
+def run_setup(task_input: dict):
     # The unpack script reads the fields it needs out of this JSON file (e.g. via jq).
     fd, task_path = tempfile.mkstemp(suffix=".json", prefix="swe_task_")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(request.task_input, f)
+            json.dump(task_input, f)
         result = subprocess.run(
             [
                 "/agent/swe_unpack.sh",
@@ -56,8 +52,8 @@ def run_setup(request: RolloutSetupRequest):
     _check("swe_unpack.sh", result)
 
     # Must run after unpack: it patches the checkout unpack just created.
-    if request.task_input.get("test_patch_applied"):
-        apply_test_patch(request.task_input)
+    if task_input.get("test_patch_applied"):
+        apply_test_patch(task_input)
 
 
 def apply_test_patch(task_input: dict) -> None:

@@ -4,9 +4,6 @@ from typing import Required, TypedDict
 
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict
 
-from .agentcore_http_session import AgentCoreHttpSession
-from .agentcore_s3_session import AgentCoreS3Session, get_or_create_rollout_client
-from .docker_session import DockerSession
 from .lifecycle import RolloutSession
 
 
@@ -41,24 +38,28 @@ def make_session(
 ) -> RolloutSession:
     """Construct the rollout session named by ``cfg["backend"]``."""
     kind = cfg["backend"]
-    if kind == "agentcore_http":
+    if kind == "agentcore_a2a":
+        from .agentcore_a2a_session import AgentCoreA2ASession
+
         runtime_arn = cfg.get("agentcore_runtime_arn")
         capacity_provider_arn = cfg.get("capacity_provider_arn")
         assert runtime_arn is not None and capacity_provider_arn is not None
-        return AgentCoreHttpSession(
+        return AgentCoreA2ASession(
             session_id,
             session_state=meta,
             runtime_arn=runtime_arn,
             capacity_provider_arn=capacity_provider_arn,
         )
-    if kind == "docker":
+    if kind == "docker_a2a":
+        from .docker_a2a_session import DockerA2ASession
+
         agent_image_uri = cfg.get("agent_image_uri")
         iam_role_arn = cfg.get("docker_iam_role_arn")
         log_group = cfg.get("docker_log_group")
         log_region = cfg.get("docker_log_region")
         assert agent_image_uri is not None and iam_role_arn is not None
         assert log_group is not None and log_region is not None
-        return DockerSession(
+        return DockerA2ASession(
             session_id,
             session_state=meta,
             agent_image_uri=agent_image_uri,
@@ -67,6 +68,8 @@ def make_session(
             log_region=log_region,
         )
     if kind == "agentcore_s3":
+        from .agentcore_s3_session import AgentCoreS3Session, get_or_create_rollout_client
+
         runtime_arn = cfg.get("agentcore_runtime_arn")
         rollout_output_s3 = cfg.get("rollout_output_s3")
         experiment_name = cfg.get("experiment_name")
@@ -82,5 +85,5 @@ def make_session(
         )
         return AgentCoreS3Session(session_id, session_state=meta, client=client)
     raise ValueError(
-        f"Unknown rollout_session_backend.backend={kind!r}, expected 'agentcore_http', 'agentcore_s3' or 'docker'"
+        f"Unknown rollout_session_backend.backend={kind!r}, expected 'agentcore_a2a', 'agentcore_s3' or 'docker_a2a'"
     )

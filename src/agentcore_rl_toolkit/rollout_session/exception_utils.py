@@ -38,7 +38,7 @@ def describe_with_root_cause(exc: BaseException) -> str:
     """``exc`` for a one-line log, naming what it was raised over when that differs.
 
     Use in the message itself, not as a substitute for ``exc_info``: a teardown error is
-    unreadable on its own -- see :meth:`AgentCoreHttpSession.__aexit__` -- and the summary
+    unreadable on its own and the summary
     line is what anyone triaging a burst of failures actually scans.
     """
     root = root_cause(exc)

@@ -2,15 +2,19 @@
 lifetime, and small shared helpers.
 """
 
+import asyncio
 import datetime as dt
 import logging
 import threading
 from asyncio import Lock
 from functools import lru_cache
 from threading import local
+from typing import Any
 
 import aioboto3
 import boto3
+import httpx
+from botocore.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +138,6 @@ class LongLivedCredentials:
         return float("inf") if remaining is None else remaining
 
     def _initialize(self) -> None:
-        from botocore.session import Session
-
         # One Session for the whole process rather than the thread-local
         # get_boto3_session(), so the credential chain is walked exactly once.
         self._session = Session()
@@ -189,3 +191,83 @@ def tags_to_map(tags):
     for line in tags:
         d[line["Key"]] = line["Value"]
     return d
+
+
+# --- SigV4-signing shared httpx client -----------------------------------------
+#
+# A process-wide httpx client that SigV4-signs every request with the ambient AWS
+# credentials, for talking to AWS HTTP endpoints that expect SigV4 (not just A2A).
+
+
+class SigV4HttpxAuth(httpx.Auth):
+    """httpx auth that SigV4-signs each request with the process's AWS credentials.
+
+    Credentials are frozen per request so a refresh (assume-role, IMDS) is picked up
+    without rebuilding the client. Existing headers are signed too.
+    """
+
+    def __init__(self, credentials: Any, region: str, service: str):
+        self._credentials = credentials
+        self._region = region
+        self._service = service
+
+    async def async_auth_flow(self, request: httpx.Request):
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+
+        frozen = await self._credentials.get_frozen_credentials()
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=dict(request.headers),
+        )
+        SigV4Auth(frozen, self._service, self._region).add_auth(aws_request)
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+# One httpx client per (loop, region, service) rather than per caller; keyed by loop
+# because the connection pool belongs to the loop that created it. Mirrors
+# `shared_agentcore_client`.
+_shared_httpx: dict[tuple[asyncio.AbstractEventLoop, str, str], httpx.AsyncClient] = {}
+_httpx_locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+
+
+def _httpx_lock(loop: asyncio.AbstractEventLoop) -> asyncio.Lock:
+    lock = _httpx_locks.get(loop)
+    if lock is None:
+        lock = _httpx_locks[loop] = asyncio.Lock()
+    return lock
+
+
+async def shared_sigv4_httpx_client(region: str, service: str) -> httpx.AsyncClient:
+    """The process-wide SigV4-signing httpx client for ``(region, service)``, opened on first use.
+
+    Closed only by :func:`close_shared_sigv4_httpx_clients` (tests, worker teardown).
+    """
+    loop = asyncio.get_running_loop()
+    key = (loop, region, service)
+    client = _shared_httpx.get(key)
+    if client is not None:
+        return client
+    async with _httpx_lock(loop):
+        client = _shared_httpx.get(key)
+        if client is None:
+            session = await get_aioboto3_session()
+            credentials = await session.get_credentials()
+            client = httpx.AsyncClient(
+                auth=SigV4HttpxAuth(credentials, region, service),
+                timeout=httpx.Timeout(60.0),
+            )
+            _shared_httpx[key] = client
+            logger.info("opened the shared SigV4 httpx client for %s (%s)", region, service)
+        return client
+
+
+async def close_shared_sigv4_httpx_clients() -> None:
+    """Close this loop's shared SigV4 httpx clients; the next call reopens one."""
+    loop = asyncio.get_running_loop()
+    _httpx_locks.pop(loop, None)
+    for key in [k for k in _shared_httpx if k[0] is loop]:
+        await _shared_httpx.pop(key).aclose()

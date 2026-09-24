@@ -1,7 +1,6 @@
 """A rollout session that drives an ``AgentCoreRLApp`` agent through :class:`RolloutClient`.
 
-:mod:`.agentcore_http_session` and :mod:`.docker_session` speak the four-POST :mod:`.wire`
-protocol to an agent server built for training. This session instead wraps the agent
+This session wraps the agent
 contract that already exists in production: an ``AgentCoreRLApp`` with
 ``@app.rollout_entrypoint``, invoked once fire-and-forget, whose result dict lands in S3
 for a :class:`RolloutFuture` to poll. An agent already deployed for batch evaluation

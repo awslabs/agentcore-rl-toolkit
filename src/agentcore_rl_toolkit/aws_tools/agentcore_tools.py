@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 # botocore's default of 10 would queue session starts behind the pool. Connections open
 # lazily, so unused headroom costs nothing.
 MAX_POOL_CONNECTIONS = 512
+COMMAND_READ_TIMEOUT = 1200
 
 SESSION_CLIENT_CONFIG = Config(
     retries={"max_attempts": 16, "mode": "standard"},
     max_pool_connections=MAX_POOL_CONNECTIONS,
+    read_timeout=COMMAND_READ_TIMEOUT,
 )
 
 # The warm-up in `start_agentcore_session` races the container's own start-up: ACR creates

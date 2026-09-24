@@ -24,6 +24,9 @@ RUNTIME_LIFECYCLE = {
     "maxLifetime": 3600,
 }
 
+RUNTIME_PROTOCOL = {"serverProtocol": "A2A"}
+RUNTIME_REQUEST_HEADERS = {"requestHeaderAllowlist": ["A2A-Version"]}
+
 # The same for an unclaimed instance in the pool.
 INSTANCE_LIFECYCLE = {
     "idleInstanceTimeout": 3600,
@@ -264,6 +267,8 @@ async def create_agentcore_runtime(
             roleArn=role_arn,
             capacityProviderConfiguration={"capacityProviderArn": capacity_provider_arn},
             lifecycleConfiguration=RUNTIME_LIFECYCLE,
+            protocolConfiguration=RUNTIME_PROTOCOL,
+            requestHeaderConfiguration=RUNTIME_REQUEST_HEADERS,
         )
         runtime_id = resp["agentRuntimeId"]
         await _wait_ready(
@@ -290,6 +295,8 @@ async def update_agentcore_runtime(
             roleArn=role_arn,
             capacityProviderConfiguration={"capacityProviderArn": capacity_provider_arn},
             lifecycleConfiguration=RUNTIME_LIFECYCLE,
+            protocolConfiguration=RUNTIME_PROTOCOL,
+            requestHeaderConfiguration=RUNTIME_REQUEST_HEADERS,
         )
         return await _wait_ready(
             lambda: acrc.get_agent_runtime(agentRuntimeId=runtime_id),

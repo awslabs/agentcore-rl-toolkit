@@ -82,7 +82,7 @@ class FakeSession:
 def patched(sts: FakeSTS, ambient: FakeCredentials | None = None):
     """Patch the Session the class constructs; returns (patch, fake session)."""
     session = FakeSession(sts, ambient if ambient is not None else FakeCredentials())
-    return mock.patch("botocore.session.Session", return_value=session), session
+    return mock.patch(f"{MODULE}.Session", return_value=session), session
 
 
 class DefaultsTest(unittest.TestCase):
@@ -234,7 +234,7 @@ class AmbientFallbackTest(unittest.TestCase):
 
     def test_no_credentials_at_all_raises(self):
         sts = FakeSTS(USER_ARN)
-        patch = mock.patch("botocore.session.Session", return_value=FakeSession(sts, None))
+        patch = mock.patch(f"{MODULE}.Session", return_value=FakeSession(sts, None))
         with patch:
             with self.assertRaises(RuntimeError):
                 LongLivedCredentials().load()

@@ -16,8 +16,6 @@ from swe_agent_server.strands_agent import (
     _ToolTimingHooks,
 )
 
-from agentcore_rl_toolkit.rollout_session.wire import RolloutStartRequest
-
 
 def _fake_response(content: str = "hello") -> SimpleNamespace:
     """A non-streaming LiteLLM completion response, shaped as the re-emit path
@@ -104,14 +102,11 @@ class RolloutTest(unittest.TestCase):
         async def fake_acompletion(self, litellm_request):
             return response
 
-        request = RolloutStartRequest(
-            rollout_id="r",
-            task_input=dict(
-                repo_path="/tmp",
-                base_commit="HEAD",
-                problem_statement="fix it",
-                llm=dict(model="openai/test", base_url="x", api_key="k"),
-            ),
+        request = dict(
+            repo_path="/tmp",
+            base_commit="HEAD",
+            problem_statement="fix it",
+            llm=dict(model="openai/test", base_url="x", api_key="k"),
         )
 
         with (
@@ -130,8 +125,8 @@ class RolloutTest(unittest.TestCase):
 
 
 class BackendDispatchTest(unittest.TestCase):
-    def _request(self, agent: str) -> RolloutStartRequest:
-        return RolloutStartRequest(rollout_id="r", task_input={"agent": agent})
+    def _request(self, agent: str) -> dict:
+        return {"agent": agent}
 
     def test_dispatches_to_strands_backend(self):
         from swe_agent_server import app

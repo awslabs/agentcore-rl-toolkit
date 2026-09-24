@@ -44,4 +44,4 @@ COPY src ./src/
 
 RUN ./copy.sh
 CMD ["/agent/entrypoint.sh"]
-EXPOSE 8080
+EXPOSE 9000
