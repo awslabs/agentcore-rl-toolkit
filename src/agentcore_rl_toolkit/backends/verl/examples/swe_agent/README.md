@@ -196,8 +196,14 @@ unless the backend is `agentcore` and `dynamodb_table` is set.
 
 - No `data.custom_cls` is set: verl's default `RLHFDataset` returns the whole parquet
   row, so the extra columns `preprocess.py` writes (`task_id`, `eval_script`,
-  `docker_image_uri`, `repo_path`) reach the container as task fields, and
-  `extra_info.index` becomes the `task_id` the loop groups rollouts by.
+  `test_patch_script`, `docker_image_uri`, `repo_path`) reach the container as task
+  fields, and `extra_info.index` becomes the `task_id` the loop groups rollouts by.
+- `task_kwargs` is merged over that row and passed through uninterpreted, so it is
+  where a run-level task option goes. `test_patch_applied` is one: with it set, the
+  setup stage runs the row's `test_patch_script`, and the agent sees the tests it is
+  graded on. Grading is unaffected -- the eval script resets and re-applies the same
+  patch -- so the flag can be flipped over an unchanged parquet. See "Showing the agent
+  the tests it is graded on" in the example's own README.
 - The gateway runs in `history_mode: linear` to keep append-only history in one
   training record. This example's rollout loop currently keeps only the record
   with the most trainable tokens when multiple records are captured.

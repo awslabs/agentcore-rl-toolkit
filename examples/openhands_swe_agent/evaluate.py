@@ -23,7 +23,8 @@ from config import (
 # All flavors imported so switching a run over is just uncommenting a line in the grid;
 # the ones left commented out are unused imports by definition, hence the noqa.
 from rollout_batch import (  # noqa: F401
-    BedrockEndpoint,
+    BedrockConverseEndpoint,
+    BedrockMantleEndpoint,
     EvalConfig,
     NullEndpoint,
     VllmGatewayEndpoint,
@@ -41,7 +42,7 @@ REPORT_DIR = str(LOCAL_DIR)
 # --- dataset slices -----------------------------------------------------------
 # Built parquets by dataset key, so a rebuilt dataset is the one the next eval reads. A
 # filtered cut lives under its own name and is the case for stating a path.
-SWE_GYM = str(dataset_parquet("swegym"))
+SWE_GYM = str(dataset_parquet("swegym_tps_r2"))
 # SWE_BENCH = str(dataset_parquet("swebench"))
 
 
@@ -52,7 +53,7 @@ def implies(a, b):
 # Task matrix: one EvalConfig per experiment run (edit and re-run).
 EVAL_CONFIGS = [
     EvalConfig(
-        experiment_name=f"eval_gym_{endpoint.model.split('/')[-1]}_n{n}_{agent}_r1",
+        experiment_name=f"eval_gym_{endpoint.model.split('/')[-1]}_n{n}_{agent}_tpa_r1",
         endpoint=endpoint,
         dataset=SWE_GYM,
         num_tasks=None,
@@ -64,11 +65,15 @@ EVAL_CONFIGS = [
         task_kwargs=dict(
             agent=agent,
             docker_image_namespace=TASK_IMAGE_NAMESPACE,
+            # Lets the agent see the tests it's graded on; grading resets them either way.
+            test_patch_applied=True,
         ),
     )
     for endpoint in [
-        NullEndpoint(),
-        BedrockEndpoint(model="openai/qwen.qwen3-coder-30b-a3b-instruct", region="us-west-2"),
+        # NullEndpoint(),
+        # BedrockMantleEndpoint(model="openai/qwen.qwen3-coder-30b-a3b-instruct", region="us-west-2"),
+        # BedrockMantleEndpoint(model="openai/qwen.qwen3-coder-30b-a3b-instruct", region="us-west-2"),
+        BedrockConverseEndpoint(model="us.anthropic.claude-sonnet-4-6", region="us-west-2"),
         # VllmGatewayEndpoint(
         #     model="qwen.qwen3-coder-30b-a3b-instruct",
         #     vllm_url="http://INFERENCE_SERVER:8000",

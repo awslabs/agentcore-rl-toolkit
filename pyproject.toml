@@ -182,7 +182,7 @@ swe-agent = [
     "datasets",
     "polars>=1.41.2",
     # evaluate.py reaches these two through the example's own rollout_batch.py:
-    # run_eval's progress bar over the rollout fan-out, and BedrockEndpoint minting a
+    # run_eval's progress bar over the rollout fan-out, and BedrockMantleEndpoint minting a
     # Bedrock bearer token. Both are imported inside the functions that use them, so
     # they are needed to *run* an eval, not to import the module.
     "tqdm",

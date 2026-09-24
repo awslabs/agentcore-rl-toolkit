@@ -1,8 +1,18 @@
-"""Unit tests for the OpenHands agent backend's metric-extraction helpers."""
+"""Unit tests for the OpenHands agent backend's metric-extraction helpers and tool specs."""
 
+import inspect
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
+from openhands.tools import FileEditorTool, TerminalTool
+from openhands.tools.terminal.definition import TerminalAction
+from openhands.tools.terminal.impl import TerminalExecutor
 from swe_agent_server.open_hands_agent import (
+    NO_PAGER_ENV,
+    build_tools,
     compute_llm_latency_sum,
     compute_token_metrics,
 )
@@ -106,6 +116,52 @@ class ComputeTokenMetricsTest(unittest.TestCase):
         }
 
         self.assertEqual(compute_token_metrics(state)["openhands_prompt_tokens"], 10.0)
+
+
+class BuildToolsTest(unittest.TestCase):
+    def test_terminal_tool_carries_the_no_pager_env(self):
+        specs = {tool.name: tool for tool in build_tools()}
+
+        self.assertEqual(set(specs), {TerminalTool.name, FileEditorTool.name})
+        self.assertEqual(specs[TerminalTool.name].params, {"env": NO_PAGER_ENV})
+        self.assertEqual(NO_PAGER_ENV["GIT_PAGER"], "cat")
+        self.assertEqual(NO_PAGER_ENV["PAGER"], "cat")
+
+    def test_terminal_tool_still_takes_an_env_parameter(self):
+        # params are passed to create() as keywords; a renamed/dropped `env` would silently un-disable pagers.
+        self.assertIn("env", inspect.signature(TerminalTool.create).parameters)
+
+
+def _repo_with_a_long_commit(directory: str) -> str:
+    """A git repo whose HEAD is too long to fit one screen, so `git show` would page."""
+    (Path(directory) / "big.txt").write_text("".join(f"line {i}\n" for i in range(500)))
+    identity = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
+    for args in (["init", "-q"], ["add", "."], [*identity, "commit", "-qm", "long commit"]):
+        subprocess.run(["git", *args], cwd=directory, check=True, capture_output=True)
+    return directory
+
+
+@unittest.skipUnless(shutil.which("tmux"), "the pooled tmux terminal needs tmux")
+@unittest.skipUnless(shutil.which("less"), "without a pager installed there is nothing to wedge")
+class TerminalPagerTest(unittest.TestCase):
+    """End-to-end check that NO_PAGER_ENV reaches TmuxPanePool's panes, which skip the
+    pager defence openhands-tools only applies in TmuxTerminal.initialize()."""
+
+    def test_paging_command_completes_and_leaves_the_terminal_usable(self):
+        directory = _repo_with_a_long_commit(self.enterContext(tempfile.TemporaryDirectory()))
+        # Short timeout so a regression fails in seconds, not the 30s default.
+        executor = TerminalExecutor(working_dir=directory, no_change_timeout_seconds=5, env=NO_PAGER_ENV)
+        self.addCleanup(executor.close)
+
+        paged = executor(TerminalAction(command="git show HEAD"))
+        # A wedged pane returns -1: no prompt came back, so no exit code could be read.
+        self.assertEqual(paged.exit_code, 0, msg=paged.text[:500])
+        self.assertIn("long commit", paged.text)
+
+        # And the next command is executed, rather than typed into a pager.
+        after = executor(TerminalAction(command="echo still-alive"))
+        self.assertEqual(after.exit_code, 0, msg=after.text[:500])
+        self.assertIn("still-alive", after.text)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
 """OpenHands backend: runs the agent loop over the task repo, then grades the diff."""
 
 import logging
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -12,7 +11,7 @@ from openhands.sdk.conversation.state import ConversationExecutionStatus
 from openhands.sdk.llm.exceptions.types import LLMContextWindowExceedError
 from openhands.tools import FileEditorTool, TerminalTool
 from pydantic import PrivateAttr
-from swe_agent_server.evaluation import run_evaluation
+from swe_agent_server.evaluation import capture_git_diff, run_evaluation
 from swe_agent_server.utils import clean_metrics, exc_to_full_string
 
 from agentcore_rl_toolkit.rollout_session.wire import (
@@ -23,6 +22,28 @@ from agentcore_rl_toolkit.rollout_session.wire import (
 # Consecutive no-content responses tolerated before finishing: enough for one stray
 # empty turn to recover via the stock nudge, few enough to cut the runaway loop short.
 MAX_CONSECUTIVE_NO_CONTENT = 3
+
+# A paging command (`git show`, `man`, `help()`) wedges the tmux pane forever: later
+# commands are fed to the pager as keystrokes instead of running, so edits/reverts the
+# agent believes it made silently vanish from the final diff.
+# openhands-tools only disables pagers in TmuxTerminal.initialize(); the default
+# TmuxPanePool backend builds panes without that step, so we set the vars here instead.
+NO_PAGER_ENV = {
+    "GIT_PAGER": "cat",
+    "PAGER": "cat",
+    # pydoc (`help()`) reads MANPAGER before PAGER; systemctl reads SYSTEMD_PAGER.
+    "MANPAGER": "cat",
+    "SYSTEMD_PAGER": "cat",
+}
+
+
+def build_tools() -> list[Tool]:
+    """Tool specs for the agent: a terminal that cannot be wedged by a pager, and the editor."""
+    return [
+        # ``params`` is forwarded to ``TerminalTool.create(conv_state, **params)``.
+        Tool(name=TerminalTool.name, params={"env": NO_PAGER_ENV}),
+        Tool(name=FileEditorTool.name),
+    ]
 
 
 class NoContentTerminatingAgent(Agent):
@@ -86,11 +107,7 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
     token_metrics = {}
 
     try:
-        tools = [
-            Tool(name=TerminalTool.name),
-            Tool(name=FileEditorTool.name),
-        ]
-        agent = NoContentTerminatingAgent(llm=LLM(**request.task_input["llm"]), tools=tools)
+        agent = NoContentTerminatingAgent(llm=LLM(**request.task_input["llm"]), tools=build_tools())
         workspace = Workspace(working_dir=request.task_input["repo_path"])
 
         conversation = Conversation(workspace=workspace, agent=agent, callbacks=[on_conversation_event])
@@ -115,16 +132,7 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
 
         logging.info(f"Conversation: {conversation.state.model_dump()}")
 
-        git_diff = subprocess.check_output(
-            [
-                "git",
-                "--no-pager",
-                "diff",
-                "--no-color",
-                request.task_input["base_commit"],
-            ],
-            cwd=request.task_input["repo_path"],
-        ).decode()
+        git_diff = capture_git_diff(request.task_input)
 
         eval_report = run_evaluation(request.task_input)
 

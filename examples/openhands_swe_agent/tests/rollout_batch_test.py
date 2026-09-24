@@ -35,6 +35,8 @@ SILENT = RolloutDumpResponse(
     exception=None,
     metrics={"num_tool_calls": 1.0},
 )
+# A row's identity fields: `task_id` is read off the row, not its position.
+TASK_ROW = {"task_id": "repo__proj-1", "instance_id": "repo__proj-1"}
 
 
 class FakeSession:
@@ -189,7 +191,7 @@ class RunOneTest(IsolatedAsyncioTestCase):
             "arn:runtime",
             "arn:capacity",
             "2026-09-03T00:00:00",
-            {"index": 7, "instance_id": "repo__proj-1"},
+            dict(TASK_ROW),
             0,
             bae.local_bounds(config),
             "s3://bucket/prefix",
@@ -270,7 +272,7 @@ class RunOneTest(IsolatedAsyncioTestCase):
             "arn:runtime",
             "arn:capacity",
             "2026-09-03T00:00:00",
-            {"index": 7, "instance_id": "repo__proj-1"},
+            dict(TASK_ROW),
             0,
             bae.local_bounds(config),
             "s3://bucket/prefix",
@@ -283,10 +285,15 @@ class RunOneTest(IsolatedAsyncioTestCase):
         ((_, dumped),) = self.uploads.items()
         self.assertIsNone(dumped["rollout_dump_response"])
 
-    async def test_the_task_id_is_the_datasets_own_index(self):
-        # So an eval task id names the same dataset row a training task id does.
+    async def test_the_task_id_is_the_datasets_own_task_id(self):
+        # So pass@k groups a task's n samples together, rather than by row position.
         row, _ = await self.run_one(GOOD)
-        self.assertEqual(row["task_id"], "7")
+        self.assertEqual(row["task_id"], "repo__proj-1")
+
+    async def test_the_instance_id_is_carried_onto_the_row(self):
+        # The benchmark's own name for the task: what the per-instance pass rates join on.
+        row, _ = await self.run_one(GOOD)
+        self.assertEqual(row["instance_id"], "repo__proj-1")
 
     async def test_the_s3_uri_is_recorded_on_the_row(self):
         row, _ = await self.run_one(GOOD)

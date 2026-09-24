@@ -116,7 +116,7 @@ class RolloutTest(unittest.TestCase):
 
         with (
             mock.patch.object(_CapturingLiteLLMModel, "_acompletion", fake_acompletion),
-            mock.patch.object(strands_agent.subprocess, "check_output", return_value=b"diff --git a b"),
+            mock.patch.object(strands_agent, "capture_git_diff", return_value="diff --git a b"),
             mock.patch.object(strands_agent, "run_evaluation", return_value={"resolved": True}),
         ):
             dump = strands_agent.rollout(request)

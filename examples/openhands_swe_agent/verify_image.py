@@ -20,11 +20,13 @@ TESTS_DIR = RECIPE_DIR / "tests"
 
 CONTAINER_TESTS_DIR = "/agent/tests"
 
-# Excluded because they cover the host side of the recipe (the deploy's execution role and
-# the eval harness), none of which is in the image. Naming the exceptions rather than the
-# inclusions means a new server-side test file runs here just by existing.
+# Excluded because they cover the host side of the recipe (the deploy's execution role, the
+# dataset conversion and the eval harness), none of which is in the image. Naming the
+# exceptions rather than the inclusions means a new server-side test file runs here just by
+# existing.
 HOST_ONLY_TESTS = (
     "iam_policy_test.py",
+    "preprocess_test.py",
     "rollout_batch_test.py",
     "rollout_report_test.py",
 )

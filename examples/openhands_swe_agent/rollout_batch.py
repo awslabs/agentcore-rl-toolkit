@@ -148,7 +148,7 @@ def bedrock_token(region: str) -> str:
 
 
 @dataclasses.dataclass
-class BedrockEndpoint:
+class BedrockMantleEndpoint:
     """The agent talks straight to Bedrock -- no gateway, no token capture.
 
     ``model`` is a LiteLLM model id whose ``openai/`` prefix routes at ``base_url``.
@@ -178,6 +178,45 @@ class BedrockEndpoint:
             api_key=bedrock_token(self.region),
             temperature=temperature,
             top_p=top_p,
+        )
+
+    def open_session(self, session_id: str, sampling_params: dict) -> None:
+        pass
+
+    async def finish_session(self, session_id: str) -> list[TraceRecord]:
+        return []
+
+
+@dataclasses.dataclass
+class BedrockConverseEndpoint:
+    """The agent talks straight to Bedrock's native Converse API.
+    ``model`` is a Bedrock model or inference-profile id
+    (e.g. ``global.anthropic.claude-sonnet-5``); LiteLLM's bedrock ``converse/`` route
+    signs with a bearer token in the ``api_key`` slot instead of SigV4.
+    """
+
+    model: str
+    region: str
+    kind: str = "bedrock_converse"
+
+    def label(self) -> str:
+        return f"bedrock-converse-{self.region}"
+
+    def captures_tokens(self) -> bool:
+        return False
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    def build_task_llm(self, session_id: str, temperature: float, top_p: float) -> dict:
+        return dict(
+            model=f"bedrock/converse/{self.model}",
+            aws_region_name=self.region,
+            api_key=bedrock_token(self.region),
+            requestMetadata={"session_id": session_id},
         )
 
     def open_session(self, session_id: str, sampling_params: dict) -> None:
@@ -309,18 +348,6 @@ class EvalConfig:
     ec2_monitor_poll_interval: float = DEFAULT_POLL_INTERVAL
 
 
-def task_index(task_row: dict) -> int:
-    """The dataset's own index for a task row, resolved as verl resolves it.
-
-    verl's ``RLHFDataset`` promotes ``extra_info["index"]`` to a top-level ``index``,
-    which the training side reads as the task id; reading it the same way means an eval
-    task id names the same dataset row rather than a number that shifts with the slice.
-    """
-    if "index" in task_row:
-        return task_row["index"]
-    return (task_row.get("extra_info") or {}).get("index", 0)
-
-
 def token_stats(records: list[TraceRecord]) -> dict:
     """Token counts for one trajectory, captured as one record per trainable turn.
 
@@ -426,8 +453,7 @@ async def run_one(
     """
     session_id = SESSION_PREFIX + uuid4().hex
     endpoint = config.endpoint
-    index = task_index(task_row)
-    task_id = str(index)
+    task_id = task_row.get("task_id")
 
     # A PersistentDict over this session's item in the table training also writes to;
     # every mutation below persists itself, so DynamoDB tracks a rollout live.
@@ -445,7 +471,7 @@ async def run_one(
             "endpoint": endpoint.label(),
             "temperature": config.temperature,
             "top_p": config.top_p,
-            "eval_start_at": dt.datetime.now(),
+            "rollout_session_start_at": dt.datetime.now(),
         },
         persister=DynamoDBPersister(
             session_table,
@@ -526,7 +552,7 @@ async def run_one(
 
     await meta.update(
         {
-            "eval_end_at": dt.datetime.now(),
+            "rollout_session_end_at": dt.datetime.now(),
             **rollout_summary,
         }
     )

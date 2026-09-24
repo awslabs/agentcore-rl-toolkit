@@ -20,6 +20,9 @@ ENV PATH=/agent/uv:$PATH
 COPY ./image/install_graders.sh ./install_graders.sh
 RUN ./install_graders.sh
 
+# A git config, not `ENV PAGER=cat`, so it doesn't leak into the graded eval script's environment.
+RUN git config --system core.pager cat
+
 # The harness implements a wire protocol it does not own: the request/response
 # types live in agentcore_rl_toolkit.rollout_session.wire, on the
 # trainer's side of the boundary, so the caller and every harness agree on one

@@ -400,6 +400,59 @@ def load_make_test_spec(swebench_path: Path | None):
     return make_test_spec
 
 
+# Where swe_unpack.sh checks out the graded repo.
+REPO_PATH = "/testbed"
+
+# Must match the delimiter the harness's own eval script uses for its patch heredoc.
+HEREDOC_DELIMITER = "EOF_114329324912"
+
+# Fixed scratch paths (not mktemp) so a failed setup leaves them for postmortem inspection.
+PATCH_FILE = "/tmp/tpa-test-patch.diff"
+SCRATCH_INDEX = "/tmp/tpa-index"
+
+# Must match swe_agent_server.evaluation.TEST_PATCH_REF (kept in sync by hand, not import,
+# since both are baked into the dataset). Own namespace so it stays out of branch/tag listings.
+TEST_PATCH_REF = "refs/tpa/test-patch"
+
+# Passed per invocation since these images don't reliably have a global git identity set.
+COMMIT_IDENTITY = "-c user.name=swe -c user.email=swe@swe.internal"
+
+
+def make_test_patch_script(instance) -> str:
+    """Build the setup-stage script that applies a task's test patch and commits it.
+
+    Run only when the harness requests ``test_patch_applied``, so the agent sees the tests
+    its patch must satisfy. The patch is committed rather than left as worktree changes, so
+    it doesn't show up as the agent's own edit in ``git diff``/``git status`` (and thus in
+    the ``model_patch`` used for grading). Grading reverts this commit via
+    ``TEST_PATCH_REF``/``evaluation.revert_test_patch_commit`` before running the eval
+    script, which expects an unpatched worktree.
+
+    Uses ``set -e`` (unlike the eval script this is descended from): every step is load
+    bearing, and a half-applied setup must not reach the agent.
+    """
+    test_patch = instance["test_patch"]
+    commands = [
+        "#!/bin/bash",
+        "set -exo pipefail",
+        f"git config --global --add safe.directory {REPO_PATH}",  # for nonroot user
+        f"cd {REPO_PATH}",
+        f"cat > {PATCH_FILE} <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}",
+        # Also stages, so a test file the image already modified is refused, not half-patched.
+        f"git apply -v --index {PATCH_FILE}",
+        # Built in a separate index so any pre-existing dirt in the real one is excluded.
+        f"GIT_INDEX_FILE={SCRATCH_INDEX} git read-tree HEAD",
+        f"GIT_INDEX_FILE={SCRATCH_INDEX} git apply --cached {PATCH_FILE}",
+        f"tree=$(GIT_INDEX_FILE={SCRATCH_INDEX} git write-tree)",
+        f"commit=$(git {COMMIT_IDENTITY} commit-tree \"$tree\" -p HEAD -m 'Apply test patch')",
+        f"rm -f {PATCH_FILE} {SCRATCH_INDEX}",
+        'git reset --soft "$commit"',
+        # Written last, so the ref exists only once the commit above has fully succeeded.
+        f'git update-ref {TEST_PATCH_REF} "$commit"',
+    ]
+    return "\n".join(commands) + "\n"
+
+
 def format_docker_image_uri(
     instance_id: str,
     docker_namespace: str,
@@ -427,8 +480,9 @@ def process_fn(example, idx, make_test_spec):
         },
         "task_id": example["instance_id"],
         "eval_script": make_test_spec(example).eval_script,
+        "test_patch_script": make_test_patch_script(example),
         "docker_image_uri": format_docker_image_uri(example["instance_id"].lower(), DOCKER_NAMESPACE),
-        "repo_path": "/testbed",
+        "repo_path": REPO_PATH,
     }
     return data
 

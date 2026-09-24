@@ -22,6 +22,8 @@ rollout_session_agent_loop:
   task_kwargs:
     agent: "openhands"
     docker_image_namespace: "${oc.env:docker_image_namespace}"
+    # lets the agent see the tests it's graded on; grading resets them either way
+    test_patch_applied: false
 
   # passed as-is to the rollout gateway (get_or_start_gateway)
   rollout_gateway:

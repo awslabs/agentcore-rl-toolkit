@@ -1,0 +1,5 @@
+actor_rollout_ref:
+  hybrid_engine: True
+  rollout:
+    free_cache_engine: True
+    gpu_memory_utilization: 0.4

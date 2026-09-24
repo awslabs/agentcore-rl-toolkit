@@ -38,3 +38,7 @@ rm -rf "$workdir"
 # So that Bash tool calls get the testbed Python environment on PATH.
 /opt/miniconda3/bin/conda init
 echo "conda activate testbed" >>$HOME/.bashrc
+
+# Disable pagers for fresh interactive shells (`su -`, `bash -i`); the graded eval script
+# doesn't source ~/.bashrc, so this doesn't touch the environment the reward is measured in.
+echo "export GIT_PAGER=cat PAGER=cat MANPAGER=cat SYSTEMD_PAGER=cat" >>$HOME/.bashrc
