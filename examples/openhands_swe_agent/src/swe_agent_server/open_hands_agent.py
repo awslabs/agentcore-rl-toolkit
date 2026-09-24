@@ -23,18 +23,11 @@ from agentcore_rl_toolkit.rollout_session.wire import (
 # empty turn to recover via the stock nudge, few enough to cut the runaway loop short.
 MAX_CONSECUTIVE_NO_CONTENT = 3
 
-# Pagers, disabled for the agent's terminal. A command that pages on a TTY (`git show`,
-# `man`, `help()` in a REPL) otherwise captures the tmux pane for the rest of the
-# rollout: `less` never exits, every later command is delivered to it as pager
-# keystrokes instead of being executed, and each turn returns the same stale page. The
-# agent spends its remaining turns on that page and is told nothing -- in pooled mode
-# the "your command is NOT executed" warning cannot fire, so reverts and edits it
-# believes it ran are silently dropped from the final diff.
-#
-# openhands-tools sets GIT_PAGER/PAGER itself, but only in ``TmuxTerminal.initialize()``;
-# the default backend is ``TmuxPanePool``, whose panes are built by ``_create_pane()``
-# without that step, so the terminal this agent gets is unprotected. Setting the
-# variables on the session is also what the agent's own child processes inherit.
+# A paging command (`git show`, `man`, `help()`) wedges the tmux pane forever: later
+# commands are fed to the pager as keystrokes instead of running, so edits/reverts the
+# agent believes it made silently vanish from the final diff.
+# openhands-tools only disables pagers in TmuxTerminal.initialize(); the default
+# TmuxPanePool backend builds panes without that step, so we set the vars here instead.
 NO_PAGER_ENV = {
     "GIT_PAGER": "cat",
     "PAGER": "cat",

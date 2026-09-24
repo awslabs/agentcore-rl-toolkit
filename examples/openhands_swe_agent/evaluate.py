@@ -65,9 +65,7 @@ EVAL_CONFIGS = [
         task_kwargs=dict(
             agent=agent,
             docker_image_namespace=TASK_IMAGE_NAMESPACE,
-            # Whether setup applies the task's test patch, so the agent can run the tests
-            # it is graded on. Grading resets them either way, so this only changes what
-            # the agent gets to see -- flip it to compare the two task framings.
+            # Lets the agent see the tests it's graded on; grading resets them either way.
             test_patch_applied=True,
         ),
     )

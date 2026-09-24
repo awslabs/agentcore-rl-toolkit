@@ -1,6 +1,4 @@
-"""Unit tests for the setup stage: unpacking the task image, and the optional test patch
-the harness can ask to have applied before the agent starts.
-"""
+"""Tests for run_setup: unpacking the task image and the optional test-patch step."""
 
 import subprocess
 import unittest
@@ -44,7 +42,7 @@ class RunSetupTest(unittest.TestCase):
         self.assertIn("boom", str(caught.exception))
 
     def test_test_patch_is_not_applied_by_default(self):
-        # The script rides in every task row; only the flag decides whether it runs.
+        # test_patch_script rides in every row; only the flag decides whether it runs.
         with (
             mock.patch.object(rollout.subprocess, "run", side_effect=_ok),
             mock.patch.object(rollout, "apply_test_patch") as apply_test_patch,
@@ -82,9 +80,7 @@ class ApplyTestPatchTest(unittest.TestCase):
             open(written["path"])
 
     def test_a_script_that_fails_to_apply_fails_the_setup(self):
-        # The script exits with `git apply`'s status (see preprocess.make_test_patch_script):
-        # a patch that does not apply must not leave the agent working on an unpatched
-        # checkout, and one that applied but was not committed must not go unnoticed either.
+        # A patch that fails to apply must fail setup, not leave the agent on an unpatched checkout.
         failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="patch does not apply")
         with mock.patch.object(rollout.subprocess, "run", return_value=failed):
             with self.assertRaises(RuntimeError) as caught:

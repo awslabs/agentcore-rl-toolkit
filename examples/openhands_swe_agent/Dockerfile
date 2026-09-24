@@ -20,10 +20,7 @@ ENV PATH=/agent/uv:$PATH
 COPY ./image/install_graders.sh ./install_graders.sh
 RUN ./install_graders.sh
 
-# a git config rather than an image-wide `ENV PAGER=cat`: the graded eval script inherits
-# this container's environment, and some projects' tests assert pager behaviour, so
-# changing it would move the reward rather than just the agent's terminal. Without a TTY
-# git does not page at all, so this is a no-op for the grader.
+# A git config, not `ENV PAGER=cat`, so it doesn't leak into the graded eval script's environment.
 RUN git config --system core.pager cat
 
 # The harness implements a wire protocol it does not own: the request/response

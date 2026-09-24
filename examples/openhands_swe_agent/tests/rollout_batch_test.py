@@ -35,8 +35,7 @@ SILENT = RolloutDumpResponse(
     exception=None,
     metrics={"num_tool_calls": 1.0},
 )
-# One row of the parquet `preprocess.py` writes, cut down to the identity fields: the
-# harness reads the rows straight off the file, so `task_id` is a column, not a position.
+# A row's identity fields: `task_id` is read off the row, not its position.
 TASK_ROW = {"task_id": "repo__proj-1", "instance_id": "repo__proj-1"}
 
 
@@ -287,9 +286,7 @@ class RunOneTest(IsolatedAsyncioTestCase):
         self.assertIsNone(dumped["rollout_dump_response"])
 
     async def test_the_task_id_is_the_datasets_own_task_id(self):
-        # Read off the row's own column rather than its position, so an eval task id names the
-        # same dataset task a training task id does -- and pass@k groups the n samples of one
-        # task together instead of collapsing every task into one null id.
+        # So pass@k groups a task's n samples together, rather than by row position.
         row, _ = await self.run_one(GOOD)
         self.assertEqual(row["task_id"], "repo__proj-1")
 

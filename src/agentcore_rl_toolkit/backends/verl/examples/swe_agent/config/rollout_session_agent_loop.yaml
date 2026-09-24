@@ -22,8 +22,7 @@ rollout_session_agent_loop:
   task_kwargs:
     agent: "openhands"
     docker_image_namespace: "${oc.env:docker_image_namespace}"
-    # apply the task's test patch during container setup, so the agent can run the tests
-    # it is graded on (grading resets them either way -- see preprocess.py)
+    # lets the agent see the tests it's graded on; grading resets them either way
     test_patch_applied: false
 
   # passed as-is to the rollout gateway (get_or_start_gateway)

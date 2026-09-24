@@ -55,18 +55,15 @@ def run_setup(request: RolloutSetupRequest):
         os.unlink(task_path)
     _check("swe_unpack.sh", result)
 
-    # After the unpack: the patch applies to the checkout it just copied in.
+    # Must run after unpack: it patches the checkout unpack just created.
     if request.task_input.get("test_patch_applied"):
         apply_test_patch(request.task_input)
 
 
 def apply_test_patch(task_input: dict) -> None:
-    """Put the task's test files in their post-patch state, before the agent starts.
+    """Apply the task's test patch before the agent starts, if the harness asked for it.
 
-    Only when the harness asked for it (``test_patch_applied``), because seeing the tests
-    changes the task the agent faces. The script is ``test_patch_script`` from the dataset
-    parquet (see ``preprocess.py``); the eval script resets and re-applies the same patch,
-    so the agent still cannot pass a task by editing its tests.
+    The eval script re-applies the same patch regardless, so this can't be gamed by editing tests.
     """
     script = task_input.get("test_patch_script")
     if not script:
@@ -75,7 +72,7 @@ def apply_test_patch(task_input: dict) -> None:
             "rebuild the dataset parquet with preprocess.py"
         )
 
-    # A temp file rather than one inside the repo, so the agent never sees it.
+    # Outside the repo, so the agent never sees the patch script.
     fd, script_path = tempfile.mkstemp(suffix=".sh", prefix="swe_test_patch_")
     try:
         with os.fdopen(fd, "w") as f:

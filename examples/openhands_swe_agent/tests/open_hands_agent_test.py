@@ -128,8 +128,7 @@ class BuildToolsTest(unittest.TestCase):
         self.assertEqual(NO_PAGER_ENV["PAGER"], "cat")
 
     def test_terminal_tool_still_takes_an_env_parameter(self):
-        # The spec's params are passed to create() as keywords, so an SDK bump that renames
-        # or drops `env` would silently un-disable the pagers. Fail here instead.
+        # params are passed to create() as keywords; a renamed/dropped `env` would silently un-disable pagers.
         self.assertIn("env", inspect.signature(TerminalTool.create).parameters)
 
 
@@ -145,18 +144,12 @@ def _repo_with_a_long_commit(directory: str) -> str:
 @unittest.skipUnless(shutil.which("tmux"), "the pooled tmux terminal needs tmux")
 @unittest.skipUnless(shutil.which("less"), "without a pager installed there is nothing to wedge")
 class TerminalPagerTest(unittest.TestCase):
-    """NO_PAGER_ENV has to reach the pane the agent actually gets.
-
-    It is passed to the executor, not set on the process, and the default backend builds
-    its panes through ``TmuxPanePool`` rather than ``TmuxTerminal.initialize()`` -- the
-    path on which openhands-tools' own pager defence does not run. So the property worth
-    pinning is end-to-end: a paging command completes and leaves the terminal usable.
-    """
+    """End-to-end check that NO_PAGER_ENV reaches TmuxPanePool's panes, which skip the
+    pager defence openhands-tools only applies in TmuxTerminal.initialize()."""
 
     def test_paging_command_completes_and_leaves_the_terminal_usable(self):
         directory = _repo_with_a_long_commit(self.enterContext(tempfile.TemporaryDirectory()))
-        # Short no-change timeout so a regression fails in seconds rather than the 30s
-        # default per wedged command.
+        # Short timeout so a regression fails in seconds, not the 30s default.
         executor = TerminalExecutor(working_dir=directory, no_change_timeout_seconds=5, env=NO_PAGER_ENV)
         self.addCleanup(executor.close)
 

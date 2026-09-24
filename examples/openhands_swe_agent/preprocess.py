@@ -400,57 +400,36 @@ def load_make_test_spec(swebench_path: Path | None):
     return make_test_spec
 
 
-# Where swe_unpack.sh puts the graded checkout and the conda env it was built with --
-# the harness's own `repo_directory` and `env_name` for these images.
+# Where swe_unpack.sh checks out the graded repo.
 REPO_PATH = "/testbed"
 
-# Lifted from the harness's test_spec module, so the test patch reaches git the same way the
-# eval script's own heredoc gets it there.
+# Must match the delimiter the harness's own eval script uses for its patch heredoc.
 HEREDOC_DELIMITER = "EOF_114329324912"
 
-# Scratch files ``make_test_patch_script`` works through, fixed paths rather than ``mktemp``
-# so that a failed setup leaves them somewhere predictable to look. Both are gone by the time
-# the agent starts, and the container serves one rollout, so nothing can collide with them.
+# Fixed scratch paths (not mktemp) so a failed setup leaves them for postmortem inspection.
 PATCH_FILE = "/tmp/tpa-test-patch.diff"
 SCRATCH_INDEX = "/tmp/tpa-index"
 
-# Where the setup commit below is left for the grading stage to find and undo. Kept in
-# step by hand with ``swe_agent_server.evaluation.TEST_PATCH_REF``, which is the only
-# reader: the container contract between the two stages, like ``REPO_PATH``, is a string
-# baked into the dataset rather than a shared import. Its own ref namespace, so it stays
-# out of ``git branch`` and ``git tag`` and cannot collide with the repo's own refs.
+# Must match swe_agent_server.evaluation.TEST_PATCH_REF (kept in sync by hand, not import,
+# since both are baked into the dataset). Own namespace so it stays out of branch/tag listings.
 TEST_PATCH_REF = "refs/tpa/test-patch"
 
-# Identity for the setup commit below, passed per invocation rather than written to the
-# global config: these images do not reliably carry one, and it is not ours to change.
+# Passed per invocation since these images don't reliably have a global git identity set.
 COMMIT_IDENTITY = "-c user.name=swe -c user.email=swe@swe.internal"
 
 
 def make_test_patch_script(instance) -> str:
-    """The script that puts a task's test files in their post-patch state, and commits them.
+    """Build the setup-stage script that applies a task's test patch and commits it.
 
-    The setup stage runs it only when the harness passes ``test_patch_applied``, so that the
-    agent sees the tests its patch has to satisfy. It applies the same test patch the
-    harness's own eval script applies, and then makes a commit the harness has no reason to
-    make.
+    Run only when the harness requests ``test_patch_applied``, so the agent sees the tests
+    its patch must satisfy. The patch is committed rather than left as worktree changes, so
+    it doesn't show up as the agent's own edit in ``git diff``/``git status`` (and thus in
+    the ``model_patch`` used for grading). Grading reverts this commit via
+    ``TEST_PATCH_REF``/``evaluation.revert_test_patch_commit`` before running the eval
+    script, which expects an unpatched worktree.
 
-    The commit is there so the tests do not read as the agent's own work. Left in the
-    worktree they are indistinguishable from an edit the agent made: they show up in its
-    ``git diff`` and ``git status``, and in the ``model_patch`` the grade report is built
-    from (``evaluation.py`` takes a plain ``git diff``). Agents have read that diff, taken
-    the tests for an accidental edit of their own, and reverted them with ``git checkout``
-    or ``git stash``.
-
-    The commit is also a mutation the eval script knows nothing about: it expects a worktree
-    the test patch was never applied to, and grading over an already-patched one silently
-    misgrades. So the last thing this script does is leave the commit under
-    ``TEST_PATCH_REF``, and ``evaluation.revert_test_patch_commit`` undoes it before the
-    eval script runs -- which is also how grading tells the two arms apart, with no marker
-    file in the worktree for the agent to trip over.
-
-    Hence ``set -e``, unlike the eval script this is descended from: every step is load
-    bearing, and a half-applied setup must not reach the agent. The temporary files are left
-    behind on failure, for a postmortem in the container.
+    Uses ``set -e`` (unlike the eval script this is descended from): every step is load
+    bearing, and a half-applied setup must not reach the agent.
     """
     test_patch = instance["test_patch"]
     commands = [
@@ -458,22 +437,17 @@ def make_test_patch_script(instance) -> str:
         "set -exo pipefail",
         f"git config --global --add safe.directory {REPO_PATH}",  # for nonroot user
         f"cd {REPO_PATH}",
-        # On disk once, because both applies below read the same bytes.
         f"cat > {PATCH_FILE} <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}",
-        # The worktree and the index together, so the tests are in place and staged, and so
-        # that a test file the image left modified is refused rather than half-patched.
+        # Also stages, so a test file the image already modified is refused, not half-patched.
         f"git apply -v --index {PATCH_FILE}",
-        # The commit, as a tree built off HEAD in an index of its own: whatever the image
-        # carries in the real one, staged or not, cannot reach it.
+        # Built in a separate index so any pre-existing dirt in the real one is excluded.
         f"GIT_INDEX_FILE={SCRATCH_INDEX} git read-tree HEAD",
         f"GIT_INDEX_FILE={SCRATCH_INDEX} git apply --cached {PATCH_FILE}",
         f"tree=$(GIT_INDEX_FILE={SCRATCH_INDEX} git write-tree)",
         f"commit=$(git {COMMIT_IDENTITY} commit-tree \"$tree\" -p HEAD -m 'Apply test patch')",
         f"rm -f {PATCH_FILE} {SCRATCH_INDEX}",
-        # The branch moves onto it; the index and worktree already match, so ``git status``
-        # is clean apart from dirt that was there before this script ran. The ref is written
-        # last, so it exists only once everything above has worked.
         'git reset --soft "$commit"',
+        # Written last, so the ref exists only once the commit above has fully succeeded.
         f'git update-ref {TEST_PATCH_REF} "$commit"',
     ]
     return "\n".join(commands) + "\n"
