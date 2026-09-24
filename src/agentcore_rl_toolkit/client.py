@@ -406,6 +406,7 @@ class RolloutClient:
         config = Config(
             retries={"max_attempts": max_retry_attempts, "mode": "adaptive"},
             max_pool_connections=max_pool_connections,
+            user_agent_extra="agentcore-rl-toolkit",
         )
         self.agentcore_client = boto3.client("bedrock-agentcore", region_name=self.region, config=config)
         self.s3_client = boto3.client("s3", region_name=self.region, config=config)
