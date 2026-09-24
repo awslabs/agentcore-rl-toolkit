@@ -11,7 +11,7 @@
   "gateway_port": 0,
   "history_mode": "linear",
   "output_dir": "/path/to/run-output",
-  "steps": 116,
+  "steps": 50,
   "batch_size": 64,
   "group_size": 4,
   "tps_limit": 4,

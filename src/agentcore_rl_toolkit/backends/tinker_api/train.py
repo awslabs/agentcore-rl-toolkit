@@ -244,7 +244,8 @@ async def update_policy(training_client, datums, learning_rate: float):
 async def train(config: Config):
     output = Path(config.output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    (output / "config.json").write_text(json.dumps(dataclasses.asdict(config), indent=2) + "\n")
+    with (output / "config.json").open("x") as stream:
+        stream.write(json.dumps(dataclasses.asdict(config), indent=2) + "\n")
     payloads = read_payloads(config.dataset)
     if len(payloads) < config.steps * config.batch_size:
         raise ValueError("Dataset needs at least steps * batch_size payload rows")

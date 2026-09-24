@@ -11,6 +11,26 @@ from agentcore_rl_toolkit.backends.tinker_api import train as recipe
 from agentcore_rl_toolkit.rollout_gateway.trace import TraceRecord
 
 
+@pytest.mark.asyncio
+async def test_existing_run_is_not_overwritten(tmp_path):
+    original = {"config.json": '{"exp_id":"previous-run"}\n', "metrics.jsonl": '{"step":1}\n'}
+    for name, contents in original.items():
+        (tmp_path / name).write_text(contents)
+    config = recipe.Config(
+        endpoint="endpoint",
+        base_model="model",
+        tokenizer="tokenizer",
+        dataset="unused",
+        agent_runtime_arn="runtime",
+        s3_bucket="bucket",
+        gateway_host="127.0.0.1",
+        output_dir=str(tmp_path),
+    )
+    with pytest.raises(FileExistsError, match="config.json"):
+        await recipe.train(config)
+    assert {name: (tmp_path / name).read_text() for name in original} == original
+
+
 @pytest.mark.parametrize(
     ("empty_first_training_batch", "failed_evaluation_inputs"),
     [

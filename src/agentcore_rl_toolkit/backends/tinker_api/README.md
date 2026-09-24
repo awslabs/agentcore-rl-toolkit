@@ -73,7 +73,7 @@ logprobs, sampler weight synchronization, and checkpoints.
 ## Run the math example
 
 Deploy the [Strands math agent](../../../../examples/strands_math_agent/) first.
-The [example config](examples/math_agent/config.json.example) runs full GSM8K
+The [example config](examples/math_agent/config.json.example) runs GSM8K
 training with Qwen3.5-4B, thinking disabled, held-out evaluation, and periodic
 checkpoints.
 

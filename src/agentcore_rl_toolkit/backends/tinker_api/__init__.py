@@ -1,1 +1,1 @@
-"""Synchronous agent training through the Tinker API."""
+"""Agent training through the Tinker API."""
