@@ -72,7 +72,7 @@ class ConcurrencyGroupedSemaphore(LocalPrioritySemaphore):
         await super().release()
 
 
-def make_priority_semaphore(name: str, semaphore_concurrency: int, acquire_concurrency: int) -> ActorProxy[LocalPrioritySemaphore]:
+def make_priority_semaphore(name: str, semaphore_concurrency: int, acquire_concurrency: int) -> "ActorProxy[LocalPrioritySemaphore]":
     return (
         ray.remote(concurrency_groups={"release": semaphore_concurrency})(ConcurrencyGroupedSemaphore)
         .options(

@@ -255,12 +255,14 @@ async def test_async_render_preserves_hf_options(fast_tokenizer, options):
 @pytest.mark.asyncio
 async def test_concurrent_renderers_sharing_tokenizer_use_their_initial_hf_options(fast_tokenizer):
     messages = [{"role": "user", "content": "中文 <extra>" * 20}]
+    # split_special_tokens is intentionally not varied here: it is pinned once
+    # on the shared tokenizer at renderer construction (last-writer-wins), not
+    # re-applied per encode. Truncation/padding options are still per-call.
     options = [
         {},
         {"max_length": 8},
         {"truncation": False},
         {"padding": "max_length", "max_length": 512},
-        {"tokenizer_kwargs": {"split_special_tokens": True}},
     ] * 4
     configs = [{"max_length": 16, "truncation": True, **kw} for kw in options]
     renderers = [HfTemplateRenderer(fast_tokenizer, chat_template_kwargs=config) for config in configs]

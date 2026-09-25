@@ -174,6 +174,22 @@ class HfTemplateRenderer:
             # (the [gateway] extra); no availability guard needed.
             if schema_name is not None:
                 self._schema = RESPONSE_SCHEMAS[schema_name]
+        # Pin the Rust backend's ``encode_special_tokens`` once, at construction.
+        # The property setter takes a mutable borrow on the Tokenizer, and
+        # tokenizers 0.22.2's async_encode holds a borrow across the returned
+        # future — a concurrent request that tried to re-set the property while
+        # another request's Rust encode work was still in flight raised
+        # ``RuntimeError: Already borrowed``. The gateway's configured value is
+        # constant per renderer, so we take the borrow once here and leave the
+        # per-call encode path read-only against the backend. Guarded so
+        # non-HF-fast stubs used by the parse-only tests still construct.
+        backend = getattr(tokenizer, "backend_tokenizer", None)
+        if backend is not None:
+            tokenizer_kwargs = self._chat_template_kwargs.get("tokenizer_kwargs") or {}
+            split_special_tokens = tokenizer_kwargs.get("split_special_tokens")
+            backend.encode_special_tokens = (
+                tokenizer.split_special_tokens if split_special_tokens is None else split_special_tokens
+            )
 
     def _render_text(self, messages, *, tools=None, add_generation_prompt=True) -> str:
         return self.tokenizer.apply_chat_template(
@@ -209,14 +225,12 @@ class HfTemplateRenderer:
             pad_to_multiple_of=kwargs.get("pad_to_multiple_of"),
             padding_side=kwargs.get("padding_side"),
         )
+        # encode_special_tokens is pinned once in __init__ (see the constructor),
+        # so any ``split_special_tokens`` in kwargs was already honored there
+        # and is intentionally ignored here — mutating the Rust backend under
+        # concurrent async_encode workers raced with ``RuntimeError: Already
+        # borrowed``.
         backend = self.tokenizer.backend_tokenizer
-        split_special_tokens = kwargs.get("split_special_tokens")
-        backend.encode_special_tokens = (
-            self.tokenizer.split_special_tokens if split_special_tokens is None else split_special_tokens
-        )
-        # tokenizers 0.22.2 snapshots its Rust configuration when async_encode is
-        # called, before returning the future. Do not await between configuring
-        # the backend and this call; other requests can then use their own settings.
         encoding = await backend.async_encode(
             text,
             pair=kwargs.get("text_pair") or None,
