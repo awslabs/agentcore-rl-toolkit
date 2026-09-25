@@ -1,0 +1,311 @@
+---
+title: "Stable Updates, Fewer Rows: Better and Faster RL in ART"
+description: How ART handles variable training rows in verl and preserves token histories in the rollout gateway to make multi-turn agent training more efficient.
+---
+
+import { Image } from 'astro:assets';
+import optimizerReward from '../../../assets/blog/variable-rows-linear-mode/optimizer-reward.png';
+import linearEfficiency from '../../../assets/blog/variable-rows-linear-mode/linear-efficiency.png';
+
+_By Bryan Lu and Danylo Vashchilenko · September 28, 2026_
+
+:::note[TL;DR]
+A single agent rollout can become several training rows. In our verl integration,
+that expansion could unintentionally increase the number of optimizer updates.
+Fixing the update count improved best MigrationBench validation reward from
+**74.92% to 78.76%** in our comparison. We also introduce the rollout gateway's
+**linear mode**, which preserves the exact token history across turns and reduces
+unnecessary trajectory splitting. In a separate tree-versus-linear comparison,
+linear mode reduced **training rows by 62.76%** and **actor-update time by 18.24%**.
+:::
+
+## One rollout, several training rows
+
+A coding agent reads a repository, runs a build, edits a file, and tries again.
+To the application, this is one rollout. To a reinforcement learning trainer,
+it may be several sequences, each with its own context and generated tokens.
+That distinction affects both how the model learns and how much work training
+requires.
+
+In our [earlier post](/agentcore-rl-toolkit/blog/training-multi-step-agents-rl/),
+we described how AgentCore RL Toolkit (ART) trains agents through their existing
+model API calls. The **rollout gateway** sits between the agent harness and the
+inference backend. It converts messages into token IDs, sends those IDs to the
+backend, and captures the sampled tokens and their logprobs. This lets the trainer
+use the exact context under which each token was generated.
+
+Here we look at what happens when those turns become training data. Two changes
+address different parts of the problem: stable optimizer-step batching in ART's
+**verl backend**, and linear-history healing in the **backend-independent gateway**.
+The first handles a variable number of rows; the second reduces rows that need
+not exist in the first place.
+
+### Why a conversation can stop being append-only
+
+A training row contains a token sequence and a loss mask identifying the generated
+tokens to train on. Several turns can share one row when each turn's input starts
+with the exact input and output tokens of the previous turn:
+
+```text
+Turn 1: prompt → generated tool call
+Turn 2: [prompt + generated tool call] + tool result → next generation
+```
+
+But agent APIs exchange messages, not token IDs. The harness parses a tool call,
+executes it, and sends the conversation back as JSON. Reconstructing the previous
+assistant message can change whitespace, argument order, or template formatting.
+For example, these tool arguments represent the same mapping:
+
+```json
+{"command": "mvn test", "timeout": 60}
+{"timeout": 60, "command": "mvn test"}
+```
+
+Their text, and therefore their token sequences, can differ. A conversation that
+is append-only at the **message level** may no longer be append-only at the
+**token level**. Similar issues are discussed in
+[No Token Left Behind](https://www.lmsys.org/blog/2026-05-13-no-token-left-behind/).
+
+ART's default tree capture preserves the actual inference history. If a replayed
+prompt diverges from the previous token sequence, it forks the trajectory into
+another training row. Earlier generations retain their original contexts; the
+new row uses the context actually sent for the next generation. Shared history
+appears again as masked context, which still costs computation even though it
+does not contribute directly to the loss.
+
+Some splits are necessary: an agent may compact context, edit history, or launch
+sub-agents. Others arise from re-serializing an otherwise linear conversation.
+Both produce **variable rows**: the number of training sequences is no longer
+determined by the number of rollouts requested.
+
+## Keep optimizer steps tied to the training configuration
+
+In ART's original verl integration, training rows were grouped into mini-batches
+of a fixed size. Each mini-batch triggered an optimizer
+update. More rows could therefore mean more Adam steps, even when the source
+prompt batch and PPO epoch count were unchanged.
+
+Consider our MigrationBench configuration: 32 source prompts,
+16 rollouts per prompt, and a PPO mini-batch size of 32 source prompts. With
+one PPO epoch, the intended schedule is one optimizer update for that outer
+training batch.
+
+| Rows emitted by 512 rollouts | Updates with fixed-row batching | Updates with fixed-step batching |
+| ---: | ---: | ---: |
+| 512 | 1 | 1 |
+| 1,536 | 3 | 1 |
+
+Three sequential Adam updates are not equivalent to accumulating the gradients
+and applying one update. After each update, both model parameters and optimizer
+state change. Allowing trajectory splitting to choose that count introduces a
+source of variation outside the configured training schedule.
+
+The [fix](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/backends/verl/trainer_mixins/variable_row_batching.py)
+uses verl's existing worker interface to specify the **number of
+mini-batches**, instead of their fixed row size. With this configuration:
+
+```text
+mini-batches    = source-prompt batch size / PPO mini-batch size
+optimizer steps = mini-batches × PPO epochs
+```
+
+All rows are still consumed. A larger expanded batch requires more
+forward/backward work, but gradients accumulate within the configured mini-batches
+before the optimizer advances. Row losses remain additive, with the same
+normalization.
+
+Padding follows the same schedule. Rows need only be divisible across
+mini-batches and data-parallel ranks. For one mini-batch and two ranks, 513 rows
+become 514, rather than being rounded up to the next 512-row multiple, 1,024.
+
+### MigrationBench: validation after the batching fix
+
+We evaluated a Strands migration agent using Qwen3-Coder-30B-A3B-Instruct with
+GRPO and LoRA training through verl and Megatron. MigrationBench asks the agent
+to upgrade Java repositories to Java 17 while preserving their tests.
+
+In the batching comparison, both runs used tree capture and completed 101 outer
+training batches. We evaluated on 299 held-out tasks before training, every
+15 batches, and at the end. The reported metric is **mean validation reward**:
+the evaluator awards 0.5 for a successful migration build and another 0.5 for
+test equivalence.
+
+<figure class="art-figure">
+  <Image src={optimizerReward} alt="MigrationBench validation reward across 101 outer training batches. The original variable optimizer-step schedule peaks at 74.92%; fixed optimizer steps peak at 78.76%." />
+  <figcaption>Figure 1. Validation reward with tree capture, before and after the verl batching fix. Each curve shows one training run, with evaluations plotted against outer training batches.</figcaption>
+</figure>
+
+Best validation reward increased from **74.92% to 78.76%**, a gain of
+**3.85 percentage points**.
+
+## Preserve a linear history before generating the next turn
+
+Stable batching accommodates extra rows, but those rows still have to be
+processed. For a harness that intends to append to one conversation, the gateway
+can also prevent cosmetic token drift from creating those rows.
+
+That is the purpose of **linear mode**. It combines two views of the history:
+
+- **Messages establish continuity.** Protocol adapters normalize the incoming
+  messages, including parsing tool arguments into dictionaries. The healer
+  checks that the stored messages are a prefix of the incoming history and
+  that the tools schema is unchanged. Dictionary key order does not affect
+  this comparison; changing message content does.
+- **Tokens preserve context.** The gateway retains the exact input IDs it
+  sent and the exact output IDs the model generated. An earlier tool result
+  keeps the tokens used when it first entered the context; an assistant
+  response keeps its sampled tokens.
+
+For a continuing conversation, the next input is constructed as:
+
+```text
+next input = saved token history
+           + missing assistant-closing tokens
+           + tokens for new messages and the next assistant opening
+```
+
+The new messages include tool results or newly appended user instructions.
+The closing tokens are the chat template's boundary after an assistant turn.
+Some may already be present in the sampled output, such as a retained stop token;
+the healer removes that overlap before appending anything.
+
+The gateway constructs this input **before inference**. The model generates the next
+response using the preserved context, and the gateway records those same input
+IDs along with the resulting output IDs and logprobs. After a successful turn,
+it extends the saved history:
+
+```text
+saved token history = next input + generated output
+```
+
+This preserves training/inference context consistency while allowing an
+uninterrupted linear rollout to form one training row. It also means linear
+mode can change the token representation the model sees compared with
+message re-rendering. It is intended for harnesses where that replay drift is
+cosmetic, not an intentional edit to the conversation.
+
+## Extract the delta without tokenizing the whole history
+
+Preserving the token history leaves one task for each new turn: efficiently
+identifying what needs to be appended.
+
+One way to find this delta is to tokenize both the stored history and the
+extended conversation, then compare their token sequences. As
+conversations grow longer, this repeatedly processes a large history just to
+identify a small addition.
+
+The insight is that **applying the chat template is much cheaper than tokenizing
+its output.** In an offline synthetic Qwen3-Coder measurement at approximately
+100,000 tokens, median template rendering took **0.15 ms**, compared with
+**137.03 ms** for tokenization.
+
+We therefore separate the two operations: render both histories to text, slice
+out the added portion, and tokenize only the fragments needed for the next turn.
+
+Suppose a tool returns `Build passed.`. Applying the chat template to the stored
+history, then to that history plus the tool result, produces these simplified
+strings:
+
+```text
+History:
+[earlier messages][assistant tool call][end marker]
+
+History + tool result:
+[earlier messages][assistant tool call][end marker][tool result: Build passed.][assistant opening]
+```
+
+The first string is a prefix of the second. Slicing off that shared prefix gives
+the new text:
+
+```text
+[tool result: Build passed.][assistant opening]
+```
+
+Both renders use the complete stored history, allowing the template to consult
+earlier messages when formatting the next turn. The gateway tokenizes the
+extracted text, completes any missing template markers between turns, and appends
+the resulting tokens to the saved history. The previous input and sampled output
+token IDs remain unchanged. If the template changes the earlier text, the gateway
+falls back to full-history healing.
+
+**Why slice text before tokenizing?** Tokenization can merge characters across
+the position where we want to split. For illustration, suppose a template places
+one newline at the end of the history and another at the start of the new text:
+
+```text
+Text:                  ...\n | \n...
+Encoded together:          [271]
+Encoded separately:    [198] | [198]
+```
+
+The Qwen3-Coder tokenizer represents one newline as `[198]` and two consecutive
+newlines as `[271]`. Encoding the entire string produces a token spanning the
+split. Text slicing identifies the new fragment directly, so it can be tokenized
+separately and appended while preserving the saved tokens.
+
+Encoding also uses the native async tokenizer, allowing the gateway's HTTP event loop
+to serve other requests while tokenization runs.
+
+## Handling context changes
+
+An agent may also edit or compact its history. When this happens, the
+message-level prefix check fails, and the default `reset` policy starts a new
+linear segment from the incoming prompt. Capture can split at that boundary,
+and subsequent append-only turns can be healed again.
+
+Other policies can raise an error or disable healing for the rest of the
+session. Tree mode remains the appropriate choice for general branching
+histories. A linear segment can occupy one row; edits or compaction may split
+a session into several. This is why linear mode complements,
+rather than replaces, support for variable-row batching.
+
+## MigrationBench: fewer rows and less training work
+
+For the efficiency comparison, we ran a separate tree-versus-linear pair with
+the same code, training data, model, and training configuration, changing the
+history mode. Both used fixed optimizer-step batching and completed 101 outer
+training batches. The table reports totals for those runs.
+
+| Metric | Tree mode | Linear mode | Reduction |
+| --- | ---: | ---: | ---: |
+| Real training rows | 138,830 | 51,697 | 62.76% |
+| Processed training tokens | 2.29 billion | 1.69 billion | 26.53% |
+| Actor-update time | 29.58 hours | 24.18 hours | 18.24% |
+| End-to-end elapsed time | 114.06 hours | 104.28 hours | 8.57% |
+
+<figure class="art-figure">
+  <Image src={linearEfficiency} alt="Linear mode uses 37.24% as many training rows, 81.76% of the actor-update time, and 91.43% of the end-to-end time of its tree-mode control." />
+  <figcaption>Figure 2. Linear-mode totals relative to the tree-mode control in the efficiency experiment; each tree baseline is 100%.</figcaption>
+</figure>
+
+Linear mode saved **9.78 hours** over the complete experiment. The end-to-end
+reduction is smaller than the actor-update reduction because agent execution,
+generation, and evaluation remain substantial parts of elapsed time. The totals
+include differences in generated trajectories as well as row consolidation.
+
+The linear run reached a best validation reward of **78.26%**, comparable to the
+**78.76%** peak in the earlier tree-mode run.
+
+These runs use synchronous training, so each batch waits for its slowest rollout.
+Linear mode may also speed up individual rollouts through better prefix-cache
+reuse; asynchronous training could translate those gains into higher overall
+throughput.
+
+## Using the two mechanisms together
+
+The two changes act at different layers. ART's verl integration keeps the
+optimizer-step schedule stable while consuming variable rows. The rollout
+gateway's linear mode preserves token continuity when the harness intends a
+single append-only conversation, reducing unnecessary splits and repeated
+context processing.
+
+The gateway handles this without requiring the agent harness to manage tokens.
+The agent continues using its model API, and the training backend continues
+receiving token-level trajectories.
+
+Start with the [verl setup guide](/agentcore-rl-toolkit/guides/verl-backend-setup/)
+and the [MigrationBench example](/agentcore-rl-toolkit/examples/strands-migration-agent/).
+Linear mode is selected with `history_mode="linear"` on the rollout gateway.
+The implementation details and supported behavior are documented in the
+[variable-row batching design](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/designs/verl_variable_trajectory_batching.md)
+and [linear-history design](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/designs/gateway_linear.md).
