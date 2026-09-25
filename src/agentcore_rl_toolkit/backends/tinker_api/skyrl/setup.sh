@@ -24,4 +24,4 @@ git -C "$SKYRL_DIR" checkout --detach "$SKYRL_COMMIT"
 cd "$SKYRL_DIR"
 uv sync --frozen --python 3.12 --extra tinker --extra megatron --extra aws
 uv run --frozen --extra tinker --extra megatron --extra aws \
-  hf download "$MODEL_ID" --revision "$MODEL_REVISION" --local-dir "$MODEL_DIR"
+  hf download "$MODEL_ID" --revision "${MODEL_REVISION:-main}" --local-dir "$MODEL_DIR"

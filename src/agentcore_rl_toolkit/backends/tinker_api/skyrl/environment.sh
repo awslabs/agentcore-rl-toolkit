@@ -20,5 +20,3 @@ export PATH="$HOME/.local/bin:$CUDA_HOME/bin:$PATH"
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
 export NVTE_FLASH_ATTN=0
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-# SkyRL starts its own Ray runtime, separate from SkyPilot's runtime.
-unset RAY_ADDRESS

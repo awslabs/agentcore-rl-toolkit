@@ -3,6 +3,9 @@ name = "skyrl-tinker-endpoint-example"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "boto3",
+    "httpx",
+    "pyyaml",
     "skypilot[aws] @ git+https://github.com/skypilot-org/skypilot.git@47dfc7c34c1f8717b6dbd69707e3ba463af758bf",
 ]
 

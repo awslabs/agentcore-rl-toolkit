@@ -1,4 +1,4 @@
-"""Deploy the pinned Qwen3.5-4B SkyRL endpoint on one private EC2 P4d."""
+"""Deploy an example SkyRL Tinker endpoint on one private EC2 instance."""
 
 import argparse
 import copy
@@ -41,7 +41,7 @@ def wait_healthy(sky, cluster, job_id, endpoint, timeout):
             statuses = sky.get(sky.job_status(cluster, job_ids=[job_id]))
             status = statuses.get(job_id)
             if status is not None and status.is_terminal():
-                raise RuntimeError(f"Endpoint job {job_id} ended: {status}. Run uv run --frozen sky logs.")
+                raise RuntimeError(f"Endpoint job {job_id} ended: {status}. Run uv run sky logs.")
             if status is not None and status.value == "RUNNING":
                 try:
                     response = client.get(endpoint + "/api/v1/healthz")
@@ -51,7 +51,7 @@ def wait_healthy(sky, cluster, job_id, endpoint, timeout):
                     pass
             print(f"Waiting for endpoint (job {job_id}: {status})...", flush=True)
             time.sleep(15)
-    raise TimeoutError(f"Endpoint not ready after {timeout}s. Run uv run --frozen sky logs {cluster} {job_id}")
+    raise TimeoutError(f"Endpoint not ready after {timeout}s. Run uv run sky logs {cluster} {job_id}")
 
 
 def run(args, state_dir):
@@ -65,6 +65,9 @@ def run(args, state_dir):
     task["resources"]["infra"] = f"aws/{args.region}/{subnet['AvailabilityZone']}"
     task["resources"]["image_id"] = resolve_image(ec2, args.image_id)
     task["workdir"] = str(HERE)
+    port = int(task["envs"]["TINKER_PORT"])
+    if not 1 <= port <= 65535 or port == 22:
+        raise ValueError("TINKER_PORT must be between 1 and 65535 and different from SSH port 22")
     base_model = "/home/ubuntu/skyrl/models/" + task["envs"]["MODEL_ID"].rsplit("/", 1)[-1]
     desired = {
         "account": account,
@@ -84,14 +87,16 @@ def run(args, state_dir):
         return
     manifest_path = state_dir / "deployment.json"
     old = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    if old and old["cluster"] != args.cluster:
+        raise ValueError("This --state-dir belongs to another cluster; choose a separate directory")
     if old and old["desired"] != desired:
         raise ValueError(
-            "Deployment settings changed. Stop the cluster and use a new --state-dir "
-            "to apply new settings; existing jobs are never replaced automatically."
+            "Deployment settings changed. Stop the server job and use a new --state-dir; "
+            "use a new cluster for hardware or network changes."
         )
     ensure_profile(session.client("iam"))
     group_id, group_name = ensure_security_group(
-        ec2, subnet["VpcId"], args.cluster, args.client_cidr, args.security_group_id
+        ec2, subnet["VpcId"], args.cluster, args.client_cidr, port, args.security_group_id
     )
     config = {
         "aws": {
@@ -109,7 +114,7 @@ def run(args, state_dir):
     # Import only after selecting this deployment's config; no ~/.sky edits.
     import sky
 
-    records = sky.get(sky.status(cluster_names=[args.cluster]))
+    records = sky.get(sky.status(cluster_names=[args.cluster], refresh=sky.StatusRefreshMode.FORCE))
     if records:
         verify_instance_network(ec2, records[0]["handle"].cluster_name_on_cloud, args.subnet_id, group_id)
     if records and records[0]["status"].value == "UP":
@@ -123,14 +128,14 @@ def run(args, state_dir):
             ):
                 raise RuntimeError(
                     "This cluster has an active job without matching ready state. "
-                    "Inspect uv run --frozen sky queue/logs "
+                    "Inspect uv run sky queue/logs "
                     "and explicitly cancel it before retrying; no second server was started."
                 )
             wait_healthy(sky, args.cluster, old["job_id"], old["endpoint"], 60)
             print(f"Reusing endpoint: {old['endpoint']}\nbase_model: {base_model}")
             return
     elif records and records[0]["status"].value != "STOPPED":
-        raise RuntimeError("Cluster provisioning is already in progress; inspect uv run --frozen sky status/logs")
+        raise RuntimeError("Cluster provisioning is already in progress; inspect uv run sky status/logs")
     manifest = {
         "desired": desired,
         "cluster": args.cluster,
@@ -149,7 +154,7 @@ def run(args, state_dir):
     print(f"SkyPilot request: {request}", flush=True)
     job_id, handle = sky.stream_and_get(request)
     manifest["instance_id"] = verify_instance_network(ec2, handle.cluster_name_on_cloud, args.subnet_id, group_id)
-    endpoint = f"http://{handle.head_ip}:18080"
+    endpoint = f"http://{handle.head_ip}:{port}"
     manifest.update(job_id=job_id, endpoint=endpoint, status="waiting")
     write_json(manifest_path, manifest)
     wait_healthy(sky, args.cluster, job_id, endpoint, args.timeout)
@@ -187,9 +192,9 @@ def main():
         except Exception:
             print(
                 f"Deployment did not complete. State/logs: {state_dir}\n"
-                f"Inspect: uv run --frozen sky queue {args.cluster}\n"
-                f"Logs: uv run --frozen sky logs {args.cluster}\n"
-                f"Stop billing for compute: uv run --frozen sky stop {args.cluster}\n"
+                f"Inspect: uv run sky queue {args.cluster}\n"
+                f"Logs: uv run sky logs {args.cluster}\n"
+                f"Stop billing for compute: uv run sky stop {args.cluster}\n"
                 "No resources were automatically deleted.",
                 file=sys.stderr,
             )

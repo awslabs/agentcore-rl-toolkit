@@ -164,7 +164,7 @@ def client_network(value):
     return str(network)
 
 
-def ingress_rules(group_id, cidr):
+def ingress_rules(group_id, cidr, endpoint_port):
     return [
         {
             "IpProtocol": "tcp",
@@ -172,7 +172,7 @@ def ingress_rules(group_id, cidr):
             "ToPort": port,
             "IpRanges": [{"CidrIp": cidr}],
         }
-        for port in (22, 18080)
+        for port in (22, endpoint_port)
     ] + [{"IpProtocol": "-1", "UserIdGroupPairs": [{"GroupId": group_id}]}]
 
 
@@ -191,7 +191,7 @@ def permits(rule, wanted):
     )
 
 
-def ensure_security_group(ec2, vpc_id, cluster, cidr, group_id=None):
+def ensure_security_group(ec2, vpc_id, cluster, cidr, endpoint_port, group_id=None):
     name = f"skyrl-tinker-{cluster}"
     if group_id:
         groups = ec2.describe_security_groups(GroupIds=[group_id])["SecurityGroups"]
@@ -225,7 +225,7 @@ def ensure_security_group(ec2, vpc_id, cluster, cidr, group_id=None):
             "GroupName": name,
             "IpPermissions": [],
         }
-    for rule in ingress_rules(group["GroupId"], cidr):
+    for rule in ingress_rules(group["GroupId"], cidr, endpoint_port):
         if any(permits(existing, rule) for existing in group["IpPermissions"]):
             continue
         if group_id:

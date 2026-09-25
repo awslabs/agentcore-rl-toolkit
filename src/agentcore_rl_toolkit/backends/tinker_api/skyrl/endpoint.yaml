@@ -1,4 +1,4 @@
-# Use uv run --frozen python deploy.py: it supplies the region, subnet's zone, regional AMI ID and
+# Use uv run python deploy.py: it supplies the region, subnet's zone, regional AMI ID and
 # private SkyPilot config.
 name: skyrl-tinker-endpoint
 
@@ -13,7 +13,6 @@ workdir: .
 envs:
   SKYRL_COMMIT: f4ecdd09c2df6085db92e2d08d5ec366e9ba8506
   MODEL_ID: Qwen/Qwen3.5-4B
-  MODEL_REVISION: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
   TINKER_PORT: "18080"
 
 setup: |

@@ -7,11 +7,13 @@ active training client per endpoint.
 
 Use these files as a starting point for your own single-node deployment:
 
-- `endpoint.yaml`: set the model ID and revision, SkyRL revision, and EC2 instance type.
+- `endpoint.yaml`: set the model ID, SkyRL revision, and EC2 instance type.
 - `backend_config.json`: set the training GPU count, inference replicas, parallelism,
   batch sizes, and context limits to match your model and hardware.
 
 Adjust the two configs together and validate your chosen configuration.
+Model downloads use Hugging Face `main` when setup runs; optionally set
+`envs.MODEL_REVISION` to a tag or commit to keep a fixed model version.
 
 ## Prerequisites
 
@@ -21,11 +23,13 @@ Adjust the two configs together and validate your chosen configuration.
 - An existing private subnet with a unique `Name` tag in the region and outbound
   HTTPS access for packages and model weights.
 
-The launcher needs SSH access (TCP 22) and endpoint access (TCP 18080); the training
-client needs TCP 18080. Routing and firewalls must permit these connections.
+The launcher needs SSH access (TCP 22) and endpoint access (`TINKER_PORT`, default
+18080); the training client needs the endpoint port. Routing and firewalls must
+permit these connections.
 `--client-cidr` allows a source IPv4 range on both ports. For one host in the same
 VPC, use its private IP plus `/32` (find it in EC2 details or `ip -4 addr`).
 For separate hosts, use a suitable private subnet CIDR or a preconfigured security group.
+A supplied security group must allow the client CIDR on both ports and all traffic within the group.
 
 ## Deploy
 
@@ -40,7 +44,7 @@ From this directory, using your AWS profile:
 ```bash
 export AWS_PROFILE=my-profile
 
-uv run --frozen python deploy.py \
+uv run python deploy.py \
   --region us-west-2 \
   --cluster skyrl-tinker-endpoint \
   --subnet-id subnet-YOUR_PRIVATE_SUBNET \
@@ -100,11 +104,11 @@ client and sampler can take several minutes to initialize.
 ## Manage and resume
 
 ```bash
-uv run --frozen sky queue skyrl-tinker-endpoint
-uv run --frozen sky logs skyrl-tinker-endpoint
-uv run --frozen sky stop skyrl-tinker-endpoint   # preserve EBS
+uv run sky queue skyrl-tinker-endpoint
+uv run sky logs skyrl-tinker-endpoint
+uv run sky stop skyrl-tinker-endpoint   # preserve EBS
 # Deletes EC2 and root EBS. Back up checkpoints first.
-uv run --frozen sky down skyrl-tinker-endpoint
+uv run sky down skyrl-tinker-endpoint
 ```
 
 | Remote path | Storage | Contents |
@@ -115,11 +119,12 @@ uv run --frozen sky down skyrl-tinker-endpoint
 
 Repeat the deployment command to reuse a running endpoint or resume after `stop`.
 Stop/start preserves EBS and clears instance store; continuing training requires
-reconnecting and explicitly loading a saved checkpoint. Configuration changes
-require stopping the cluster and selecting a new `--state-dir`.
+reconnecting and explicitly loading a saved checkpoint. To change the model or
+backend config, stop the server job and use a new `--state-dir`. For changes to
+the instance type, AMI, or network, use a new cluster name.
 
 Failures leave resources in place. Check queue/logs; if an active job blocks a
-retry, inspect it and explicitly cancel it with `uv run --frozen sky cancel CLUSTER JOB_ID`.
+retry, inspect it and explicitly cancel it with `uv run sky cancel CLUSTER JOB_ID`.
 The endpoint stays running while idle, so stop it when finished. EBS and any
 capacity reservation retain their own charges.
 
