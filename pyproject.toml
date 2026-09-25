@@ -67,17 +67,14 @@ gateway = [
     "tokenizers>=0.22.2",  # native async_encode
     "jmespath>=1.0",
 ]
-# NOTE: the Tinker backend (TinkerSdkBackend + TinkerRenderer) needs `tinker` and
-# `tinker-cookbook`; install them manually (`pip install tinker tinker-cookbook`) to use
-# it. They are not declared as an extra, but the reason they *could not* be is gone: it
-# was that they require Python >=3.11 while this package supported >=3.10, which made the
-# pin unsatisfiable on the floor. The floor is now >=3.11, so a [tinker] extra is
-# available whenever the backend wants one. Both pull torch.
-#
-# NOTE: HfTemplateRenderer parses tool calls with a dependency-free regex covering the
-# common <tool_call><function=...> format, and reasoning via a </think> split. Engine
-# tool/reasoning parsers (sglang, vllm) are not a declared dependency; a caller that
-# needs one for an exotic format installs it and passes a parser name explicitly.
+tinker_api = [
+    # Client only. Install [gateway] for HF rendering and trajectory capture.
+    # SkyRL / Megatron / vLLM live in the endpoint's separate GPU environment.
+    "tinker==0.30.1",
+]
+tinker_skyrl = [
+    "tinker==0.24.1",
+]
 rollout = [
     # Driving containerized rollouts: agentcore_rl_toolkit.aws_tools and
     # .rollout_session. Trainer- and host-side only, like [gateway] — the agent-side
@@ -223,10 +220,12 @@ verl-megatron = [
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
 [tool.uv]
-# Declaring verl and rllm as conflicting extras lets uv resolve each
-# in its own fork instead of forcing one universal lock.
-#
+# Resolve incompatible extras and groups in separate forks of the lockfile.
 conflicts = [
+    [
+        { extra = "tinker_api" },
+        { extra = "tinker_skyrl" },
+    ],
     [
         { extra = "verl" },
         { extra = "rllm" },

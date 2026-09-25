@@ -32,6 +32,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
 | `src/agentcore_rl_toolkit/backends/verl/` | verl backend: `AgentCoreAgentLoop` plugged into verl's standard main_ppo entrypoint via the rollout gateway |
+| `src/agentcore_rl_toolkit/backends/tinker_api/` | CPU training loop over a Tinker-compatible endpoint, with HF rendering and synchronous group-relative updates |
 | `src/agentcore_rl_toolkit/backends/experimental/slime/` | Experimental slime backend: `generate` + `normalize_episode_rewards` hooks for slime's `--custom-generate-function-path` / `--custom-reward-post-process-path` (see [Experimental slime backend](#experimental-slime-backend-backendsexperimentalslime)) |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
 | `sandboxd/` | Go daemon (`agentcore-sandboxd`) for session health and recoverable command execution |
@@ -135,7 +136,7 @@ sample-only backends like Tinker, which cannot render themselves.
 |---|---|---|
 | `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`. Each training backend converts this to its native sample type in its own process. |
 | `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation and parallel tool-call branches; re-tokenization drift splits records while preserving generated tokens (CLEAN / FORK). Tokenizer-free and torch-free. |
-| `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (default, HF `apply_chat_template`) or `TinkerRenderer` (needs `tinker-cookbook`, installed manually). |
+| `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (HF `apply_chat_template`), shared by all sampling backends. |
 | `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
 | Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
 | `RolloutGateway` | `gateway.py` | Assembles tokenizer + renderer + backend + adapters onto one aiohttp app sharing one `TrajectoryManager`. Session identity rides in the api-key / Bearer slot; `base_url` is a fixed gateway address (no per-session URLs). |
@@ -187,17 +188,20 @@ drains the tree into `list[TraceRecord]`.
   schema-based parsing (`HfTemplateRenderer` with no custom parsers); injecting the same
   SGLang-native parsers via the `reasoning_parser` / `tool_parser` kwargs is a natural
   extension if tool-bearing or reasoning-bearing models are served.
-- For the Tinker backend (`TinkerSdkBackend` + `TinkerRenderer`), install `tinker` and
-  `tinker-cookbook` manually — they are not declared as an extra. Both pull torch. (The
-  original reason no longer applies: they require Python ≥3.11, which was unsatisfiable
-  when this package's floor was ≥3.10. The floor is now ≥3.11.)
+- For Tinker API training (`backends/tinker_api/`), install `[gateway,tinker_api]`
+  for the official service or `[gateway,tinker_skyrl]` for the tested SkyRL version.
+  `TinkerSdkBackend` uses the Tinker SDK for token sampling and the gateway uses
+  `HfTemplateRenderer`. SkyRL and its GPU dependencies live in a separate service
+  environment. The synchronous recipe and instructions for connecting to an existing endpoint are in
+  `src/agentcore_rl_toolkit/backends/tinker_api/README.md`.
 
 The core (`TraceRecord`, `TrajectoryManager`, `Renderer` protocol, `SamplingBackend`
 protocol) imports torch-free and aiohttp-free; `RolloutGateway` is exposed lazily so
 importing the package never requires aiohttp. Tests live in `tests/rollout_gateway/`.
 
 **Status.** The capture layer above is implemented and tested. Training-backend consumers:
-the **verl backend** (`backends/verl/`, see below) and the **experimental slime backend**
+the **verl backend** (`backends/verl/`, see below), the **Tinker API backend**
+(`backends/tinker_api/`), and the **experimental slime backend**
 (`backends/experimental/slime/`, see below). Other
 backends' dispatch/reward-join glue is not yet on the main branch — a prototype
 dispatcher is parked on the `wip/online-rl-dispatch` branch.
