@@ -22,6 +22,6 @@ if ! git -C "$SKYRL_DIR" cat-file -e "$SKYRL_COMMIT^{commit}" 2>/dev/null; then
 fi
 git -C "$SKYRL_DIR" checkout --detach "$SKYRL_COMMIT"
 cd "$SKYRL_DIR"
-uv sync --frozen --python 3.12 --extra tinker --extra fsdp
-uv run --frozen --extra tinker --extra fsdp \
+uv sync --frozen --python 3.12 --extra tinker --extra megatron --extra aws
+uv run --frozen --extra tinker --extra megatron --extra aws \
   hf download "$MODEL_ID" --revision "$MODEL_REVISION" --local-dir "$MODEL_DIR"

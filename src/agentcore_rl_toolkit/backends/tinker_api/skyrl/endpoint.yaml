@@ -1,4 +1,4 @@
-# Use deploy.sh: it supplies the region, subnet's zone, regional AMI ID and
+# Use uv run --frozen python deploy.py: it supplies the region, subnet's zone, regional AMI ID and
 # private SkyPilot config.
 name: skyrl-tinker-endpoint
 

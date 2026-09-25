@@ -2,8 +2,6 @@
 export SKYRL_HOME="$HOME/skyrl"
 export SKYRL_STATE_DIR="$HOME/skyrl-state"
 export TMPDIR=/opt/dlami/nvme/skyrl/tmp
-export TMP="$TMPDIR"
-export TEMP="$TMPDIR"
 # Source, dependencies, weights and reusable compilation caches stay on EBS.
 export SKYRL_DIR="$SKYRL_HOME/SkyRL"
 export MODEL_DIR="$SKYRL_HOME/models/${MODEL_ID##*/}"
@@ -20,5 +18,7 @@ export RAY_TMPDIR="$TMPDIR/ray"
 export CUDA_HOME=/usr/local/cuda-13.0
 export PATH="$HOME/.local/bin:$CUDA_HOME/bin:$PATH"
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+export NVTE_FLASH_ATTN=0
+export CUDA_DEVICE_MAX_CONNECTIONS=1
 # SkyRL starts its own Ray runtime, separate from SkyPilot's runtime.
 unset RAY_ADDRESS

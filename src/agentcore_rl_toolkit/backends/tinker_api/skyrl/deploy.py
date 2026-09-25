@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def wait_healthy(sky, cluster, job_id, endpoint, timeout):
             statuses = sky.get(sky.job_status(cluster, job_ids=[job_id]))
             status = statuses.get(job_id)
             if status is not None and status.is_terminal():
-                raise RuntimeError(f"Endpoint job {job_id} ended: {status}. Run sky logs.")
+                raise RuntimeError(f"Endpoint job {job_id} ended: {status}. Run uv run --frozen sky logs.")
             if status is not None and status.value == "RUNNING":
                 try:
                     response = client.get(endpoint + "/api/v1/healthz")
@@ -50,7 +51,7 @@ def wait_healthy(sky, cluster, job_id, endpoint, timeout):
                     pass
             print(f"Waiting for endpoint (job {job_id}: {status})...", flush=True)
             time.sleep(15)
-    raise TimeoutError(f"Endpoint not ready after {timeout}s. Run sky logs {cluster} {job_id}")
+    raise TimeoutError(f"Endpoint not ready after {timeout}s. Run uv run --frozen sky logs {cluster} {job_id}")
 
 
 def run(args, state_dir):
@@ -72,9 +73,9 @@ def run(args, state_dir):
         "security_group_id": args.security_group_id,
         "reservation": args.reservation,
         "task": task,
-        "scripts": {
+        "files": {
             name: hashlib.sha256((HERE / name).read_bytes()).hexdigest()
-            for name in ("environment.sh", "setup.sh", "serve.sh")
+            for name in ("environment.sh", "setup.sh", "serve.sh", "backend_config.json")
         },
     }
     print(json.dumps(desired, indent=2), flush=True)
@@ -121,14 +122,15 @@ def run(args, state_dir):
                 or old.get("status") != "ready"
             ):
                 raise RuntimeError(
-                    "This cluster has an active job without matching ready state. Inspect sky queue/logs "
+                    "This cluster has an active job without matching ready state. "
+                    "Inspect uv run --frozen sky queue/logs "
                     "and explicitly cancel it before retrying; no second server was started."
                 )
             wait_healthy(sky, args.cluster, old["job_id"], old["endpoint"], 60)
             print(f"Reusing endpoint: {old['endpoint']}\nbase_model: {base_model}")
             return
     elif records and records[0]["status"].value != "STOPPED":
-        raise RuntimeError("Cluster provisioning is already in progress; inspect sky status/logs")
+        raise RuntimeError("Cluster provisioning is already in progress; inspect uv run --frozen sky status/logs")
     manifest = {
         "desired": desired,
         "cluster": args.cluster,
@@ -176,7 +178,7 @@ def main():
         parser.error("--cluster must be a lowercase SkyPilot name, at most 40 characters")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
-    state_dir = (args.state_dir or Path(os.environ["TMPDIR"]) / "skyrl-endpoints" / args.cluster).resolve()
+    state_dir = (args.state_dir or Path(tempfile.gettempdir()) / "skyrl-endpoints" / args.cluster).resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
     with (state_dir / "deploy.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -185,9 +187,9 @@ def main():
         except Exception:
             print(
                 f"Deployment did not complete. State/logs: {state_dir}\n"
-                f"Inspect: ./deploy.sh sky queue {args.cluster}\n"
-                f"Logs: ./deploy.sh sky logs {args.cluster}\n"
-                f"Stop billing for compute: ./deploy.sh sky stop {args.cluster}\n"
+                f"Inspect: uv run --frozen sky queue {args.cluster}\n"
+                f"Logs: uv run --frozen sky logs {args.cluster}\n"
+                f"Stop billing for compute: uv run --frozen sky stop {args.cluster}\n"
                 "No resources were automatically deleted.",
                 file=sys.stderr,
             )
