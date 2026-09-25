@@ -30,7 +30,7 @@ from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
 # imported lazily in VllmGatewayEndpoint.start() so a Bedrock-only run stays light.
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.agentcore_a2a_session import AgentCoreA2ASession
-from agentcore_rl_toolkit.rollout_session.exception_utils import exception_to_string
+from agentcore_rl_toolkit.rollout_session.exception_utils import describe_with_root_cause, exception_to_string
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
     RolloutSession,
     RolloutSessionBounds,
@@ -526,7 +526,13 @@ async def run_one(
             )
         await meta.set("aborted", exception is not None)
     except Exception as error:
-        logger.error("rollout %s (instance=%s n_idx=%s) failed: %r", session_id, meta["instance_id"], n_idx, error)
+        logger.error(
+            "rollout %s (instance=%s n_idx=%s) failed: %s",
+            session_id,
+            meta["instance_id"],
+            n_idx,
+            describe_with_root_cause(error),
+        )
         exception = exception_to_string(error)
         await meta.set("aborted", True)
     finally:

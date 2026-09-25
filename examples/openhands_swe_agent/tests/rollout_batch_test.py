@@ -42,7 +42,8 @@ TASK_ROW = {"task_id": "repo__proj-1", "instance_id": "repo__proj-1"}
 class FakeSession:
     """A rollout session that records the task each phase saw."""
 
-    def __init__(self, *args, rollout: RolloutDumpResponse = GOOD, **kwargs):
+    def __init__(self, *args, rollout: RolloutDumpResponse = GOOD, error: Exception | None = None, **kwargs):
+        self.error = error
         self.rollout = rollout
         self.setup_task: dict | None = None
         self.run_task: dict | None = None
@@ -59,6 +60,8 @@ class FakeSession:
     async def setup(self, task):
         # a copy: run() mutates the same dict, and the question is what setup saw
         self.setup_task = dict(task)
+        if self.error is not None:
+            raise self.error
 
     async def run(self, task):
         self.run_task = dict(task)
@@ -178,9 +181,9 @@ class RunOneTest(IsolatedAsyncioTestCase):
         for name, original in self._originals.items():
             setattr(bae, name, original)
 
-    async def run_one(self, rollout: RolloutDumpResponse, **config_overrides):
+    async def run_one(self, rollout: RolloutDumpResponse, error: Exception | None = None, **config_overrides):
         def make_session(*args, **kwargs):
-            session = FakeSession(rollout=rollout)
+            session = FakeSession(rollout=rollout, error=error)
             self.sessions.append(session)
             return session
 
@@ -243,6 +246,20 @@ class RunOneTest(IsolatedAsyncioTestCase):
         # a local one that only points back at the harness.
         _, dumped = await self.run_one(FAILED)
         self.assertEqual(dumped["exception"], "Traceback: agent crashed")
+
+    async def test_a_setup_error_logs_a_summary_but_dumps_the_full_trace(self):
+        error = RuntimeError(
+            "setup did not reach input-required (state Traceback (most recent call last):\n"
+            '  File "/agent.py", line 1, in setup\n'
+            "RuntimeError: registry authentication denied"
+        )
+
+        with self.assertLogs(bae.logger, level="ERROR") as logs:
+            _, dumped = await self.run_one(GOOD, error=error)
+
+        self.assertIn("failed: RuntimeError: setup did not reach input-required", logs.output[0])
+        self.assertNotIn("Traceback", logs.output[0])
+        self.assertIn("Traceback (most recent call last):", dumped["exception"])
 
     async def test_a_silent_failure_is_aborted_with_a_reason(self):
         # aborted with a null exception would be uncategorisable in the report.

@@ -54,6 +54,26 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 logging.getLogger("backoff").setLevel(logging.ERROR)
 
+
+class _SettledRolloutErrorFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if not message.startswith("Error in _run_prompt for uid=") or not isinstance(record.exc_info, tuple):
+            return True
+
+        error = record.exc_info[1]
+        summary = str(error).strip().splitlines()[-1] or type(error).__name__
+        record.msg = f"{message}: {summary}"
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+_tq_logger = logging.getLogger("verl.trainer.ppo.v1.agent_loop_tq")
+if not any(isinstance(log_filter, _SettledRolloutErrorFilter) for log_filter in _tq_logger.filters):
+    _tq_logger.addFilter(_SettledRolloutErrorFilter())
+
 # The canonical name of the rollout's own score inside ``reward_extra_info``. DAPO group
 # filtering reads ``algorithm.filter_groups.metric`` from that dict, and the v1 replay buffer
 # raises when a finished trajectory lacks the configured key -- so it must be present on
