@@ -80,9 +80,8 @@ determined by the number of rollouts requested.
 
 ## Keep optimizer steps tied to the training configuration
 
-This became an optimization-schedule problem in our verl integration. With
-verl 0.9.0's v1 fixed-row batching path, expanded rows were partitioned into
-mini-batches of a configured row count. Each mini-batch triggered an optimizer
+In ART's original verl integration, training rows were grouped into mini-batches
+of a fixed size. Each mini-batch triggered an optimizer
 update. More rows could therefore mean more Adam steps, even when the source
 prompt batch and PPO epoch count were unchanged.
 
@@ -106,17 +105,17 @@ uses verl's existing worker interface to specify the **number of
 mini-batches**, instead of their fixed row size. With this configuration:
 
 ```text
-optimizer partitions = source-prompt batch size / PPO mini-batch size
-optimizer steps      = optimizer partitions × PPO epochs
+mini-batches    = source-prompt batch size / PPO mini-batch size
+optimizer steps = mini-batches × PPO epochs
 ```
 
 All rows are still consumed. A larger expanded batch requires more
-forward/backward work, but gradients accumulate within the configured partitions
+forward/backward work, but gradients accumulate within the configured mini-batches
 before the optimizer advances. Row losses remain additive, with the same
 normalization.
 
-Padding follows the same schedule. Rows need only be divisible across optimizer
-partitions and data-parallel ranks. For one partition and two ranks, 513 rows
+Padding follows the same schedule. Rows need only be divisible across
+mini-batches and data-parallel ranks. For one mini-batch and two ranks, 513 rows
 become 514, rather than being rounded up to the next 512-row multiple, 1,024.
 
 ### MigrationBench: validation after the batching fix
@@ -162,7 +161,7 @@ For a continuing conversation, the next input is constructed as:
 ```text
 next input = saved token history
            + missing assistant-closing tokens
-           + new messages and next assistant opening
+           + tokens for new messages and the next assistant opening
 ```
 
 The new messages include tool results or newly appended user instructions.
@@ -284,13 +283,13 @@ reduction is smaller than the actor-update reduction because agent execution,
 generation, and evaluation remain substantial parts of elapsed time. The totals
 include differences in generated trajectories as well as row consolidation.
 
+The linear run reached a best validation reward of **78.26%**, comparable to the
+**78.76%** peak in the earlier tree-mode run.
+
 These runs use synchronous training, so each batch waits for its slowest rollout.
 Linear mode may also speed up individual rollouts through better prefix-cache
 reuse; asynchronous training could translate those gains into higher overall
 throughput.
-
-The linear run reached a best validation reward of **78.26%**, matching the
-**78.76%** peak in the earlier tree-mode run.
 
 ## Using the two mechanisms together
 
