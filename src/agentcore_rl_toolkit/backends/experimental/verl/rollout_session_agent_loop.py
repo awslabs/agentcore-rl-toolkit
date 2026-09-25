@@ -328,14 +328,14 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         await self.meta.update(update)
         await self.save_to_s3(task, recs, exc, dump)
 
+        # A failed session logs a single summary line; the full traceback (with locals,
+        # via exception_to_string) is preserved in the S3 dump written by save_to_s3.
         if exc is not None:
-            logger.error(
-                f"Rollout {self.session_id} has trainer exception " f"= {describe_with_root_cause(exc)}",
-                exc_info=trainer_exception,
-            )
+            logger.error(f"Rollout {self.session_id} has trainer exception = {describe_with_root_cause(exc)}")
 
         if dump is not None and dump.failure_reason() is not None:
-            logger.error(f"Rollout {self.session_id} has agent exception = {dump.failure_reason()}")
+            summary = dump.failure_reason().strip().splitlines()[-1]
+            logger.error(f"Rollout {self.session_id} has agent exception = {summary}")
 
         return recs
 
