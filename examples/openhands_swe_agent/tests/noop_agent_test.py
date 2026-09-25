@@ -8,14 +8,9 @@ from unittest import mock
 
 from swe_agent_server import noop_agent
 
-from agentcore_rl_toolkit.rollout_session.wire import RolloutStartRequest
 
-
-def _request() -> RolloutStartRequest:
-    return RolloutStartRequest(
-        rollout_id="r",
-        task_input=dict(agent="noop", repo_path="/testbed", base_commit="HEAD"),
-    )
+def _request() -> dict:
+    return dict(agent="noop", repo_path="/testbed", base_commit="HEAD")
 
 
 class RolloutTest(unittest.TestCase):
@@ -36,7 +31,7 @@ class RolloutTest(unittest.TestCase):
         assert dump.task_output is not None
         self.assertEqual(dump.task_output["git_diff"], "")
         # The repo is only read, never written: the diff is the backend's whole turn.
-        capture.assert_called_once_with(_request().task_input)
+        capture.assert_called_once_with(_request())
 
     def test_reports_resolved_base_commit_as_reward_one(self):
         # A task resolved with no changes is a broken task, not an error: reward 1.0
@@ -77,7 +72,7 @@ class BackendDispatchTest(unittest.TestCase):
         from swe_agent_server import app
 
         with self.assertRaises(ValueError):
-            app.run_rollout(RolloutStartRequest(rollout_id="r", task_input=dict(agent="nope")))
+            app.run_rollout(dict(agent="nope"))
 
 
 if __name__ == "__main__":

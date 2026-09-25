@@ -14,8 +14,7 @@ a training run, which never writes a report at all.
 
 An experiment name is not unique -- re-running one appends another run to the same
 partition -- so the latest run wins by default, ``--runs`` lists what is there, and
-``--start-at`` pins an older one by a prefix of its start timestamp. Needs only AWS
-credentials that can read the table named in ``config.toml`` (``[storage]``).
+``--start-at`` pins an older one by a prefix of its start timestamp.
 """
 
 import argparse
@@ -65,16 +64,52 @@ def parse_args():
     return args
 
 
+def pass_distribution(rows: list[dict]) -> dict:
+    """How a task's samples split between passing and failing, beyond pass@k.
+
+    A session "passed" iff it resolved its task; aborted rows never resolve, so they
+    count as fails (matching :func:`summarize`, which keeps aborted rollouts in the
+    pass@k denominator). Sessions are grouped by ``task_id`` and each task is classified
+    by whether *all* of its sessions passed, *all* failed, or the outcomes were mixed --
+    the three ratios partition the tasks and sum to 1.
+    """
+    by_task: dict = {}
+    for row in rows:
+        by_task.setdefault(row.get("task_id"), []).append(bool(row.get("resolved")))
+
+    num_sessions = len(rows)
+    sessions_passed = sum(1 for row in rows if row.get("resolved"))
+
+    num_tasks = len(by_task)
+    all_pass = sum(1 for outcomes in by_task.values() if all(outcomes))
+    all_fail = sum(1 for outcomes in by_task.values() if not any(outcomes))
+    mixed = num_tasks - all_pass - all_fail
+
+    return {
+        "pass_at_1": (sessions_passed / num_sessions) if num_sessions else None,
+        "all_pass": (all_pass / num_tasks) if num_tasks else None,
+        "all_fail": (all_fail / num_tasks) if num_tasks else None,
+        "mixed": (mixed / num_tasks) if num_tasks else None,
+        "mixed_count": mixed,
+        "samples_per_task": max((len(o) for o in by_task.values()), default=0),
+    }
+
+
 def print_summary(run: Run, report: dict) -> None:
     """The header, then a row per numeric field the rollouts carried."""
-    counts, reward = report["counts"], report["reward"]
+    counts, reward, dist = report["counts"], report["reward"], report["pass_distribution"]
+    k = dist["samples_per_task"]
     print(
         f"\n{run.experiment_name}  run {run.experiment_start_at}\n"
         f"  rollouts {counts['rollouts']} (ok {counts['rollouts_ok']}, "
         f"aborted {counts['rollouts_aborted']}) over {counts['tasks']} tasks\n"
         f"  pass@{reward['pass_at_k_k']} {_number(reward['pass_at_k'])}  "
         f"tasks_passed {reward['tasks_passed']}  "
-        f"mean_reward {_number(reward['mean_reward'])}"
+        f"mean_reward {_number(reward['mean_reward'])}\n"
+        f"  pass@1 {_number(dist['pass_at_1'])}  "
+        f"all-pass@{k} {_number(dist['all_pass'])}  "
+        f"all-fail@{k} {_number(dist['all_fail'])}  "
+        f"mixed@{k} {_number(dist['mixed'])} ({dist['mixed_count']})"
     )
 
     table = pl.from_dicts(
@@ -121,6 +156,7 @@ async def analyze(experiment_name: str, args, table_name: str, region_name: str)
     # No `k`: this script never sees the run's config, so pass@k is over the samples
     # actually recorded.
     report = summarize(run.rows)
+    report["pass_distribution"] = pass_distribution(run.rows)
     print_summary(run, report)
 
     if args.output is not None:

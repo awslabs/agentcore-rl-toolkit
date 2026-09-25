@@ -6,13 +6,10 @@ import subprocess
 from swe_agent_server.evaluation import capture_git_diff, run_evaluation
 from swe_agent_server.utils import clean_metrics, exc_to_full_string
 
-from agentcore_rl_toolkit.rollout_session.wire import (
-    RolloutDumpResponse,
-    RolloutStartRequest,
-)
+from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
 
-def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
+def rollout(task_input: dict) -> RolloutDumpResponse:
     """Apply ``task_input["patch"]``, then grade the result.
 
     A reward other than 1.0 means the eval harness is broken. Never raises --
@@ -23,8 +20,8 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
     eval_report = None
 
     try:
-        repo_path = request.task_input["repo_path"]
-        patch = request.task_input["patch"]
+        repo_path = task_input["repo_path"]
+        patch = task_input["patch"]
 
         # ``-p1`` matches the repo-relative paths git produces.
         subprocess.run(
@@ -35,9 +32,9 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
             capture_output=True,
         )
 
-        git_diff = capture_git_diff(request.task_input)
+        git_diff = capture_git_diff(task_input)
 
-        eval_report = run_evaluation(request.task_input)
+        eval_report = run_evaluation(task_input)
 
     except Exception as error:
         logging.error("Exception during oracle rollout", exc_info=error)

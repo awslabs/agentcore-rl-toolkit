@@ -5,13 +5,10 @@ import logging
 from swe_agent_server.evaluation import capture_git_diff, run_evaluation
 from swe_agent_server.utils import clean_metrics, exc_to_full_string
 
-from agentcore_rl_toolkit.rollout_session.wire import (
-    RolloutDumpResponse,
-    RolloutStartRequest,
-)
+from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
 
-def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
+def rollout(task_input: dict) -> RolloutDumpResponse:
     """Change nothing, then grade the untouched repo. Never raises -- see ``exception``.
 
     A reward other than 0.0 means the task grades as resolved without any work
@@ -23,9 +20,9 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
 
     try:
         # Should come back empty; a non-empty diff means a dirty testbed.
-        git_diff = capture_git_diff(request.task_input)
+        git_diff = capture_git_diff(task_input)
 
-        eval_report = run_evaluation(request.task_input)
+        eval_report = run_evaluation(task_input)
 
     except Exception as error:
         logging.error("Exception during noop rollout", exc_info=error)

@@ -6,17 +6,13 @@ from unittest import mock
 
 from swe_agent_server import rollout
 
-from agentcore_rl_toolkit.rollout_session.wire import RolloutSetupRequest
 
-
-def _request(**task_input) -> RolloutSetupRequest:
-    return RolloutSetupRequest(
-        task_input=dict(
-            agent="openhands",
-            docker_image_namespace="acct.dkr.ecr.us-west-2.amazonaws.com/cache",
-            docker_image_uri="swebench/sweb.eval.x86_64.some_1776_task:latest",
-            **task_input,
-        )
+def _request(**task_input) -> dict:
+    return dict(
+        agent="openhands",
+        docker_image_namespace="acct.dkr.ecr.us-west-2.amazonaws.com/cache",
+        docker_image_uri="swebench/sweb.eval.x86_64.some_1776_task:latest",
+        **task_input,
     )
 
 

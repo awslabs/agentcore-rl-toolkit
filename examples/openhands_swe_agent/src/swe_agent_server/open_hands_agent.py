@@ -14,13 +14,9 @@ from pydantic import PrivateAttr
 from swe_agent_server.evaluation import capture_git_diff, run_evaluation
 from swe_agent_server.utils import clean_metrics, exc_to_full_string
 
-from agentcore_rl_toolkit.rollout_session.wire import (
-    RolloutDumpResponse,
-    RolloutStartRequest,
-)
+from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
-# Consecutive no-content responses tolerated before finishing: enough for one stray
-# empty turn to recover via the stock nudge, few enough to cut the runaway loop short.
+# No-content responses tolerated before finishing: survives a stray empty turn, still cuts runaway loops.
 MAX_CONSECUTIVE_NO_CONTENT = 3
 
 # A paging command (`git show`, `man`, `help()`) wedges the tmux pane forever: later
@@ -94,7 +90,7 @@ class NoContentTerminatingAgent(Agent):
         await super()._ahandle_tool_calls(message, llm_response, conversation, state, on_event)
 
 
-def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
+def rollout(task_input: dict) -> RolloutDumpResponse:
     conversation = None
     exception = None
     git_diff = None
@@ -107,11 +103,11 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
     token_metrics = {}
 
     try:
-        agent = NoContentTerminatingAgent(llm=LLM(**request.task_input["llm"]), tools=build_tools())
-        workspace = Workspace(working_dir=request.task_input["repo_path"])
+        agent = NoContentTerminatingAgent(llm=LLM(**task_input["llm"]), tools=build_tools())
+        workspace = Workspace(working_dir=task_input["repo_path"])
 
         conversation = Conversation(workspace=workspace, agent=agent, callbacks=[on_conversation_event])
-        message = get_instruction(request.task_input)
+        message = get_instruction(task_input)
         conversation.send_message(message)
 
         try:
@@ -132,9 +128,9 @@ def rollout(request: RolloutStartRequest) -> RolloutDumpResponse:
 
         logging.info(f"Conversation: {conversation.state.model_dump()}")
 
-        git_diff = capture_git_diff(request.task_input)
+        git_diff = capture_git_diff(task_input)
 
-        eval_report = run_evaluation(request.task_input)
+        eval_report = run_evaluation(task_input)
 
     except Exception as e:
         logging.error("Exception during rollout", exc_info=e)

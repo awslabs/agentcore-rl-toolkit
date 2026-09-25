@@ -29,7 +29,7 @@ from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
 # BaseTrace/TraceRecord are torch-free and aiohttp-free; the heavy gateway pieces are
 # imported lazily in VllmGatewayEndpoint.start() so a Bedrock-only run stays light.
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
-from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
+from agentcore_rl_toolkit.rollout_session.agentcore_a2a_session import AgentCoreA2ASession
 from agentcore_rl_toolkit.rollout_session.exception_utils import exception_to_string
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
     RolloutSession,
@@ -487,7 +487,7 @@ async def run_one(
     # No task["llm"] yet: LateBoundLlmSession fills it in once the bounded run reaches
     # `run`, and shares this rollout's `meta` so session keys land in the same item.
     session = LateBoundLlmSession(
-        AgentCoreHttpSession(
+        AgentCoreA2ASession(
             session_id,
             meta,
             runtime_arn=runtime_arn,

@@ -164,7 +164,7 @@ class RunOneTest(IsolatedAsyncioTestCase):
         self.uploads: dict[str, dict] = {}
         self.sessions: list[FakeSession] = []
         self._originals = {
-            name: getattr(bae, name) for name in ("AgentCoreHttpSession", "upload_object", "DynamoDBPersister")
+            name: getattr(bae, name) for name in ("AgentCoreA2ASession", "upload_object", "DynamoDBPersister")
         }
 
         async def fake_upload(s3_uri, region_name, data):
@@ -184,7 +184,7 @@ class RunOneTest(IsolatedAsyncioTestCase):
             self.sessions.append(session)
             return session
 
-        bae.AgentCoreHttpSession = make_session
+        bae.AgentCoreA2ASession = make_session
         config = eval_config(**config_overrides)
         row = await bae.run_one(
             config,
@@ -265,7 +265,7 @@ class RunOneTest(IsolatedAsyncioTestCase):
         def make_session(*args, **kwargs):
             return SlowSession()
 
-        bae.AgentCoreHttpSession = make_session
+        bae.AgentCoreA2ASession = make_session
         config = eval_config(timeout=0.05)
         row = await bae.run_one(
             config,
