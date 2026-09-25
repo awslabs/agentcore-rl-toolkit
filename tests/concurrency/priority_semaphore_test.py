@@ -3,6 +3,7 @@ priorities, permit accounting under cancellation, and the ``slot`` context manag
 """
 
 import asyncio
+import threading
 
 import pytest
 
@@ -117,6 +118,46 @@ async def test_cancelled_waiter_does_not_consume_permit():
     # The release must skip the dead future rather than be swallowed by it.
     await sem.release()
     assert sem.value == 1
+
+
+@pytest.mark.asyncio
+async def test_release_from_a_different_loop_drains_blocked_waiters():
+    """Regression: waiters queued on one event loop are woken by releases on another.
+    """
+    total = 50  # every one of these blocks; there are zero permits to start
+    sem = LocalPrioritySemaphore(value=0)
+    completed: list[int] = []
+    completed_lock = threading.Lock()
+
+    acquire_loop = asyncio.new_event_loop()
+    started = threading.Thread(target=acquire_loop.run_forever, daemon=True)
+    started.start()
+
+    async def waiter(tag: int) -> None:
+        await sem.acquire()
+        with completed_lock:
+            completed.append(tag)
+
+    try:
+        pending = [asyncio.run_coroutine_threadsafe(waiter(i), acquire_loop) for i in range(total)]
+        await asyncio.sleep(0.1)  # let every waiter enqueue; value is 0 so none can proceed
+        assert completed == []
+
+        # Drive the releases from *this* loop -- a different loop than the blocked waiters.
+        for _ in range(total):
+            await sem.release()
+
+        # A cross-loop deadlock would surface here as a timeout rather than a hang.
+        await asyncio.wait_for(
+            asyncio.gather(*(asyncio.wrap_future(p) for p in pending)),
+            timeout=10,
+        )
+    finally:
+        acquire_loop.call_soon_threadsafe(acquire_loop.stop)
+        started.join(timeout=5)
+
+    assert sorted(completed) == list(range(total))
+    assert sem.value == 0  # all permits went to waiters, none left over
 
 
 @pytest.mark.asyncio

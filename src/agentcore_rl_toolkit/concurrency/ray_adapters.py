@@ -9,6 +9,8 @@ locally rather than forwarded: Ray turns an ``@asynccontextmanager`` into an
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, AsyncGenerator
 
+import ray
+
 from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore
 from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
@@ -58,3 +60,25 @@ class RayRateLimiter:
 
     async def wait_async(self) -> None:
         await self._actor.wait_async.remote()
+
+
+class ConcurrencyGroupedSemaphore(LocalPrioritySemaphore):
+    """``LocalPrioritySemaphore`` with ``release`` pinned to its own Ray concurrency group.
+    Routing ``release`` to a dedicated group gives it slots that acquires cannot occupy.
+    """
+
+    @ray.method(concurrency_group="release")
+    async def release(self) -> None:
+        await super().release()
+
+
+def make_priority_semaphore(name: str, semaphore_concurrency: int, acquire_concurrency: int) -> ActorProxy[LocalPrioritySemaphore]:
+    return (
+        ray.remote(concurrency_groups={"release": semaphore_concurrency})(ConcurrencyGroupedSemaphore)
+        .options(
+            name=name,
+            get_if_exists=True,
+            max_concurrency=acquire_concurrency,
+        )
+        .remote(value=semaphore_concurrency)
+    )

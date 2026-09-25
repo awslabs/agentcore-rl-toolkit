@@ -23,6 +23,7 @@ from agentcore_rl_toolkit.concurrency.ray_adapters import (
     RayPriorityAssigner,
     RayPrioritySemaphore,
     RayRateLimiter,
+    make_priority_semaphore,
 )
 from agentcore_rl_toolkit.rollout_session.lifecycle import RolloutSessionBounds
 
@@ -41,9 +42,6 @@ CONTAINER_PRIORITY_ASSIGNER = "container_priority_assigner"
 ROLLOUT_PRIORITY_ASSIGNER = "rollout_priority_assigner"
 SESSION_RATE_LIMITER = "session_create_rate_limiter"
 
-# headroom on the semaphore actors' async slots, which bound queued waiters not permits
-CONCURRENCY_SAFETY_MARGIN = 2
-
 
 @dataclasses.dataclass
 class RolloutSessionAgentLoopResources:
@@ -61,17 +59,6 @@ class RolloutSessionAgentLoopResources:
     ec2_monitor: EC2Monitor | None
 
 
-def _max_concurrency(config: DictConfig) -> int:
-    """How many callers may be queued on a semaphore actor at once.
-
-    Sized as every trajectory of every in-flight batch plus margin. ``num_warmup_batches``
-    exists in all trainer modes, so non-async runs just get an over-generous ceiling.
-    """
-    trajectories_per_batch = config.data.train_batch_size * config.actor_rollout_ref.rollout.n
-    batches_inflight = config.trainer.v1.separate_async.num_warmup_batches + 1
-    return trajectories_per_batch * batches_inflight * CONCURRENCY_SAFETY_MARGIN
-
-
 async def start_rollout_session_agent_loop_resources(
     config: DictConfig,
 ) -> RolloutSessionAgentLoopResources:
@@ -82,32 +69,15 @@ async def start_rollout_session_agent_loop_resources(
     """
     cfg: RolloutSessionAgentLoopConfig = instantiate(config.rollout_session_agent_loop, _convert_="all")
     bounds_cfg = cfg.rollout_session_bounds
-    max_concurrency = _max_concurrency(config)
 
     return RolloutSessionAgentLoopResources(
         # the V1 trainer sets no rollout priority, so each semaphore gets an assigner that
         # numbers groups in arrival order to give it something to order waiters by
-        rollout_semaphore=(
-            ray.remote(LocalPrioritySemaphore)
-            .options(
-                name=ROLLOUT_SEMAPHORE,
-                get_if_exists=True,
-                max_concurrency=max_concurrency,
-            )
-            .remote(value=bounds_cfg["rollout_concurrency"])
-        ),
+        rollout_semaphore=make_priority_semaphore(ROLLOUT_SEMAPHORE, bounds_cfg["rollout_concurrency"], 10_000),
         rollout_priority_assigner=(
             ray.remote(LocalPriorityAssigner).options(name=ROLLOUT_PRIORITY_ASSIGNER, get_if_exists=True).remote()
         ),
-        container_semaphore=(
-            ray.remote(LocalPrioritySemaphore)
-            .options(
-                name=CONTAINER_SEMAPHORE,
-                get_if_exists=True,
-                max_concurrency=max_concurrency,
-            )
-            .remote(value=bounds_cfg["container_concurrency"])
-        ),
+        container_semaphore=make_priority_semaphore(CONTAINER_SEMAPHORE, bounds_cfg["container_concurrency"], 10_000),
         container_priority_assigner=(
             ray.remote(LocalPriorityAssigner).options(name=CONTAINER_PRIORITY_ASSIGNER, get_if_exists=True).remote()
         ),
