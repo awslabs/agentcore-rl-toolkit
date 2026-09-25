@@ -1,0 +1,32 @@
+{
+  "trainer.placement.colocate_all": true,
+  "trainer.placement.policy_num_nodes": 1,
+  "trainer.placement.policy_num_gpus_per_node": 8,
+  "trainer.policy.language_model_only": true,
+  "trainer.policy.megatron_config.tensor_model_parallel_size": 4,
+  "trainer.policy.megatron_config.pipeline_model_parallel_size": 1,
+  "trainer.policy.megatron_config.context_parallel_size": 1,
+  "trainer.policy.megatron_config.lora_config.merge_lora": false,
+  "trainer.micro_forward_batch_size_per_gpu": 1,
+  "trainer.micro_train_batch_size_per_gpu": 1,
+  "trainer.max_prompt_length": 16384,
+  "trainer.logger": "console",
+  "trainer.log_path": "/home/ubuntu/skyrl-state/logs",
+  "trainer.policy.model.lora.lora_sync_path": "/home/ubuntu/skyrl-state/lora-sync",
+  "generator.sampling_params.max_generate_length": 2048,
+  "generator.inference_engine.backend": "vllm",
+  "generator.inference_engine.num_engines": 2,
+  "generator.inference_engine.tensor_parallel_size": 4,
+  "generator.inference_engine.language_model_only": true,
+  "generator.inference_engine.distributed_executor_backend": "mp",
+  "generator.inference_engine.run_engines_locally": true,
+  "generator.inference_engine.weight_sync_backend": "nccl",
+  "generator.inference_engine.gpu_memory_utilization": 0.7,
+  "generator.inference_engine.enforce_eager": false,
+  "generator.inference_engine.engine_init_kwargs": {
+    "max_model_len": 16384,
+    "gdn_prefill_backend": "triton",
+    "disable_custom_all_reduce": true
+  },
+  "generator.batched": true
+}
