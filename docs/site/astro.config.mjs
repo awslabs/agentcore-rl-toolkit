@@ -78,6 +78,10 @@ export default defineConfig({
 							label: 'Growing verifiable training data',
 							slug: 'blog/data-synthesis-v0',
 						},
+						{
+							label: 'Stable Updates, Fewer Rows',
+							slug: 'blog/variable-rows-linear-mode',
+						},
 					],
 				},
 				{
