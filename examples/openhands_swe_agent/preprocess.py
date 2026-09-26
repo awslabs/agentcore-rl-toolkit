@@ -466,6 +466,10 @@ def make_test_patch_script(instance) -> str:
         f"git config --global --add safe.directory {REPO_PATH}",  # for nonroot user
         f"cd {REPO_PATH}",
         f"cat > {PATCH_FILE} <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}",
+        # Task images can have stale index stat data after their working tree was materialized.
+        # A dirty unrelated path makes refresh return 1; it has still refreshed matching files.
+        # --index below remains the content-integrity gate for the test-patch paths.
+        "git update-index --refresh || [ $? -eq 1 ]",
         # Also stages, so a test file the image already modified is refused, not half-patched.
         f"git apply -v --index {PATCH_FILE}",
         # Built in a separate index so any pre-existing dirt in the real one is excluded.
