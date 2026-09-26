@@ -160,8 +160,9 @@ was deployed last.
 
 ## Dataset preparation
 0. Install a dataset-specific grader (see images/install_graders.sh)
-1. Preprocess the whole dataset into .parquet format: `./preprocess.py`, which writes
-   `local/<dataset>.parquet` -- the same path `evaluate.py` reads its slices from.
+1. Preprocess the whole dataset into train/test .parquet files: `./preprocess.py`, which
+   writes `local/<dataset>.parquet` for training and `local/<dataset>_test.parquet` for
+   testing. The test split is 20% by default; set `--test-percent` to change it.
 2. Run batch evaluation with (oracle, noop, and openhands agents)
 3. Re-run `preprocess.py` with those runs named, to create the difficulty-filtered subset
 
@@ -183,10 +184,11 @@ per-task pass rates are read from the session table. Re-running a name does not
 overwrite what the previous run said: pass `<name>@<start-at prefix>` to filter
 by a run other than that name's latest.
 
-Beside the parquet it writes `<output>.lineage.json`: which runs each filter came from
-(name, start timestamp, rollout count), the pass-rate window, how many tasks each rule
-dropped, and which tasks that run never measured. The parquet itself says none of this,
-and "which data is this" is the first question asked of a training run six weeks later.
+Beside each parquet it writes `<output>.lineage.json`: which runs each filter came from
+(name, start timestamp, rollout count), the pass-rate window, deterministic split settings,
+how many tasks each rule dropped, and which tasks that run never measured. The parquet
+itself says none of this, and "which data is this" is the first question asked of a training
+run six weeks later.
 
 ### Showing the agent the tests it is graded on
 

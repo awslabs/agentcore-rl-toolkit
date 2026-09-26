@@ -4,6 +4,7 @@ worktree and commit rather than the script text.
 """
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -240,6 +241,37 @@ class MakeTestPatchScriptTest(RepoTest):
     def test_grading_reads_the_ref_this_script_writes(self):
         # These two strings are the only thing keeping preprocess.py and evaluation.py in sync.
         self.assertEqual(preprocess.TEST_PATCH_REF, evaluation.TEST_PATCH_REF)
+
+
+class DatasetSplitTest(unittest.TestCase):
+    def test_split_is_deterministic_and_exhaustive(self):
+        dataset = preprocess.datasets.Dataset.from_dict({"instance_id": [f"task-{n}" for n in range(10)]})
+
+        first = preprocess.split_dataset(dataset, 20)
+        second = preprocess.split_dataset(dataset, 20)
+
+        self.assertEqual(first["test"].num_rows, 2)
+        self.assertEqual(first["train"]["instance_id"], second["train"]["instance_id"])
+        self.assertEqual(first["test"]["instance_id"], second["test"]["instance_id"])
+        self.assertEqual(
+            set(first["train"]["instance_id"]) | set(first["test"]["instance_id"]),
+            set(dataset["instance_id"]),
+        )
+        self.assertFalse(set(first["train"]["instance_id"]) & set(first["test"]["instance_id"]))
+
+    def test_test_output_is_next_to_train_output(self):
+        self.assertEqual(
+            preprocess.test_output_path(Path("local/challenged.parquet")),
+            Path("local/challenged_test.parquet"),
+        )
+
+    def test_percentage_rejects_empty_splits(self):
+        with self.assertRaises(preprocess.argparse.ArgumentTypeError):
+            preprocess.percentage("100")
+
+    def test_cli_defaults_to_twenty_percent_test_data(self):
+        with mock.patch.object(sys, "argv", ["preprocess.py"]):
+            self.assertEqual(preprocess.parse_args().test_percent, 20)
 
 
 if __name__ == "__main__":

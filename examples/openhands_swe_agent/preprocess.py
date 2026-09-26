@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 
-"""Build the verl task parquet for a SWE dataset -- optionally only the tasks worth training on.
+"""Build train/test verl task parquets for a SWE dataset -- optionally only its useful tasks.
 
-Without filters, every dataset instance becomes one row (prompt, eval script, task image).
-Each ``--*-experiment`` filter is a rule over the per-instance pass rate of a prior batch
-eval, read from the session table: drop tasks the empty patch already resolves, drop tasks
-the gold patch cannot fix, keep only tasks with a non-zero GRPO advantage.
+Without filters, every dataset instance is assigned to either the train or test parquet
+(80/20 by default). Each ``--*-experiment`` filter is a rule over the per-instance pass
+rate of a prior batch eval, read from the session table: drop tasks the empty patch already
+resolves, drop tasks the gold patch cannot fix, keep only tasks with a non-zero GRPO
+advantage.
 
     ./swe_agent/preprocess.py
     ./swe_agent/preprocess.py --output swe_agent/local/swegym_challenged.parquet \\
@@ -14,8 +15,8 @@ the gold patch cannot fix, keep only tasks with a non-zero GRPO advantage.
         --model-experiment eval_qwen.qwen3-coder-30b-a3b-instruct_n4_gym_r5@2026-09-03
 
 An experiment name resolves to its latest run unless ``name@<start-at prefix>`` pins one.
-Writing the parquet also writes ``<output>.lineage.json`` beside it; ``--dry-run`` reports
-the same filtration without building either.
+Writing either parquet also writes ``<output>.lineage.json`` beside it; ``--dry-run``
+reports the same filtration without building either.
 """
 
 import argparse
@@ -44,6 +45,15 @@ DATASETS = {
 
 DATASET_NAME = "swegym"
 DATA_SOURCE, SPLIT, DOCKER_NAMESPACE = DATASETS[DATASET_NAME]
+SPLIT_SEED = 42
+
+
+def percentage(value: str) -> float:
+    """A percentage that leaves at least one task in both train and test."""
+    percent = float(value)
+    if not 0 < percent < 100:
+        raise argparse.ArgumentTypeError("must be greater than 0 and less than 100")
+    return percent
 
 
 def parse_args():
@@ -52,7 +62,14 @@ def parse_args():
         "--output",
         type=Path,
         default=dataset_parquet(DATASET_NAME),
-        help="parquet to write (the trainer's data.train_files) (default: %(default)s)",
+        help="train parquet to write (the trainer's data.train_files) (default: %(default)s); "
+        "the test parquet is written beside it as <stem>_test.parquet",
+    )
+    parser.add_argument(
+        "--test-percent",
+        type=percentage,
+        default=20,
+        help="percentage of the filtered dataset assigned to the test split (default: %(default)s)",
     )
     parser.add_argument(
         "--dry-run",
@@ -350,6 +367,11 @@ def lineage_path(output: Path) -> Path:
     return output.with_suffix(output.suffix + ".lineage.json")
 
 
+def test_output_path(train_output: Path) -> Path:
+    """The test parquet written next to ``train_output``."""
+    return train_output.with_name(f"{train_output.stem}_test{train_output.suffix}")
+
+
 def write_lineage(
     output: Path,
     args,
@@ -357,6 +379,7 @@ def write_lineage(
     table: pl.DataFrame,
     num_tasks: int,
     records: Storage,
+    split: str,
 ) -> Path:
     """Record what this parquet is, next to it, and return where that went.
 
@@ -367,6 +390,11 @@ def write_lineage(
         "output": str(output),
         "written_at": dt.datetime.now().isoformat(),
         "tasks": num_tasks,
+        "split": {
+            "name": split,
+            "test_percent": args.test_percent,
+            "seed": SPLIT_SEED,
+        },
         "dataset": {
             "source": DATA_SOURCE,
             "split": SPLIT,
@@ -487,6 +515,11 @@ def process_fn(example, idx, make_test_spec):
     return data
 
 
+def split_dataset(dataset, test_percent: float):
+    """Deterministically divide a filtered dataset into train and test sets."""
+    return dataset.train_test_split(test_size=test_percent / 100, seed=SPLIT_SEED)
+
+
 async def main():
     args = parse_args()
     records = storage(load_config())
@@ -501,26 +534,35 @@ async def main():
         keep = set(kept_ids)
         dataset = dataset.filter(lambda x: x["instance_id"] in keep)
 
+    splits = split_dataset(dataset, args.test_percent)
+    train_output = args.output
+    test_output = test_output_path(train_output)
+
     # Stopping here skips the slow part: an eval script per task, and the harness import.
     if args.dry_run:
-        print(f"dry run: would write {dataset.num_rows} tasks to {args.output}")
+        print(
+            f"dry run: would write {splits['train'].num_rows} train tasks to {train_output} "
+            f"and {splits['test'].num_rows} test tasks to {test_output}"
+        )
         return
 
     make_test_spec = load_make_test_spec(args.swebench_path)
 
-    # After the filtering, so extra_info.index numbers this parquet's rows, not the
-    # unfiltered dataset's.
-    verl_dataset = dataset.map(
-        function=process_fn,
-        with_indices=True,
-        fn_kwargs={"make_test_spec": make_test_spec},
-    )
     # A fresh checkout has no ``local``, and an hour of generation must not die on that.
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    verl_dataset.to_parquet(args.output)
-    print(f"wrote {verl_dataset.num_rows} tasks to {args.output}")
-    # After the parquet, so a lineage file never describes one that was not written.
-    print(f"wrote {write_lineage(args.output, args, provenance, table, verl_dataset.num_rows, records)}")
+    train_output.parent.mkdir(parents=True, exist_ok=True)
+    for split_name, output in (("train", train_output), ("test", test_output)):
+        # After filtering and splitting, so each parquet's indices begin at zero.
+        verl_dataset = splits[split_name].map(
+            function=process_fn,
+            with_indices=True,
+            fn_kwargs={"make_test_spec": make_test_spec},
+        )
+        verl_dataset.to_parquet(output)
+        print(f"wrote {verl_dataset.num_rows} {split_name} tasks to {output}")
+        # After the parquet, so a lineage file never describes one that was not written.
+        print(
+            f"wrote {write_lineage(output, args, provenance, table, verl_dataset.num_rows, records, split_name)}"
+        )
 
 
 if __name__ == "__main__":
