@@ -1,6 +1,5 @@
-from types import SimpleNamespace
-
-from verl.trainer.ppo.v1.agent_loop_tq import AgentLoopManagerTQ
+import sys
+from types import ModuleType, SimpleNamespace
 
 from agentcore_rl_toolkit.backends.verl.trainer_mixins import round_robin_agent_loop_dispatch
 
@@ -26,6 +25,30 @@ def _prompts(*chunks):
 def _upstream_generate_sequences(manager, prompts):
     for worker, chunk in zip(manager.agent_loop_workers, prompts.chunk(len(manager.agent_loop_workers)), strict=False):
         worker.generate_sequences.remote(chunk)
+
+
+def _install_fake_verl_agent_loop_module(monkeypatch):
+    """Provide only the class the installer imports, without importing verl/Ray."""
+    verl = ModuleType("verl")
+    trainer = ModuleType("verl.trainer")
+    ppo = ModuleType("verl.trainer.ppo")
+    v1 = ModuleType("verl.trainer.ppo.v1")
+    agent_loop_tq = ModuleType("verl.trainer.ppo.v1.agent_loop_tq")
+
+    class AgentLoopManagerTQ:
+        generate_sequences = _upstream_generate_sequences
+
+    agent_loop_tq.AgentLoopManagerTQ = AgentLoopManagerTQ
+    verl.trainer = trainer
+    trainer.ppo = ppo
+    ppo.v1 = v1
+    v1.agent_loop_tq = agent_loop_tq
+    monkeypatch.setitem(sys.modules, "verl", verl)
+    monkeypatch.setitem(sys.modules, "verl.trainer", trainer)
+    monkeypatch.setitem(sys.modules, "verl.trainer.ppo", ppo)
+    monkeypatch.setitem(sys.modules, "verl.trainer.ppo.v1", v1)
+    monkeypatch.setitem(sys.modules, "verl.trainer.ppo.v1.agent_loop_tq", agent_loop_tq)
+    return AgentLoopManagerTQ
 
 
 def test_singleton_dispatch_rotates_workers():
@@ -57,8 +80,7 @@ def test_multi_chunk_dispatch_advances_by_dispatched_worker_count():
 def test_install_replaces_the_v1_tq_dispatcher_once(monkeypatch):
     calls = []
     manager = SimpleNamespace(agent_loop_workers=[_worker("zero", calls), _worker("one", calls)])
-
-    monkeypatch.setattr(AgentLoopManagerTQ, "generate_sequences", _upstream_generate_sequences)
+    AgentLoopManagerTQ = _install_fake_verl_agent_loop_module(monkeypatch)
 
     round_robin_agent_loop_dispatch.install_round_robin_agent_loop_dispatch()
     patched_generate_sequences = AgentLoopManagerTQ.generate_sequences
