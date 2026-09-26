@@ -6,6 +6,7 @@ bookkeeping. No AWS: the session store, the S3 upload and the rollout session ar
 
 import asyncio
 import json
+import tempfile
 import unittest
 from unittest import IsolatedAsyncioTestCase
 
@@ -158,6 +159,59 @@ def eval_config(**overrides):
     )
     kwargs.update(overrides)
     return bae.EvalConfig(**kwargs)
+
+
+class RunEvalDatasetTest(IsolatedAsyncioTestCase):
+    async def test_seeded_shuffle_is_reproducible_and_precedes_task_limit(self):
+        import polars as pl
+
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = f"{directory}/tasks.parquet"
+            report_dir = f"{directory}/reports"
+            task_ids = list(range(10))
+            pl.DataFrame({"task_id": task_ids}).write_parquet(dataset)
+            seen_task_ids: list[list[int]] = []
+
+            async def fake_run_one(config, *args):
+                task = args[3]
+                seen_task_ids[-1].append(task["task_id"])
+                return {"resolved": False, "aborted": False}
+
+            async def no_monitor(config, env):
+                return None
+
+            originals = {
+                "run_one": bae.run_one,
+                "start_eval_ec2_monitor": bae.start_eval_ec2_monitor,
+                "build_report": bae.build_report,
+            }
+            bae.run_one = fake_run_one
+            bae.start_eval_ec2_monitor = no_monitor
+            bae.build_report = lambda *args: {"reward": {"pass_at_k": None, "mean_reward": None}}
+            config = eval_config(
+                dataset=dataset,
+                num_tasks=4,
+                dataset_shuffle_seed=42,
+                report_dir=report_dir,
+            )
+            env = {
+                "agentcore_runtime_arn": "arn:runtime",
+                "agentcore_capacity_provider_arn": "arn:capacity",
+                "agent_dynamodb_table": "sessions-table",
+                "aws_region": "us-west-2",
+                "rollout_output_s3": "s3://bucket/prefix",
+            }
+            try:
+                for _ in range(2):
+                    seen_task_ids.append([])
+                    await bae.run_eval(config, env)
+            finally:
+                for name, original in originals.items():
+                    setattr(bae, name, original)
+
+        self.assertEqual(seen_task_ids[0], seen_task_ids[1])
+        self.assertEqual(len(seen_task_ids[0]), 4)
+        self.assertNotEqual(seen_task_ids[0], task_ids[:4])
 
 
 class RunOneTest(IsolatedAsyncioTestCase):

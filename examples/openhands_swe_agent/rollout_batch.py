@@ -320,7 +320,8 @@ class EvalConfig:
     """One evaluation run: a (dataset slice, endpoint, sampling, concurrency) point.
 
     ``dataset`` is a parquet whose rows are tasks in the schema training reads;
-    ``num_tasks`` caps the rows used (None = all) and ``n`` is samples per task.
+    ``num_tasks`` caps the rows used (None = all), ``dataset_shuffle_seed`` optionally
+    shuffles them reproducibly before that cap, and ``n`` is samples per task.
     ``task_kwargs`` is merged into every task and passed through uninterpreted, so which
     keys an agent needs is a property of this config, not of the driver.
     """
@@ -337,6 +338,7 @@ class EvalConfig:
     # where the recipe's artifacts belong. Resolved when the run finishes, so a relative
     # path answers to whatever cwd the driver happened to have.
     report_dir: str
+    dataset_shuffle_seed: int | None = None
     # max concurrent agent runs (None = `concurrency`, i.e. non-binding). Lower it to
     # hold containers warm while throttling how many talk to inference at once.
     rollout_concurrency: int | None = None
@@ -642,6 +644,8 @@ async def run_eval(config: EvalConfig, env: dict) -> dict:
     s3_prefix = f"{env['rollout_output_s3']}/{experiment_start_at}"
 
     frame = pl.read_parquet(config.dataset)
+    if config.dataset_shuffle_seed is not None:
+        frame = frame.sample(fraction=1.0, shuffle=True, seed=config.dataset_shuffle_seed)
     if config.num_tasks is not None:
         frame = frame.head(config.num_tasks)
     task_rows = frame.to_dicts()
