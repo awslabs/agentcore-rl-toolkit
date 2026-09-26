@@ -20,6 +20,7 @@ from verl.trainer.ppo.v1 import (
 from .trainer_mixins import (
     AdvantageZeroMetricsMixin,
     AgentLoopMetricsMixin,
+    RoundRobinAgentLoopDispatchMixin,
     VariableRowBatchingMixin,
 )
 
@@ -55,6 +56,7 @@ class _AgentCoreTrainerBase:
 @register_trainer("agentcore_sync")
 class AgentCorePPOTrainerSync(
     _AgentCoreTrainerBase,
+    RoundRobinAgentLoopDispatchMixin,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
     VariableRowBatchingMixin,
@@ -66,6 +68,7 @@ class AgentCorePPOTrainerSync(
 @register_trainer("agentcore_colocate_async")
 class AgentCorePPOTrainerColocateAsync(
     _AgentCoreTrainerBase,
+    RoundRobinAgentLoopDispatchMixin,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
     VariableRowBatchingMixin,
@@ -77,6 +80,7 @@ class AgentCorePPOTrainerColocateAsync(
 @register_trainer("agentcore_separate_async")
 class AgentCorePPOTrainerSeparateAsync(
     _AgentCoreTrainerBase,
+    RoundRobinAgentLoopDispatchMixin,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
     VariableRowBatchingMixin,
