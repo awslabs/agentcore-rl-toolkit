@@ -30,9 +30,7 @@ def _upstream_generate_sequences(manager, prompts):
 
 def test_singleton_dispatch_rotates_workers():
     calls = []
-    manager = SimpleNamespace(
-        agent_loop_workers=[_worker("zero", calls), _worker("one", calls), _worker("two", calls)]
-    )
+    manager = SimpleNamespace(agent_loop_workers=[_worker("zero", calls), _worker("one", calls), _worker("two", calls)])
 
     for chunk in ("first", "second", "third", "fourth"):
         round_robin_agent_loop_dispatch._generate_sequences_round_robin(
@@ -44,9 +42,7 @@ def test_singleton_dispatch_rotates_workers():
 
 def test_multi_chunk_dispatch_advances_by_dispatched_worker_count():
     calls = []
-    manager = SimpleNamespace(
-        agent_loop_workers=[_worker("zero", calls), _worker("one", calls), _worker("two", calls)]
-    )
+    manager = SimpleNamespace(agent_loop_workers=[_worker("zero", calls), _worker("one", calls), _worker("two", calls)])
 
     round_robin_agent_loop_dispatch._generate_sequences_round_robin(
         manager, _prompts("first", "second"), _upstream_generate_sequences
@@ -71,5 +67,5 @@ def test_install_replaces_the_v1_tq_dispatcher_once(monkeypatch):
     round_robin_agent_loop_dispatch.install_round_robin_agent_loop_dispatch()
 
     assert patched_generate_sequences is AgentLoopManagerTQ.generate_sequences
-    assert getattr(patched_generate_sequences, "_agentcore_round_robin_dispatch")
+    assert patched_generate_sequences._agentcore_round_robin_dispatch
     assert calls == [("zero", "first"), ("one", "second")]

@@ -7,7 +7,6 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-
 _NEXT_WORKER_INDEX_ATTR = "_agentcore_next_agent_loop_worker_index"
 _PATCHED_ATTR = "_agentcore_round_robin_dispatch"
 _DISPATCH_LOCK = threading.Lock()

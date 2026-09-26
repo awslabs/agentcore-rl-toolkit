@@ -122,8 +122,7 @@ async def test_cancelled_waiter_does_not_consume_permit():
 
 @pytest.mark.asyncio
 async def test_release_from_a_different_loop_drains_blocked_waiters():
-    """Regression: waiters queued on one event loop are woken by releases on another.
-    """
+    """Regression: waiters queued on one event loop are woken by releases on another."""
     total = 50  # every one of these blocks; there are zero permits to start
     sem = LocalPrioritySemaphore(value=0)
     completed: list[int] = []

@@ -476,7 +476,7 @@ async def test_anthropic_max_context_tokens_returns_context_window_error():
         body = {"model": "m", "max_tokens": 8, "messages": [{"role": "user", "content": "hi"}]}
         resp = await client.post("/v1/messages", json=body, headers=bearer(sid))
         assert resp.status == 400
-        error = (await resp.json())
+        error = await resp.json()
         assert error["type"] == "error"
         assert error["error"]["type"] == "invalid_request_error"
         assert "maximum context length is 2 tokens" in error["error"]["message"]
