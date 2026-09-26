@@ -442,7 +442,7 @@ async def test_max_turns_per_sid_returns_429():
 
 
 @pytest.mark.asyncio
-async def test_max_context_tokens_short_circuits_with_length_finish():
+async def test_max_context_tokens_returns_context_window_error():
     gateway, backend = make_gateway(replies=["never sampled"])
     sid = "ep7:tiny"
 
@@ -451,13 +451,36 @@ async def test_max_context_tokens_short_circuits_with_length_finish():
         gateway.create_session(sid, max_context_tokens=2)
         body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
         resp = await client.post("/v1/chat/completions", json=body, headers=bearer(sid))
-        assert resp.status == 200
-        choice = (await resp.json())["choices"][0]
-        assert choice["finish_reason"] == "length"
-        assert choice["message"]["content"] is None
+        assert resp.status == 400
+        error = (await resp.json())["error"]
+        assert error["type"] == "invalid_request_error"
+        assert error["code"] == "context_length_exceeded"
+        assert error["message"] == (
+            "This model's maximum context length is 2 tokens. "
+            "However, your prompt contains 3 input tokens, which leaves no room for output tokens. "
+            "Please reduce the length of the messages."
+        )
         assert backend.calls == []  # backend never invoked
 
-        # an empty generated turn trains nothing -> no records
+        # a rejected input is not part of the trajectory
+        assert await gateway.finish_session(sid) == []
+
+
+@pytest.mark.asyncio
+async def test_anthropic_max_context_tokens_returns_context_window_error():
+    gateway, backend = make_gateway(replies=["never sampled"])
+    sid = "ep7:anthropic-tiny"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid, max_context_tokens=2)
+        body = {"model": "m", "max_tokens": 8, "messages": [{"role": "user", "content": "hi"}]}
+        resp = await client.post("/v1/messages", json=body, headers=bearer(sid))
+        assert resp.status == 400
+        error = await resp.json()
+        assert error["type"] == "error"
+        assert error["error"]["type"] == "invalid_request_error"
+        assert "maximum context length is 2 tokens" in error["error"]["message"]
+        assert backend.calls == []
         assert await gateway.finish_session(sid) == []
 
 

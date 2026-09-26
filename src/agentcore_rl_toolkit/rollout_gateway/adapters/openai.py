@@ -22,6 +22,7 @@ from ..render import ParsedOutput
 from .common import (
     BaseAdapter,
     Reply,
+    context_limit_message,
     flatten_content,
     manager_finish_reason,
     sid_from_bearer,
@@ -60,6 +61,20 @@ class OpenAIAdapter(BaseAdapter):
             manager_message=manager_message,
             finish_reason=manager_finish_reason(parsed.tool_uses, raw_finish),
             wire=(wire_message, wire_finish),
+        )
+
+    def _context_limit_error(self, *, prompt_tokens: int, max_context_tokens: int) -> web.Response:
+        message = context_limit_message(prompt_tokens, max_context_tokens)
+        return web.json_response(
+            {
+                "error": {
+                    "message": message,
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "context_length_exceeded",
+                }
+            },
+            status=400,
         )
 
     async def _respond(self, request, body, reply, in_tok, out_tok, stream) -> web.StreamResponse:

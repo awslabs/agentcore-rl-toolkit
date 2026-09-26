@@ -43,5 +43,11 @@ def describe_with_root_cause(exc: BaseException) -> str:
     """
     root = root_cause(exc)
     if root is exc:
-        return f"{exc}"
-    return f"{exc} [raised over {type(root).__name__}: {root}]"
+        return _describe(exc)
+    return f"{_describe(exc)} [raised over {_describe(root)}]"
+
+
+def _describe(exc: BaseException) -> str:
+    message = str(exc).split("Traceback (most recent call last):", maxsplit=1)[0]
+    message = " ".join(message.splitlines()).removesuffix("(state").strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__

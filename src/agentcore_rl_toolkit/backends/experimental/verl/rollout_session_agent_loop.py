@@ -54,6 +54,26 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 logging.getLogger("backoff").setLevel(logging.ERROR)
 
+
+class _SettledRolloutErrorFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if not message.startswith("Error in _run_prompt for uid=") or not isinstance(record.exc_info, tuple):
+            return True
+
+        error = record.exc_info[1]
+        summary = str(error).strip().splitlines()[-1] or type(error).__name__
+        record.msg = f"{message}: {summary}"
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+_tq_logger = logging.getLogger("verl.trainer.ppo.v1.agent_loop_tq")
+if not any(isinstance(log_filter, _SettledRolloutErrorFilter) for log_filter in _tq_logger.filters):
+    _tq_logger.addFilter(_SettledRolloutErrorFilter())
+
 # The canonical name of the rollout's own score inside ``reward_extra_info``. DAPO group
 # filtering reads ``algorithm.filter_groups.metric`` from that dict, and the v1 replay buffer
 # raises when a finished trajectory lacks the configured key -- so it must be present on
@@ -328,14 +348,14 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         await self.meta.update(update)
         await self.save_to_s3(task, recs, exc, dump)
 
+        # A failed session logs a single summary line; the full traceback (with locals,
+        # via exception_to_string) is preserved in the S3 dump written by save_to_s3.
         if exc is not None:
-            logger.error(
-                f"Rollout {self.session_id} has trainer exception " f"= {describe_with_root_cause(exc)}",
-                exc_info=trainer_exception,
-            )
+            logger.error(f"Rollout {self.session_id} has trainer exception = {describe_with_root_cause(exc)}")
 
         if dump is not None and dump.failure_reason() is not None:
-            logger.error(f"Rollout {self.session_id} has agent exception = {dump.failure_reason()}")
+            summary = dump.failure_reason().strip().splitlines()[-1]
+            logger.error(f"Rollout {self.session_id} has agent exception = {summary}")
 
         return recs
 

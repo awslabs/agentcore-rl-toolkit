@@ -21,6 +21,7 @@ from ..render import ParsedOutput
 from .common import (
     BaseAdapter,
     Reply,
+    context_limit_message,
     flatten_content,
     manager_finish_reason,
     sid_from_bearer,
@@ -60,6 +61,18 @@ class AnthropicAdapter(BaseAdapter):
             manager_message=manager_message,
             finish_reason=manager_finish_reason(parsed.tool_uses, raw_finish),
             wire=(blocks, stop_reason),
+        )
+
+    def _context_limit_error(self, *, prompt_tokens: int, max_context_tokens: int) -> web.Response:
+        return web.json_response(
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": context_limit_message(prompt_tokens, max_context_tokens),
+                },
+            },
+            status=400,
         )
 
     async def _respond(self, request, body, reply, in_tok, out_tok, stream) -> web.StreamResponse:

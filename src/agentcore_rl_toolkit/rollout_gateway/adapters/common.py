@@ -31,7 +31,7 @@ from ..linear import LinearHealer
 from ..render import Renderer
 from ..sampling_backends.base import SamplingBackend
 from ..trace import BaseTrace, TraceRecord
-from ..trajectory import TrajectoryManager, TurnRecord
+from ..trajectory import TrajectoryManager
 
 __all__ = ["BaseAdapter", "Reply", "Session", "sid_from_bearer", "sid_from_body"]
 
@@ -110,6 +110,19 @@ def manager_finish_reason(tool_uses: list[dict], raw_finish: str) -> str:
     """Finish reason stored on the manager turn: tool_calls if the turn called a
     tool, else the raw backend finish."""
     return "tool_calls" if tool_uses else (raw_finish or "stop")
+
+
+def context_limit_message(prompt_tokens: int, max_context_tokens: int) -> str:
+    """Describe an input that fills the model's context window.
+
+    The wording follows OpenAI-compatible endpoints so clients such as Litellm
+    can classify the response as a context-window error and reduce the input.
+    """
+    return (
+        f"This model's maximum context length is {max_context_tokens} tokens. "
+        f"However, your prompt contains {prompt_tokens} input tokens, which leaves no room for output tokens. "
+        "Please reduce the length of the messages."
+    )
 
 
 class BaseAdapter:
@@ -198,6 +211,10 @@ class BaseAdapter:
 
     def _build_reply(self, parsed, raw_finish: str, translated: list[dict], tools_schema: list[dict] | None) -> Reply:
         """Pack parsed model output into a Reply."""
+        raise NotImplementedError
+
+    def _context_limit_error(self, *, prompt_tokens: int, max_context_tokens: int) -> web.Response:
+        """Return this protocol's response when the input fills its context window."""
         raise NotImplementedError
 
     async def _respond(
@@ -378,19 +395,25 @@ class BaseAdapter:
             if sid in self.closed:
                 return web.Response(status=503, text="session closed")
             sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
-            # context-budget clamp (backend-neutral): if the prompt already exceeds the
-            # per-sid budget, short-circuit with an empty length-capped turn.
+            # Context-budget clamp (backend-neutral): an input that fills the
+            # per-sid budget cannot generate even one token. Report that as an
+            # input-context error, rather than fabricating a zero-token,
+            # length-capped completion that clients cannot distinguish from a
+            # normal empty model response.
             if s.max_context_tokens > 0:
                 remaining = s.max_context_tokens - len(prompt_ids)
                 if remaining <= 0:
                     self.logger.warning(
-                        "[%s] sid=%s prompt exceeds max_context_tokens (%d >= %d)",
+                        "[%s] sid=%s prompt fills max_context_tokens (%d >= %d)",
                         self.log_prefix,
                         sid,
                         len(prompt_ids),
                         s.max_context_tokens,
                     )
-                    turn = TurnRecord(prompt_ids=list(prompt_ids), output_ids=[], finish_reason="length")
+                    return self._context_limit_error(
+                        prompt_tokens=len(prompt_ids),
+                        max_context_tokens=s.max_context_tokens,
+                    )
                 else:
                     sampling_params["max_new_tokens"] = min(
                         int(sampling_params.get("max_new_tokens", remaining)), remaining
