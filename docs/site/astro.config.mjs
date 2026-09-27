@@ -55,15 +55,11 @@ export default defineConfig({
 					label: 'Examples',
 					items: [
 						{ label: 'Overview', slug: 'examples' },
-						{
-							label: 'Strands Agents on AgentCore',
-							items: [
-								{ label: 'Math', slug: 'examples/strands-math-agent' },
-								{ label: 'AppWorld', slug: 'examples/strands-appworld-agent' },
-								{ label: 'MigrationBench', slug: 'examples/strands-migration-agent' },
-								{ label: 'OfficeBench', slug: 'examples/strands-officebench-agent' },
-							],
-						},
+						{ label: 'Math (GSM8K)', slug: 'examples/strands-math-agent' },
+						{ label: 'AppWorld', slug: 'examples/strands-appworld-agent' },
+						{ label: 'MigrationBench', slug: 'examples/strands-migration-agent' },
+						{ label: 'OfficeBench', slug: 'examples/strands-officebench-agent' },
+						{ label: 'SWE-Gym', slug: 'examples/openhands-swegym-agent' },
 					],
 				},
 				{
@@ -74,13 +70,17 @@ export default defineConfig({
 							label: 'Training multi-step agents with RL',
 							slug: 'blog/training-multi-step-agents-rl',
 						},
-												{
+						{
 							label: 'Growing verifiable training data',
 							slug: 'blog/data-synthesis-v0',
 						},
 						{
 							label: 'Stable Updates, Fewer Sequences',
 							slug: 'blog/variable-rows-linear-mode',
+						},
+						{
+							label: 'Async RL performance optimization',
+							slug: 'blog/async-rl-performance-optimization',
 						},
 					],
 				},
