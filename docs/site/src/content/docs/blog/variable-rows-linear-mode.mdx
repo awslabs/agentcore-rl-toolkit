@@ -1,6 +1,6 @@
 ---
-title: "Stable Updates, Fewer Rows: Better and Faster RL in ART"
-description: How ART handles variable training rows in verl and preserves token histories in the rollout gateway to make multi-turn agent training more efficient.
+title: "Stable Updates, Fewer Sequences: Better and Faster RL in ART"
+description: How ART handles variable numbers of training sequences in verl and preserves token histories in the rollout gateway to make multi-turn agent training more efficient.
 ---
 
 import { Image } from 'astro:assets';
@@ -10,16 +10,17 @@ import linearEfficiency from '../../../assets/blog/variable-rows-linear-mode/lin
 _By Bryan Lu and Danylo Vashchilenko · September 28, 2026_
 
 :::note[TL;DR]
-A single agent rollout can become several training rows. In our verl integration,
-that expansion could unintentionally increase the number of optimizer updates.
+A single agent rollout can produce multiple training sequences, each represented
+as a row in the training batch. In our verl integration, that expansion could
+unintentionally increase the number of optimizer updates.
 Fixing the update count improved best MigrationBench validation reward from
 **74.92% to 78.76%** in our comparison. We also introduce the rollout gateway's
 **linear mode**, which preserves the exact token history across turns and reduces
 unnecessary trajectory splitting. In a separate tree-versus-linear comparison,
-linear mode reduced **training rows by 62.76%** and **actor-update time by 18.24%**.
+linear mode reduced **training sequences by 62.76%** and **actor-update time by 18.24%**.
 :::
 
-## One rollout, several training rows
+## One rollout, several training sequences
 
 A coding agent reads a repository, runs a build, edits a file, and tries again.
 To the application, this is one rollout. To a reinforcement learning trainer,
@@ -42,9 +43,9 @@ not exist in the first place.
 
 ### Why a conversation can stop being append-only
 
-A training row contains a token sequence and a loss mask identifying the generated
-tokens to train on. Several turns can share one row when each turn's input starts
-with the exact input and output tokens of the previous turn:
+Each training sequence is stored as a row containing token IDs and a loss mask
+identifying the generated tokens to train on. Several turns can share one row when
+each turn's input starts with the exact input and output tokens of the previous turn:
 
 ```text
 Turn 1: prompt → generated tool call
@@ -179,7 +180,7 @@ saved token history = next input + generated output
 ```
 
 This preserves training/inference context consistency while allowing an
-uninterrupted linear rollout to form one training row. It also means linear
+uninterrupted linear rollout to form one training sequence. It also means linear
 mode can change the token representation the model sees compared with
 message re-rendering. It is intended for harnesses where that replay drift is
 cosmetic, not an intentional edit to the conversation.
@@ -259,7 +260,7 @@ histories. A linear segment can occupy one row; edits or compaction may split
 a session into several. This is why linear mode complements,
 rather than replaces, support for variable-row batching.
 
-## MigrationBench: fewer rows and less training work
+## MigrationBench: fewer sequences and less training work
 
 For the efficiency comparison, we ran a separate tree-versus-linear pair with
 the same code, training data, model, and training configuration, changing the
@@ -268,13 +269,13 @@ training batches. The table reports totals for those runs.
 
 | Metric | Tree mode | Linear mode | Reduction |
 | --- | ---: | ---: | ---: |
-| Real training rows | 138,830 | 51,697 | 62.76% |
+| Training sequences | 138,830 | 51,697 | 62.76% |
 | Processed training tokens | 2.29 billion | 1.69 billion | 26.53% |
 | Actor-update time | 29.58 hours | 24.18 hours | 18.24% |
 | End-to-end elapsed time | 114.06 hours | 104.28 hours | 8.57% |
 
 <figure class="art-figure">
-  <Image src={linearEfficiency} alt="Linear mode uses 37.24% as many training rows, 81.76% of the actor-update time, and 91.43% of the end-to-end time of its tree-mode control." />
+  <Image src={linearEfficiency} alt="Linear mode uses 37.24% as many training sequences, 81.76% of the actor-update time, and 91.43% of the end-to-end time of its tree-mode control." />
   <figcaption>Figure 2. Linear-mode totals relative to the tree-mode control in the efficiency experiment; each tree baseline is 100%.</figcaption>
 </figure>
 

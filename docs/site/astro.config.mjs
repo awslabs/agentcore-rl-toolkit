@@ -79,7 +79,7 @@ export default defineConfig({
 							slug: 'blog/data-synthesis-v0',
 						},
 						{
-							label: 'Stable Updates, Fewer Rows',
+							label: 'Stable Updates, Fewer Sequences',
 							slug: 'blog/variable-rows-linear-mode',
 						},
 					],
