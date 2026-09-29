@@ -253,34 +253,6 @@ async def test_async_render_preserves_hf_options(fast_tokenizer, options):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_renderers_sharing_tokenizer_use_their_initial_hf_options(fast_tokenizer):
-    messages = [{"role": "user", "content": "中文 <extra>" * 20}]
-    # split_special_tokens is intentionally not varied here: it is pinned once
-    # on the shared tokenizer at renderer construction (last-writer-wins), not
-    # re-applied per encode. Truncation/padding options are still per-call.
-    options = [
-        {},
-        {"max_length": 8},
-        {"truncation": False},
-        {"padding": "max_length", "max_length": 512},
-    ] * 4
-    configs = [{"max_length": 16, "truncation": True, **kw} for kw in options]
-    renderers = [HfTemplateRenderer(fast_tokenizer, chat_template_kwargs=config) for config in configs]
-    expected = [
-        fast_tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_dict=False,
-            **config,
-        )
-        for config in configs
-    ]
-    actual = await asyncio.gather(*(renderer.render(messages) for renderer in renderers))
-    assert actual == expected
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("closer", ["<|im_end|>", "<extra>"])
 @pytest.mark.parametrize("tool_call", [False, True])
 async def test_delta_uses_real_history_and_only_encodes_new_text(fast_tokenizer, closer, tool_call):

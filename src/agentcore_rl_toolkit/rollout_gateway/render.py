@@ -225,11 +225,6 @@ class HfTemplateRenderer:
             pad_to_multiple_of=kwargs.get("pad_to_multiple_of"),
             padding_side=kwargs.get("padding_side"),
         )
-        # encode_special_tokens is pinned once in __init__ (see the constructor),
-        # so any ``split_special_tokens`` in kwargs was already honored there
-        # and is intentionally ignored here — mutating the Rust backend under
-        # concurrent async_encode workers raced with ``RuntimeError: Already
-        # borrowed``.
         backend = self.tokenizer.backend_tokenizer
         encoding = await backend.async_encode(
             text,
