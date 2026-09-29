@@ -62,7 +62,8 @@ class _SettledRolloutErrorFilter(logging.Filter):
             return True
 
         error = record.exc_info[1]
-        summary = str(error).strip().splitlines()[-1] or type(error).__name__
+        summary_lines = str(error).strip().splitlines()
+        summary = summary_lines[-1] if summary_lines else type(error).__name__
         record.msg = f"{message}: {summary}"
         record.args = ()
         record.exc_info = None
@@ -353,9 +354,8 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         if exc is not None:
             logger.error(f"Rollout {self.session_id} has trainer exception = {describe_with_root_cause(exc)}")
 
-        if dump is not None and dump.failure_reason() is not None:
-            summary = dump.failure_reason().strip().splitlines()[-1]
-            logger.error(f"Rollout {self.session_id} has agent exception = {summary}")
+        if dump is not None and (failure_reason := dump.failure_reason()) is not None:
+            logger.error(f"Rollout {self.session_id} has agent exception = {failure_reason}")
 
         return recs
 

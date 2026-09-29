@@ -72,6 +72,20 @@ async def test_settled_rollout_error_is_logged_as_one_line(caplog):
     assert "Traceback" not in caplog.text
 
 
+async def test_settled_rollout_error_with_an_empty_message_uses_its_type(caplog):
+    tq_logger = logging.getLogger("verl.trainer.ppo.v1.agent_loop_tq")
+
+    with caplog.at_level(logging.ERROR, logger=tq_logger.name):
+        try:
+            raise RuntimeError()
+        except RuntimeError as error:
+            tq_logger.error("Error in _run_prompt for uid=group-1", exc_info=error)
+
+    record = caplog.records[-1]
+    assert record.message == "Error in _run_prompt for uid=group-1: RuntimeError"
+    assert record.exc_info is None
+
+
 async def test_trainer_exception_log_excludes_embedded_a2a_traceback(caplog):
     loop = make_loop(
         session=FakeRolloutSession(

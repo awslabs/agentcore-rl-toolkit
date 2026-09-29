@@ -14,9 +14,10 @@ class RolloutDumpResponse(BaseModel):
     exception: str | None
 
     def failure_reason(self) -> str | None:
-        """Why this dump does not describe a succesfully finished rollout, or None if it does."""
+        """A non-empty, single-line failure summary, or ``None`` for a successful dump."""
         if self.exception is not None:
-            return self.exception
+            summary = self.exception.strip().splitlines()
+            return summary[-1] if summary else "Rollout reported an empty exception"
         if self.reward is None:
             return "Rollout reported no reward and no exception"
         if self.task_output is None:

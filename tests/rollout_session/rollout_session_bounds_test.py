@@ -168,11 +168,14 @@ class SuccessPredicateTest(unittest.TestCase):
         self.assertTrue(dump().is_successful())
         self.assertIsNone(dump().failure_reason())
 
-    def test_the_reported_exception_is_the_reason_verbatim(self):
-        # Unwrapped on purpose: the container's own traceback is the useful one.
-        failed = dump(reward=None, exception="Traceback: agent crashed")
+    def test_the_reported_exception_is_summarized_to_its_last_line(self):
+        failed = dump(reward=None, exception="Traceback: agent crashed\nRuntimeError: broken")
         self.assertFalse(failed.is_successful())
-        self.assertEqual(failed.failure_reason(), "Traceback: agent crashed")
+        self.assertEqual(failed.failure_reason(), "RuntimeError: broken")
+
+    def test_an_empty_reported_exception_gets_a_summary(self):
+        failed = dump(reward=None, exception="")
+        self.assertEqual(failed.failure_reason(), "Rollout reported an empty exception")
 
     def test_a_missing_reward_is_a_failure(self):
         # Nothing to train on, even though the container reported no error.
