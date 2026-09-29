@@ -28,6 +28,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | File | Purpose |
 |------|---------|
 | `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
+| `src/agentcore_rl_toolkit/runtime/` | `AgentCoreRuntimeApp`: optional HTTP `start/get` invocation lifecycle with filesystem records |
 | `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
@@ -98,6 +99,20 @@ Since the client won't get results directly from HTTP:
 On the client side, `RolloutClient` and `RolloutFuture` are the complement to these server-side patterns — they handle submitting requests to ACR and polling S3 for results, so both sides work together to manage long-running async agent tasks end-to-end. See the [Evaluation](#evaluation) section for details.
 
 #### Core Classes
+
+**AgentCoreRuntimeApp** (`src/agentcore_rl_toolkit/runtime/`)
+- Exported from `agentcore_rl_toolkit`; retains `@app.entrypoint` and ordinary HTTP behavior.
+- Requests with `_agentcore_runtime` use versioned `start/get`, foreground/background execution, and session-scoped invocation IDs.
+- Records live under configurable `state_dir`, defaulting to `.agentcore_runtime` under the OS temporary directory (`TMPDIR`).
+- One app process serves one Runtime session; live tasks are keyed by invocation ID. Filesystem records retain session-specific paths; use a managed mount for stop/resume persistence.
+- Protocol handlers return JSON values; structured terminal errors, `interrupted`, and `not_found` are HTTP 200 states, while storage failures are operation errors.
+- Existing `RolloutClient` still uses S3 and does not yet drive this app. See [the app design](designs/agentcore_runtime_app.md) for HTTP mapping and implementation decisions, and [RIP](designs/runtime_invocation_protocol.md) for the shared lifecycle contract.
+- Tests: `uv run pytest tests/runtime/`.
+- Live tests: deploy `tests/runtime/live_agent.py` with the checkout's package,
+  the HTTP contract, and `idleRuntimeSessionTimeout=60`, then run
+  `RUNTIME_TEST_ARN=arn:... uv run pytest tests/runtime/test_live.py`.
+  Without the ARN they skip. Each test stops its own sessions; the Runtime stays
+  deployed for reuse. The agent needs no model, S3, or managed session storage.
 
 **AgentCoreRLApp** (`src/agentcore_rl_toolkit/app.py`)
 - Inherits `BedrockAgentCoreApp` - drop-in replacement

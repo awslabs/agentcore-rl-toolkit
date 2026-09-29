@@ -37,28 +37,34 @@ microVM-local filesystem is the baseline store. Placing the same file layout on
 a managed session-storage mount extends its lifetime across compute
 stop/resume, while S3 remains an alternative for external retrieval.
 
-The protocol is not an RL-specific abstraction. It can support both:
+The protocol is not an RL-specific abstraction. Its execution contract is
+shared by two adapters:
 
-- the Rollout SDK, which submits long-running agent rollouts for training and
-  evaluation; and
-- the Sandbox SDK, which executes commands in isolated task environments and
-  needs the same foreground, detached, polling, and recovery semantics.
+- the HTTP app-handler adapter, used by HTTP agent rollouts and other
+  applications built on `BedrockAgentCoreApp`; and
+- the Sandbox process adapter, which executes commands in isolated task
+  environments with the same foreground, detached, polling, and recovery
+  semantics.
 
-The two SDKs retain their workload-specific APIs. The protocol supplies the
-shared execution contract underneath them.
+The Rollout and Sandbox SDKs retain their workload-specific APIs.
 
-## Current implementation
+## Scope and companion designs
 
-The first consumer is the [Sandbox SDK](./sandbox_sdk.md), whose process adapter
-implements versioned `start/get`, independent execution ownership, and persisted
-local records for foreground and background commands. This is a partial
-implementation of phases 1 and 3; the app-handler and Rollout migration remain
-pending.
+This document defines the shared invocation contract without requiring one
+transport, implementation language, or public SDK surface.
 
-The Sandbox design owns its public APIs, AgentCore transport choice, process
-management, and output policy. This document remains the shared invocation
-contract and does not require consumers to use one transport or one implementation
-language.
+- [AgentCoreRuntimeApp](./agentcore_runtime_app.md) owns the HTTP app adapter:
+  entrypoint compatibility, request envelopes, task ownership, and filesystem
+  storage.
+- [Sandbox SDK](./sandbox_sdk.md) owns the process adapter: session APIs,
+  AgentCore transport, process management, and output policy.
+
+### Relationship to A2A
+
+A2A already models long-running work as tasks with identity, state, and result
+retrieval. RIP supplies a shared lifecycle for HTTP app handlers and Sandbox
+commands; native A2A servers keep their own task operations and state model.
+Persistence and recovery guarantees depend on each server's implementation.
 
 ## Motivation: the missing invocation lifecycle
 
@@ -181,17 +187,14 @@ The acronym is deliberate: if the generic capability is absorbed upstream, the
 ART-local implementation should be allowed to RIP. Its Rollout and Sandbox
 consumers should survive; the duplicated protocol implementation should not.
 
-## Existing ART evidence
+## Workload requirements
 
-At proposal time, ART had two execution-facing SDK surfaces with the following
-baseline behavior (see Current implementation above for the Sandbox adapter):
+| Consumer | Execution target | Required lifecycle |
+| --- | --- | --- |
+| Rollout SDK's HTTP path | An application handler in a Runtime session | Submit agent work, retrieve its result after disconnecting, and retain the session for follow-up invocations |
+| Sandbox SDK | A process in an isolated Runtime session | Run foreground or detached commands, reconnect by execution identity, and recover status and output |
 
-| Consumer | Execution target | Current behavior | Missing or coupled behavior |
-| --- | --- | --- | --- |
-| Rollout SDK | An application handler reached through `InvokeAgentRuntime` | Detaches every handler, writes results to S3, and returns a `RolloutFuture` | Foreground delivery, per-invocation identity, storage-independent retrieval, sticky-session follow-up, and separation from RL naming |
-| Sandbox SDK | A process in an isolated Runtime session | Reaches one command through `InvokeAgentRuntimeCommand`, consumes its stream synchronously, and returns `ExecResult` | Detached execution, invocation handles, polling, reconnection, and recovery |
-
-These surfaces use different AgentCore APIs, but need the same answers to:
+These surfaces may use different AgentCore APIs, but need the same answers to:
 
 - What identifies one execution independently of its Runtime session?
 - Does the initial connection wait for the result?
@@ -207,10 +210,10 @@ transport as described in the [Sandbox SDK design](./sandbox_sdk.md).
 
 ## Problems addressed
 
-| Current behavior or gap | Consequence | RIP direction |
+| Coupling or missing abstraction | Consequence | RIP direction |
 | --- | --- | --- |
 | Rollout execution is always detached. | Short or interactive calls pay persistence and polling costs unnecessarily. | Support foreground and background delivery as modes of the same execution. |
-| Sandbox commands are always attached to their initial stream. | Long commands cannot be safely detached and reattached. | Give detached commands their own invocation handle. |
+| A command is identified only by its initial stream. | Long commands cannot be safely detached and reattached. | Give detached commands their own invocation handle. |
 | `runtimeSessionId` also acts as the rollout execution identity. | Multiple calls and follow-ups in one sticky session cannot be addressed independently. | Add one invocation ID per logical execution. |
 | S3 storage, polling, and background execution are combined in `rollout_entrypoint`. | Connection mode cannot evolve independently from storage or retrieval. | Separate execution mode, persistent state, storage backend, and retrieval path. |
 | Rollout results require a customer-managed bucket, while other workloads may need only compute-scoped state or session-scoped recovery. | One mandatory persistence scope either adds setup or weakens recovery. | Use the same filesystem store on local or managed roots and retain S3 for external retrieval. |
@@ -240,6 +243,8 @@ transport as described in the [Sandbox SDK design](./sandbox_sdk.md).
 
 - Reproducing the complete OpenAI Responses control plane or managing
   conversation history.
+- Replacing A2A's Task lifecycle or requiring native A2A servers to implement
+  RIP.
 - Defining rollout trajectory capture, reward computation, or trainer sample
   construction.
 - Automatically rerunning interrupted workloads with side effects, or
@@ -340,7 +345,8 @@ Stopping a Runtime session is a separate lifecycle operation outside RIP.
 
 App-handler requests carry these operations in a reserved payload field
 separate from application data and from `_rollout`, which is rollout-specific
-configuration. Appendix A shows an illustrative envelope.
+configuration. The [HTTP app design](./agentcore_runtime_app.md#http-mapping)
+defines that adapter's envelope.
 
 ### State machine
 
@@ -472,8 +478,7 @@ managed session-storage mount:
 | S3 | Configured bucket and retention policy | Direct S3 read or `get` request |
 
 A microVM-local root is the baseline implementation: it requires no additional
-storage configuration and can be exercised in local Docker tests. Its records
-disappear when that compute is replaced.
+storage configuration. Its records disappear when that compute is replaced.
 
 AgentCore
 [managed session storage](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)
@@ -483,17 +488,16 @@ bucket. It is currently a Preview feature on microVM runtimes: the documented
 lifecycle expires after 14 idle days and resets on a Runtime version update.
 
 Filesystem records are retrieved through a same-session data-plane adapter
-regardless of whether the root is local or managed. Candidate implementations
-include:
+regardless of whether the root is local or managed. Possible mappings include:
 
 - an internal `InvokeAgentRuntime` operation intercepted before the user
   handler; or
 - `InvokeAgentRuntimeCommand` running a deterministic helper that reads and
   emits the invocation record.
 
-This proposal intentionally does not select between them without live
-validation. Managed storage additionally requires validating `get` after the
-original compute becomes idle and a new compute resumes the session.
+The execution adapter selects its transport. That transport must support
+retrieval without entering the workload, including after compute resumes when
+the selected store supports that lifetime.
 
 S3 remains an alternative backend for workloads that need direct external
 reads, larger artifacts, or independent retention.
@@ -532,28 +536,28 @@ filesystem store.
 An S3 backend instead relies on its configured IAM policy, bucket, and key
 layout. Selecting S3 does not give those objects AgentCore session isolation.
 
+The same applies to an S3 Files mount: it is shared storage unless access
+controls provide isolation. Session-specific paths can avoid collisions but do
+not create an access-control boundary.
+
+Managed session storage replicates writes asynchronously and documents a flush
+during graceful shutdown. Atomic local publication does not by itself promise
+that the latest write survives an abrupt compute failure. In-session retrieval
+also depends on the app being reachable, and may resume compute to read a result.
+
 ## Execution adapters
 
 ### App-handler adapter
 
-The app-handler adapter carries RIP through `InvokeAgentRuntime`. A wrapper
-around the registered `BedrockAgentCoreApp` entrypoint intercepts protocol
-operations before they reach the user handler:
+The app-handler adapter carries RIP through `InvokeAgentRuntime`.
+It dispatches `start/get` before the user handler, owns execution independently
+of the request, and persists the terminal result before reporting completion.
+Ordinary HTTP requests can continue to use the same entrypoint.
 
-```text
-InvokeAgentRuntime
-  -> RIP envelope
-  -> start / get dispatch
-  -> registered application handler for start only
-```
-
-Both modes retain the same handler task, persist its terminal state, and use
-AgentCore async-task tracking to keep the session busy until terminal
-publication completes. Foreground execution waits for that task on the initial
-connection; background execution returns `in_progress` after the task is
-registered. Both modes continue to use the upstream sync/async handler
-dispatch. Appendix A describes the initial in-process registry, persistence
-ordering, and recovery behavior.
+The [AgentCoreRuntimeApp design](./agentcore_runtime_app.md) defines the
+envelope, handler dispatch, concurrency, storage layout, and recovery choices.
+These choices do not constrain the process adapter or an upstream service
+implementation.
 
 ### Sandbox process adapter
 
@@ -569,47 +573,53 @@ implementation.
 
 ## Consumer 1: Rollout SDK
 
-### Definition and scope change
+### Session adapters and responsibilities
 
-After RIP is separated, the **Rollout SDK** is the ART training- and
-evaluation-facing adapter that configures, submits, groups, and collects agent
-rollouts over RIP.
+The **Rollout SDK** configures, submits, groups, and collects agent rollouts for
+training and evaluation. Its `RolloutSession` interface exposes `setup`, `run`,
+and `shutdown` across server protocols. The target AgentCore adapters are:
 
-Its scope changes as follows:
-
-| Concern | Current owner | Proposed owner |
+| Session adapter | Agent server | Execution lifecycle |
 | --- | --- | --- |
-| Runtime app wrapper and entrypoint dispatch | Rollout SDK (`AgentCoreRLApp` + `@app.rollout_entrypoint`) | RIP app adapter (`AgentCoreRuntimeApp` + `@app.entrypoint`) |
-| Foreground/background execution | Background-only Rollout SDK behavior | RIP |
-| Invocation identity, status, result, and retry | Implicit across `runtimeSessionId`, S3 key, and `RolloutFuture` | RIP |
-| Invocation persistence and retrieval | Rollout SDK S3 implementation | RIP storage and retrieval adapters |
-| Runtime quota handling | `RolloutClient` | Shared RIP client machinery |
-| Default session cleanup policy | `RolloutFuture` always stops after retrieval or timeout | Rollout-specific configurable policy over RIP |
-| Model endpoint, model ID, and sampling configuration | `_rollout` payload | Rollout SDK |
-| Batch submission and grouping by training input | `RolloutClient` | Rollout SDK |
-| Trainer-facing timeout and failure adaptation | `RolloutClient` and backend integrations | Rollout SDK and the relevant training backend |
-| Trajectory capture and correlation | Rollout Gateway and training backends | Rollout Gateway and training backends |
-| Reward computation and conversation history | Application or training integration | Application or training integration |
+| `agentcore_http` | `AgentCoreRuntimeApp` adapting `BedrockAgentCoreApp` | RIP `start/get`, invocation records, and recovery |
+| `agentcore_a2a` | A native A2A server adapted as described in [PR #156](https://github.com/awslabs/agentcore-rl-toolkit/pull/156) | A2A Task lifecycle and the server's task storage |
 
-The resulting layering is:
+Each session adapter translates its server's operations and results into the
+rollout interface. The agent's existing server protocol determines which
+adapter to use.
+
+| Concern | Owner |
+| --- | --- |
+| Handler execution, identity, status, results, and retries | RIP app/client adapter for HTTP; A2A server/client integration for A2A |
+| Result persistence and retrieval | The selected server and its session adapter |
+| Runtime quota handling | Runtime client machinery and shared rollout session limits |
+| Session setup, result adaptation, and cleanup policy | The workload-specific `RolloutSession` adapter |
+| Model endpoint, model ID, sampling configuration, batching, and grouping | Rollout SDK |
+| Trainer-facing timeout and failure adaptation | Rollout SDK and the relevant training backend |
+| Trajectory capture and correlation | Rollout Gateway and training backends |
+| Reward computation and conversation history | Application or training integration |
+
+The target layering is:
 
 ```text
 Training or evaluation integration
   -> Rollout SDK
-       -> RIP client and app adapter
-            -> AgentCore Runtime
+       -> RolloutSession
+            -> agentcore_http -> RIP -> AgentCoreRuntimeApp
+            -> agentcore_a2a  -> A2A -> native A2A server
+               (both server paths run on AgentCore Runtime)
 
 Training backend
   <-> Rollout Gateway for trajectory capture
 ```
 
-### Concrete rollout flow
+### HTTP rollout flow
 
-A background training rollout can use RIP as follows:
+A background training rollout through `agentcore_http` uses RIP as follows:
 
 1. The training backend creates any Rollout Gateway capture state it needs.
-2. The Rollout SDK builds the agent payload and starts a RIP invocation with
-   `background=true`.
+2. The Rollout SDK builds the agent payload, and the HTTP session adapter
+   starts a RIP invocation with `background=true`.
 3. The agent runs while the training integration retains the invocation
    handle.
 4. The integration awaits the terminal result and independently finishes any
@@ -622,7 +632,7 @@ session ID, rollout ID, training input ID, or conversation ID. An integration
 may correlate them explicitly, but the protocol does not collapse their
 meanings.
 
-### Benefits to rollout users
+### Benefits to HTTP rollout users
 
 - Training keeps the current fire-and-retrieve background model.
 - Evaluation and interactive use can call the same handler in foreground mode.
@@ -633,6 +643,26 @@ meanings.
 - Retries can address one execution without guessing from payload or S3 key.
 - `RolloutClient` can focus on rollout configuration, batching, grouping, and
   training-facing policy instead of implementing a private task manager.
+
+### Migration
+
+The HTTP migration has two corresponding replacements:
+
+- `AgentCoreRuntimeApp` replaces `AgentCoreRLApp`, retaining the standard
+  `@app.entrypoint` application interface.
+- A RIP-backed `agentcore_http` rollout session replaces `agentcore_s3`,
+  retrieving invocation state and results through Runtime HTTP calls.
+
+The app and client contracts must migrate together. The S3-based `RolloutClient`
+requires the existing `AgentCoreRLApp` result contract. Callers retain that pair
+during the transition. The target `agentcore_http` adapter speaks RIP; it is not
+wire-compatible with the older rollout-specific setup/status/start/dump HTTP
+adapter.
+
+Session adapter names describe the interaction path. Storage is a separate
+choice: using an S3 mount for `AgentCoreRuntimeApp.state_dir` still retrieves
+results through `agentcore_http`. Direct external S3 retrieval can remain a
+separate capability without making S3 mandatory for HTTP invocations.
 
 ## Consumer 2: Sandbox SDK
 
@@ -656,6 +686,7 @@ flows, AgentCore API choices, and implementation scope.
 | --- | --- | --- |
 | RIP | Invocation identity, foreground/background delivery, persisted lifecycle state and terminal result, retry semantics, waiting, storage and retrieval seams | Conversation history, rollout semantics, shell UX, trainer samples |
 | Rollout SDK | Rollout payload and model configuration, batch submission, grouping, result policy, and session policy | Generic app task management, trajectory capture, conversation storage |
+| `RolloutSession` adapters | Workload setup, run, shutdown, and result adaptation over HTTP/RIP or A2A | A universal server wire protocol, conversation storage |
 | Sandbox SDK | Sandbox sessions, command/shell/file UX, structured process results, Sandbox-specific handles | Agent payloads, rewards, trajectory capture |
 | Rollout Gateway | Token-level trajectory capture and trace construction | Runtime invocation lifecycle and result delivery |
 | Training backends | Capture-session orchestration, reward and trace joining, trainer-native sample construction | Generic Runtime execution protocol |
@@ -666,82 +697,27 @@ application or agent framework. RIP accepts an optional conversation ID so it
 does not prevent multi-turn or multi-conversation designs, but it does not
 manage messages or memory.
 
-## Public surface and migration
-
-The app-side generic class can initially be `AgentCoreRuntimeApp`, retaining
-the upstream `@app.entrypoint` name. `AgentCoreRLApp` and
-`rollout_entrypoint` can remain temporary migration aliases while examples
-move to the generic app surface.
+## Public client surface
 
 The generic client and handle names remain open. `RolloutFuture` and Sandbox
-`ExecHandle` may consume shared RIP client machinery as the app adapter lands,
-without exposing a new public `Retriever` abstraction.
-
-## Implementation phases
-
-### Phase 1: specify and validate the protocol
-
-- Define versioned `start` and `get` envelopes.
-- Define invocation identity, repeated-start behavior, and the minimum state
-  model.
-- Implement the filesystem store against a configurable local root.
-- Define compute- and session-scoped persistence guarantees.
-- Add local Docker coverage for start, get, retry, completion, and
-  interruption.
-- Validate both candidate same-session retrieval transports.
-- Test two identical requests with distinct invocation IDs and repeated
-  submission of one invocation ID without re-entering the workload.
-
-### Phase 2: app adapter and Rollout migration
-
-- Introduce the generic app adapter and `AgentCoreRuntimeApp`.
-- Add foreground/background modes to the client machinery.
-- Allow the filesystem store root to use a managed session-storage mount.
-- Validate stop/resume recovery with managed storage.
-- Preserve the current S3 backend and direct retrieval path for Rollout.
-- Separate wait timeout from session cleanup.
-- Refactor `RolloutClient` and `RolloutFuture` into rollout-facing wrappers
-  over RIP.
-- Keep rollout payload fields and trainer-facing batching outside the generic
-  layer.
-
-### Phase 3: Sandbox process adapter and detached execution
-
-- Implement the process adapter against the shared identity, retry, persistence,
-  and waiting contract.
-- Validate foreground/background execution and result recovery through the
-  Sandbox SDK. See its [design](./sandbox_sdk.md) for implementation decisions
-  and the boundary with native terminal features.
-
-### Phase 4: hardening and upstreaming
-
-- Separate data-plane and new-session rate limiting.
-- Add live integration coverage for local-store loss, managed-store
-  reactivation, persistence failure, and storage retention.
-- Define artifact policies for results that exceed the manifest format.
-- Evaluate moving the generic app, client, and protocol behavior into
-  `bedrock-agentcore-sdk-python`.
-- Keep Rollout, Sandbox, Rollout Gateway, and trainer-specific integrations in
-  ART.
+`ExecHandle` may consume shared RIP client machinery where applicable without
+exposing a new public `Retriever` abstraction.
 
 ## Open questions
 
-- Which existing Runtime API should serve `get` for filesystem records?
 - How should each consumer select and expose its persistence scope?
 - Which result and artifact size limits belong in the protocol versus each
   workload adapter?
 - Which generic classes should be public in ART before the capability has an
   upstream home?
 
-## Appendix A: Initial ART implementation sketch
+## Appendix A: Client integration
 
-This appendix is illustrative and is not part of the protocol contract. It
-describes one way ART can validate RIP with the current AgentCore Runtime and
-SDK surfaces. The protocol does not require these private envelope names, file
-paths, or helper processes, and they should be replaceable by upstream
-support.
+HTTP rollout and Sandbox clients map their public APIs onto RIP without
+exposing the adapter's storage layout or requiring a new public method for
+every protocol operation.
 
-### Current quota considerations
+### Quota considerations
 
 Service quotas are implementation inputs, not RIP semantics, and must be
 rechecked as AgentCore evolves. The current
@@ -768,123 +744,6 @@ runtime_session_id
 invocation_id
 execution_adapter
 ```
-
-### Private app envelope
-
-The app adapter can carry protocol metadata in a reserved top-level namespace
-while leaving the rest of the application payload unchanged:
-
-```json
-{
-  "_agentcore_runtime": {
-    "version": 1,
-    "operation": "start",
-    "invocation_id": "inv-123",
-    "background": true,
-    "conversation_id": "conversation-a"
-  },
-  "prompt": "..."
-}
-```
-
-`get` uses the same envelope without application input. The wrapper removes
-the reserved field before calling the registered handler. The exact namespace
-is private and must not reuse `_rollout`.
-
-### Shared implementation components
-
-Both execution adapters can share three internal concepts:
-
-- a filesystem invocation store configured with a root path;
-- a process-local registry that retains live tasks or process handles; and
-- an adapter that starts the workload through the appropriate Runtime
-  mechanism.
-
-The initial single-owner implementation can serialize `start` handling for
-each invocation ID:
-
-```python
-# Illustrative ordering only.
-with start_lock(invocation_id):
-    if state := store.get(invocation_id):
-        return state
-    store.write_started(invocation_id)
-    registry[invocation_id] = create_execution()
-```
-
-The lock prevents an overlapping request or retry from observing the ID as
-absent and starting the same workload again. The layout can remain an
-implementation detail:
-
-```text
-<invocation-store-root>/.agentcore-runtime/invocations/inv-123/
-  started.json
-  result.json
-```
-
-The store is authoritative for invocation identity and terminal result for as
-long as its files remain available. The live registry controls work in the
-current process and establishes whether a start record still has a live
-execution owner.
-
-### App-handler `start`
-
-The app wrapper can implement `start` in this order:
-
-1. Read the request context and validate the private envelope.
-2. Acquire the process-local start lock for the invocation ID.
-3. Read the selected store. If the ID already exists, return its observable
-   state without entering the user handler.
-4. Persist the start record.
-5. Create and retain the handler task, install it in the live registry, and
-   register AgentCore async-task tracking before releasing the lock.
-6. Await the task for foreground delivery or return `in_progress` for
-   background delivery.
-7. Publish the terminal result before removing live tracking state.
-
-Persisting terminal state for foreground and background invocations gives both
-modes the same recovery semantics. The execution task must be owned
-independently from the foreground request wait so losing that connection does
-not discard invocation tracking or terminal publication.
-
-### App-handler `get`
-
-For the initial single-owner app adapter, the wrapper intercepts `get` before
-the user handler and resolves status in this order:
-
-```text
-terminal record exists       -> completed; return its result or error
-live registry contains ID    -> in_progress
-start record exists only     -> interrupted
-no record exists             -> not_found
-```
-
-Writing the start record and installing the live registry entry must be
-serialized against `get`, so a concurrent read cannot mistake the brief
-registration window for interruption. If a server process restarts while the
-filesystem remains, the registry is empty and a remaining start-only record
-can be reported as `interrupted`. If a local filesystem disappears with its
-compute, the record is absent and the invocation becomes `not_found`; a managed
-mount preserves the record across compute replacement.
-
-The client initially performs this operation through another
-`InvokeAgentRuntime` call using the same Runtime session ID. The same request
-works for local and managed filesystem roots. Managed storage additionally
-requires validating the path after the original compute becomes idle and the
-session resumes.
-
-### Sandbox command operations
-
-The Sandbox adapter follows the same ordering as the app adapter: claim the ID
-before entering the workload, retain a live owner independently of the request,
-and publish the terminal record before releasing that ownership. `get` never
-enters the workload. The terminal payload is a command result or structured
-execution error instead of an application response.
-
-The concrete process manager, request path, output capture, and public handle
-belong to the [Sandbox SDK design](./sandbox_sdk.md). Native Interactive Shell
-remains a separate capability; it does not by itself supply a persisted record
-for each command entered into the terminal.
 
 ## Appendix B: Related process and connection models
 
