@@ -105,7 +105,7 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 - Requests with `_agentcore_runtime` use versioned `start/get`, foreground/background execution, and session-scoped invocation IDs.
 - Records live under configurable `state_dir`, defaulting to `.agentcore_runtime` under the OS temporary directory (`TMPDIR`).
 - One app process serves one Runtime session; live tasks are keyed by invocation ID. Filesystem records retain session-specific paths; use a managed mount for stop/resume persistence.
-- Protocol handlers return JSON values; structured terminal errors, `interrupted`, and `not_found` are HTTP 200 states, while storage failures are operation errors.
+- Protocol handlers return JSON values; terminal errors use an `error` string. Terminal errors, `interrupted`, and `not_found` are HTTP 200 states, while storage failures are operation errors.
 - Existing `RolloutClient` still uses S3 and does not yet drive this app. See [the app design](designs/agentcore_runtime_app.md) for HTTP mapping and implementation decisions, and [RIP](designs/runtime_invocation_protocol.md) for the shared lifecycle contract.
 - Tests: `uv run pytest tests/runtime/`.
 - Live tests: deploy `tests/runtime/live_agent.py` with the checkout's package,

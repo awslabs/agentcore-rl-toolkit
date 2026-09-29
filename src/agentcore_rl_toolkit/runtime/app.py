@@ -44,7 +44,7 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
         try:
             request = InvocationRequest.parse(payload[ENVELOPE_KEY])
         except ValueError as exc:
-            return JSONResponse({"error": {"code": "InvalidRequest", "message": str(exc)}}, status_code=400)
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
         handler = self.handlers.get("main")
         if handler is None:
@@ -61,7 +61,7 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
         try:
             return JSONResponse(await asyncio.shield(task))
         except Exception as exc:
-            return JSONResponse({"error": {"code": type(exc).__name__, "message": str(exc)}}, status_code=500)
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     async def _dispatch(
         self,
@@ -117,7 +117,7 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
             except Exception as exc:
                 self.logger.exception("Invocation %s failed", invocation_id)
                 terminal = state(invocation_id, "completed")
-                terminal["error"] = {"code": type(exc).__name__, "message": str(exc)}
+                terminal["error"] = str(exc)
                 # A serialization/write failure may still permit saving a small error.
                 # If that also fails, propagate; never report an unpersisted success.
                 await asyncio.to_thread(self._store.finish, session_id, terminal)

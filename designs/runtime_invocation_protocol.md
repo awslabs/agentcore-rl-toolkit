@@ -61,10 +61,10 @@ transport, implementation language, or public SDK surface.
 
 ### Relationship to A2A
 
-A2A already models long-running work as tasks with identity, state, and result
-retrieval. RIP supplies a shared lifecycle for HTTP app handlers and Sandbox
-commands; native A2A servers keep their own task operations and state model.
-Persistence and recovery guarantees depend on each server's implementation.
+`AgentCoreRuntimeApp` adds `start/get` operations to HTTP agents, allowing
+clients to submit work and retrieve results later. Sandbox commands use the
+same operations. A2A agents use their existing task APIs and do not need to
+implement RIP.
 
 ## Motivation: the missing invocation lifecycle
 
@@ -362,7 +362,7 @@ in_progress ------> completed
       +-----------> interrupted
 ```
 
-A completed invocation contains either a result or a structured error.
+A completed invocation contains either a result or an error.
 
 `interrupted` means a persisted start record shows that execution began, but no
 live execution and no terminal result can be recovered. RIP must not
@@ -449,11 +449,10 @@ managed mount.
 The store contains:
 
 - a start record persisted before the user workload begins; and
-- one terminal record containing the result or a structured error.
+- one terminal record containing the result or an error.
 
 The start record identifies an accepted invocation. The terminal record stores
-its result or structured error. Their exact schemas are implementation
-details.
+its result or error. Their exact schemas are implementation details.
 
 For an app handler, a replayable response can contain the status code, content
 type, response body, or an artifact reference. It stores the normalized

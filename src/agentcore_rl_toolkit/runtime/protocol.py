@@ -10,17 +10,12 @@ VERSION = 1
 Status = Literal["in_progress", "completed", "interrupted", "not_found"]
 
 
-class InvocationError(TypedDict):
-    code: str
-    message: str
-
-
 class InvocationState(TypedDict):
     version: int
     invocation_id: str
     status: Status
     result: NotRequired[Any]
-    error: NotRequired[InvocationError]
+    error: NotRequired[str]
 
 
 def state(invocation_id: str, status: Status) -> InvocationState:

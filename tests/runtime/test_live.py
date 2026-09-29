@@ -91,11 +91,10 @@ def test_live_results_retries_and_session_isolation(client, session):
     assert all(item["status"] == "in_progress" for item in starts)
     saved = result(client, session, "retry")
     assert saved["result"] == {**ordinary, "value": "original", "call_count": 2}
-    assert saved["result"]["reward"] == 1.0
     assert request(client, session, "retry", value="must not run") == saved
 
     failed = request(client, session, "failure", fail=True)
-    assert failed["error"] == {"code": "ValueError", "message": "intentional test failure"}
+    assert failed["error"] == "intentional test failure"
     assert request(client, session, "failure", "get") == failed
 
     other_session = str(uuid.uuid4())

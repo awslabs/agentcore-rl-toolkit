@@ -94,7 +94,7 @@ The envelope requires integer `version: 1`, `operation`, and `invocation_id`.
 IDs are 1–128 ASCII letters, digits, underscores, or hyphens, starting with a
 letter or digit. `background` is a boolean valid only for `start`; it defaults
 to `false`. Unsupported versions, unknown fields, and invalid values return
-HTTP 400 with error code `InvalidRequest`. Explicit version validation prevents
+HTTP 400 with `{"error": "..."}` describing the problem. Explicit version validation prevents
 a caller and server from silently interpreting different envelope formats.
 Version 1 has no protocol-level conversation-ID field; applications can carry
 their own conversation identity in the application payload.
@@ -113,7 +113,7 @@ Retrieval uses the same envelope without application input or `background`:
 
 Every state response contains `version`, `invocation_id`, and `status`.
 `completed` additionally contains either `result` (any JSON value, including
-`null`) or `error: {"code": "...", "message": "..."}`.
+`null`) or `error` containing the exception text from `str(exc)`.
 
 Foreground starts wait for the invocation's terminal response; background
 starts return its current state after acceptance. Repeated foreground starts
