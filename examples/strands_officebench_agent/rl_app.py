@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from models import InvocationRequest
 from reward import OfficeBenchReward
 from strands import Agent
+from strands.agent.conversation_manager import NullConversationManager
 from strands.models import BedrockModel
 from strands.models.openai import OpenAIModel
 from strands_tools import shell
@@ -86,6 +87,7 @@ def invoke_agent(payload: dict):
         model=model,
         tools=[shell, *ALL_TOOLS],
         system_prompt=system_prompt,
+        conversation_manager=NullConversationManager(),
     )
 
     # Run agent on the task

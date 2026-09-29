@@ -3,6 +3,7 @@ import logging
 from models import InvocationRequest
 from reward import GSM8KReward
 from strands import Agent
+from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
 from strands_tools import calculator
 
@@ -56,6 +57,7 @@ def invoke_agent(payload: dict, context):
         model=model,
         tools=[calculator],
         system_prompt=system_prompt,
+        conversation_manager=NullConversationManager(),
     )
 
     # Validate the payload: `prompt: str` rejects non-string input (e.g. toolUse

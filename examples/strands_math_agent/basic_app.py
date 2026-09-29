@@ -4,6 +4,7 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from dotenv import load_dotenv
 from models import InvocationRequest
 from strands import Agent
+from strands.agent.conversation_manager import NullConversationManager
 from strands.models import BedrockModel
 from strands_tools import calculator
 
@@ -24,6 +25,7 @@ agent = Agent(
         + "Use calculator when applicable. "
         + 'Let\'s think step by step and output the final answer after "####".'
     ),
+    conversation_manager=NullConversationManager(),
 )
 
 

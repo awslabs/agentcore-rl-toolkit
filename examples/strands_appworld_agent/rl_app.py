@@ -4,6 +4,7 @@ from appworld.environment import AppWorld, AppWorldServers
 from few_shot_example import build_example_messages
 from reward import AppWorldReward
 from strands import Agent, tool
+from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
 
 from agentcore_rl_toolkit import AgentCoreRLApp
@@ -155,6 +156,7 @@ def invoke_agent(payload: dict):
                 tools=[execute],
                 system_prompt=SYSTEM_PROMPT,
                 messages=build_example_messages(),
+                conversation_manager=NullConversationManager(),
             )
 
             response = agent(user_message)

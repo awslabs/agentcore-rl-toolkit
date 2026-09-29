@@ -7,6 +7,7 @@ from java_migration_agent.tools.dependency_tools import search_dependency_versio
 from models import InvocationRequest, RepoMetaData
 from reward import MigrationReward
 from strands import Agent
+from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
 from strands_tools import editor, shell
 from utils import configure_codeartifact_token, load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
@@ -87,6 +88,7 @@ def invoke_agent(payload: dict):
         model=model,
         tools=tools,
         system_prompt=prompt,
+        conversation_manager=NullConversationManager(),
     )
 
     metadata = RepoMetaData(**load_metadata_from_s3(request.metadata_uri))

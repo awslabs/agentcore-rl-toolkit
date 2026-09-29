@@ -4,6 +4,7 @@ import re
 
 from pydantic import BaseModel
 from strands import Agent
+from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
 from strands_tools import calculator
 
@@ -33,6 +34,7 @@ def invoke(payload):
             "Use the calculator tool to compute all mathematical expressions. "
             'Let\'s think step by step and output the final answer after "####".'
         ),
+        conversation_manager=NullConversationManager(),
     )
     response = agent(task.prompt)
     text = "".join(block["text"] for block in response.message.get("content", []) if "text" in block)

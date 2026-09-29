@@ -29,6 +29,7 @@ import time
 
 from harbor_sandbox import REGION, HarborSandboxClient
 from strands import Agent, tool
+from strands.agent.conversation_manager import NullConversationManager
 from strands.hooks import BeforeToolCallEvent, HookProvider
 from strands.models import BedrockModel
 from strands.models.openai import OpenAIModel
@@ -195,7 +196,12 @@ def run_rollout(
         t0 = time.time()
         limiter = _Budget(max_steps, deadline=t0 + agent_timeout_s)
         agent = Agent(
-            model=model_obj, tools=[bash], system_prompt=SYSTEM_PROMPT, hooks=[limiter], callback_handler=None
+            model=model_obj,
+            tools=[bash],
+            system_prompt=SYSTEM_PROMPT,
+            conversation_manager=NullConversationManager(),
+            hooks=[limiter],
+            callback_handler=None,
         )
         stop = "end_turn"
         try:
