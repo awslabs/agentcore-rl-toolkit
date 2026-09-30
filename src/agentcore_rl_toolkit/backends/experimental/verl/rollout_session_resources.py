@@ -18,7 +18,7 @@ from ray.actor import ActorProxy
 from agentcore_rl_toolkit.aws_tools.ec2_monitor import EC2Monitor, start_ec2_monitor
 from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore
-from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 from agentcore_rl_toolkit.concurrency.ray_adapters import (
     RayPriorityAssigner,
     RayPrioritySemaphore,
@@ -55,7 +55,7 @@ class RolloutSessionAgentLoopResources:
     rollout_semaphore: ActorProxy[LocalPrioritySemaphore]
     container_priority_assigner: ActorProxy[LocalPriorityAssigner]
     rollout_priority_assigner: ActorProxy[LocalPriorityAssigner]
-    session_rate_limiter: ActorProxy[ACRRateLimiter]
+    session_rate_limiter: ActorProxy[LocalRateLimiter]
     ec2_monitor: EC2Monitor | None
 
 
@@ -82,7 +82,7 @@ async def start_rollout_session_agent_loop_resources(
             ray.remote(LocalPriorityAssigner).options(name=CONTAINER_PRIORITY_ASSIGNER, get_if_exists=True).remote()
         ),
         session_rate_limiter=(
-            ray.remote(ACRRateLimiter)
+            ray.remote(LocalRateLimiter)
             .options(name=SESSION_RATE_LIMITER, get_if_exists=True)
             .remote(tps_limit=bounds_cfg["session_create_rate"])
         ),

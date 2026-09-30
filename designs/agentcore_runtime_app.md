@@ -85,10 +85,12 @@ reserved envelope:
 }
 ```
 
-The adapter removes only `_agentcore_runtime` before calling the handler.
-Application fields, including `_rollout`, pass through unchanged. Keeping the
-envelope separate prevents execution controls from becoming rollout-specific
-configuration.
+The adapter removes `_agentcore_runtime` before calling the handler. An optional
+`_config` object becomes `context.config`; all other application fields pass
+through unchanged. Omitted `_config` means `{}` for that invocation. The app
+does not remember configuration from earlier calls or modify environment variables.
+The client sends the complete payload supplied by the caller without changing it
+in place. Configuration values have no protocol-specific meaning.
 
 The envelope requires integer `version: 1`, `operation`, and `invocation_id`.
 IDs are 1–128 ASCII letters, digits, underscores, or hyphens, starting with a
@@ -228,15 +230,56 @@ record resolves to `interrupted` after the task is released. Storage read
 failures also return HTTP 500, never `not_found`. Success is reported only after
 the terminal record is published.
 
+## HTTP client
+
+`AgentCoreHttpClient` is a public async client, available with the `rollout` extra.
+One client shares its connection pool across Runtime sessions on one event loop.
+Each invocation supplies its own session ID and complete application payload:
+
+```python
+from agentcore_rl_toolkit import AgentCoreHttpClient
+
+async with AgentCoreHttpClient(runtime_arn) as client:
+    task = {
+        "question": "What is 2 + 2?",
+        "_config": {"base_url": gateway_url, "model_id": model_id, "api_key": session_id},
+    }
+    handle = await client.invoke(task, session_id=session_id, background=True)
+    result = await handle.result(timeout=600)
+    # Save both IDs to retrieve this invocation from another client later.
+    restored = client.get_invocation(session_id=session_id, invocation_id=handle.invocation_id)
+```
+
+`invoke()` defaults to foreground execution and returns the handler's JSON value.
+With `background=True`, it returns an `InvocationHandle`. `handle.status()` reads
+the current state; `handle.result()` polls every 10 seconds while `in_progress`
+and returns the original result. A completed result is cached. Handler errors, `interrupted`,
+and `not_found` raise `InvocationError`. A local wait timeout raises `TimeoutError`
+and leaves the invocation running.
+
+The client generates an invocation ID before submission unless the caller supplies
+one. SDK retries reuse that ID; the client uses the SDK's configured retry policy.
+
+An ordinary `BedrockAgentCoreApp` may ignore the envelope and return JSON directly.
+The client accepts that response; a background call then returns an already
+completed handle after waiting for the HTTP response. Such a handle cannot be
+reconstructed remotely. Protocol responses are identified by their version,
+status, and matching invocation ID; applications should avoid that response shape.
+
+Closing the client closes connections. `stop_session(session_id)` explicitly
+stops compute. Neither collecting a result nor cancelling a local wait stops
+the Runtime session.
+
 ## Session and workload integration
 
 The HTTP `RolloutSession` adapter submits and retrieves work through this
-app's `start/get` operations and converts results to the rollout result format.
+app's `start/get` operations and converts results to the rollout result format:
+the complete returned dictionary becomes `task_output`, its optional scalar
+`reward` becomes the rollout reward, and `metrics` are passed through. An absent
+reward remains absent. `RolloutDumpResponse` validates these fields.
 
-Invocation completion and foreground disconnection never stop the Runtime
-session. Session cleanup belongs to the workload client, which may retain a
-session for follow-up work.
-
-Setup and run can be two invocations in the same Runtime session, each with
-its own invocation ID. The handler can use an application payload field such
-as `phase: "setup"` or `phase: "run"` to choose what to do.
+`AgentCoreHttpSession.setup()` is a no-op. `run(task)` forwards the caller's
+complete task, including `_config`, and waits for a background handle's result.
+Applications decide where to prepare repositories or other task resources.
+`shutdown()` stops only this Runtime session, including after failed submissions;
+it never deletes the deployment or closes the shared client.

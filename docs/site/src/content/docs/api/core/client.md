@@ -198,7 +198,7 @@ RolloutFuture(
     input_id: str = None,
     agentcore_client = None,
     agent_runtime_arn: str = None,
-    rate_limiter: ACRRateLimiter = None,
+    rate_limiter: LocalRateLimiter = None,
 )
 ```
 

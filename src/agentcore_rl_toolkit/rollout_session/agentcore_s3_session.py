@@ -53,7 +53,7 @@ MIN_ACR_SESSION_ID_LEN = 33
 # cluster-wide named actor, which is the only place a per-ARN TPS cap can actually be
 # enforced: the client's limiter is per process, so N agent-loop workers each holding a 25
 # TPS budget admit 25N. Effectively-infinite rather than a disable flag, because
-# ACRRateLimiter has no off switch; a `1/tps` interval of a nanosecond never sleeps.
+# LocalRateLimiter has no off switch; a `1/tps` interval of a nanosecond never sleeps.
 #
 # What that leaves unthrottled is the stop call in teardown, which shares ACR's per-ARN
 # budget with invoke but happens outside the bounded region -- so size

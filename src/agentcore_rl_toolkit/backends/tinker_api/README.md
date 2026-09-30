@@ -20,12 +20,12 @@ From a toolkit checkout:
 ```bash
 uv venv --python 3.12 .venv
 source .venv/bin/activate
-uv pip install -e '.[gateway,tinker_api]' 'transformers==5.12.1' datasets wandb
+uv pip install -e '.[rollout,gateway,tinker_api]' 'transformers==5.12.1' datasets wandb
 ```
 
 `datasets` is used to prepare the math example; `wandb` enables optional logging.
 
-> **SkyRL:** Replace `.[gateway,tinker_api]` with `.[gateway,tinker_skyrl]` to use
+> **SkyRL:** Replace `.[rollout,gateway,tinker_api]` with `.[rollout,gateway,tinker_skyrl]` to use
 > SDK 0.24.1. The tested SkyRL version does not return `sample_sequence_ids`,
 > which SDK 0.30.1 requires. The two extras are mutually exclusive and share the
 > same training loop.
@@ -66,13 +66,14 @@ is unset or empty, the client uses `tml-dummy` for unauthenticated endpoints.
 Keep real keys out of the JSON config, which is logged to W&B.
 
 The AgentCore runtime must reach the client's gateway through its VPC. The
-client needs access to the Tinker endpoint and AWS APIs/S3. The endpoint must
+client needs access to the Tinker endpoint and AWS APIs. The endpoint must
 support the client's Tinker SDK version, LoRA training, token sampling with
 logprobs, sampler weight synchronization, and checkpoints.
 
 ## Run the math example
 
-Deploy the [Strands math agent](../../../../examples/strands_math_agent/) first.
+Deploy [http_app.py](../../../../examples/strands_math_agent/http_app.py) from the
+Strands math example with its dependencies and the checkout's toolkit package.
 The [example config](examples/math_agent/config.json.example) runs GSM8K
 training with Qwen3.5-4B, thinking disabled, held-out evaluation, and periodic
 checkpoints.
@@ -84,7 +85,7 @@ python prepare_data.py gsm8k-test.jsonl --split test
 cp config.json.example config.json
 ```
 
-Fill in the endpoint, runtime ARN, S3 bucket, gateway address, dataset paths, and
+Fill in the endpoint, runtime ARN, gateway address, dataset paths, and
 output directory in `config.json`, then run:
 
 ```bash
@@ -93,7 +94,7 @@ python -m agentcore_rl_toolkit.backends.tinker_api.train config.json
 
 Each dataset row is an agent invocation payload, for example
 `{"prompt": "What is 7 + 5?", "answer": "12"}`. The agent returns a finite scalar
-`rewards`. Failed rollouts with captured training tokens receive zero reward;
+`reward`. Failed rollouts with captured training tokens receive zero reward;
 rollouts with no training tokens are excluded from scoring and training.
 Groups with no reward variation are skipped.
 

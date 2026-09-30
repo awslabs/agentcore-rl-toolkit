@@ -576,7 +576,7 @@ implementation.
 
 The **Rollout SDK** configures, submits, groups, and collects agent rollouts for
 training and evaluation. Its `RolloutSession` interface exposes `setup`, `run`,
-and `shutdown` across server protocols. The target AgentCore adapters are:
+and `shutdown` across server protocols. The AgentCore adapters are:
 
 | Session adapter | Agent server | Execution lifecycle |
 | --- | --- | --- |
@@ -598,7 +598,7 @@ adapter to use.
 | Trajectory capture and correlation | Rollout Gateway and training backends |
 | Reward computation and conversation history | Application or training integration |
 
-The target layering is:
+The layering is:
 
 ```text
 Training or evaluation integration
@@ -654,7 +654,7 @@ The HTTP migration has two corresponding replacements:
 
 The app and client contracts must migrate together. The S3-based `RolloutClient`
 requires the existing `AgentCoreRLApp` result contract. Callers retain that pair
-during the transition. The target `agentcore_http` adapter speaks RIP; it is not
+during the transition. The `agentcore_http` adapter speaks RIP; it is not
 wire-compatible with the older rollout-specific setup/status/start/dump HTTP
 adapter.
 
@@ -698,9 +698,10 @@ manage messages or memory.
 
 ## Public client surface
 
-The generic client and handle names remain open. `RolloutFuture` and Sandbox
-`ExecHandle` may consume shared RIP client machinery where applicable without
-exposing a new public `Retriever` abstraction.
+The HTTP adapter exposes `AgentCoreHttpClient` and `InvocationHandle`; their
+API and plain HTTP compatibility are defined in the
+[app design](./agentcore_runtime_app.md#http-client). Sandbox retains
+`ExecHandle`. Consumers need not expose a shared `Retriever` abstraction.
 
 ## Open questions
 

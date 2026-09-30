@@ -9,13 +9,13 @@ import time
 import unittest
 from unittest import IsolatedAsyncioTestCase
 
-from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter, RateLimiter
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter, RateLimiter
 from agentcore_rl_toolkit.concurrency.ray_adapters import RayRateLimiter
 
 
 class ProtocolTest(unittest.TestCase):
     def test_the_toolkit_limiter_satisfies_the_protocol(self):
-        self.assertIsInstance(ACRRateLimiter(25), RateLimiter)
+        self.assertIsInstance(LocalRateLimiter(25), RateLimiter)
 
     def test_the_ray_adapter_satisfies_it_without_a_cluster(self):
         # Must hold before any actor exists.
@@ -45,8 +45,8 @@ class RayRateLimiterTest(IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["remote", "awaited"])
 
 
-class ACRRateLimiterTest(IsolatedAsyncioTestCase):
-    """Timed against the real clock because the vendored limiter reads ``time.time``
+class LocalRateLimiterTest(IsolatedAsyncioTestCase):
+    """Timed against the real clock because the limiter reads ``time.time``
     and sleeps internally. The rate is high and the bounds loose, so the assertions are
     about smearing having happened at all, not precise pacing."""
 
@@ -54,7 +54,7 @@ class ACRRateLimiterTest(IsolatedAsyncioTestCase):
     INTERVAL = 1 / RATE
 
     async def test_sequential_callers_are_paced(self):
-        limiter = ACRRateLimiter(self.RATE)
+        limiter = LocalRateLimiter(self.RATE)
         started = time.monotonic()
         for _ in range(6):
             await limiter.wait_async()
@@ -63,14 +63,14 @@ class ACRRateLimiterTest(IsolatedAsyncioTestCase):
         self.assertGreaterEqual(elapsed, 5 * self.INTERVAL * 0.9)
 
     async def test_a_simultaneous_burst_is_smeared_not_let_through(self):
-        limiter = ACRRateLimiter(self.RATE)
+        limiter = LocalRateLimiter(self.RATE)
         started = time.monotonic()
         await asyncio.gather(*(limiter.wait_async() for _ in range(6)))
         elapsed = time.monotonic() - started
         self.assertGreaterEqual(elapsed, 5 * self.INTERVAL * 0.9)
 
     async def test_an_idle_limiter_does_not_delay_the_next_caller(self):
-        limiter = ACRRateLimiter(self.RATE)
+        limiter = LocalRateLimiter(self.RATE)
         await limiter.wait_async()
         await asyncio.sleep(self.INTERVAL * 3)
         started = time.monotonic()
@@ -78,13 +78,13 @@ class ACRRateLimiterTest(IsolatedAsyncioTestCase):
         self.assertLess(time.monotonic() - started, self.INTERVAL)
 
 
-class ACRRateLimiterLoopTest(unittest.TestCase):
+class LocalRateLimiterLoopTest(unittest.TestCase):
     """Driven with its own loops, so it cannot live in the async test case above."""
 
     def test_it_survives_a_new_event_loop(self):
         # One limiter outlives any single asyncio.run(), and its internal lock is
         # bound to a loop, so it has to notice when that loop is gone.
-        limiter = ACRRateLimiter(50)
+        limiter = LocalRateLimiter(50)
         asyncio.run(limiter.wait_async())
         asyncio.run(limiter.wait_async())  # must not raise "attached to a different loop"
 

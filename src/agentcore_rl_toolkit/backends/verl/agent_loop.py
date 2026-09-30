@@ -34,7 +34,7 @@ from .gateway_host import GatewayHandle, get_or_start_gateway
 logger = logging.getLogger(__name__)
 
 # Agent loops are instantiated per trajectory, so same-config instances MUST share
-# one client: the client owns the ACRRateLimiter, and a fresh limiter per instance
+# one client: the client owns the LocalRateLimiter, and a fresh limiter per instance
 # means no effective rate limiting toward ACR's per-ARN TPS cap. Keyed by config
 # rather than a process singleton so distinct ARNs get distinct clients. Only ever
 # touched from the AgentLoopWorker's asyncio thread (RolloutClient isn't thread-safe).

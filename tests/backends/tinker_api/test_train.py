@@ -9,20 +9,25 @@ import pytest
 
 from agentcore_rl_toolkit.backends.tinker_api.data import Episode
 from agentcore_rl_toolkit.backends.tinker_api.train import (
-    agent_reward,
     collect_batch,
     drain_rollouts,
     evaluate,
     rollout,
 )
 from agentcore_rl_toolkit.rollout_gateway.trace import TraceRecord
+from agentcore_rl_toolkit.runtime import InvocationError
+
+
+@pytest.fixture
+def rollout_kwargs():
+    return {"base_url": "http://gateway/v1", "session_rate_limiter": SimpleNamespace(wait_async=AsyncMock())}
 
 
 @pytest.mark.asyncio
-async def test_processing_error_drains_other_rollouts_before_raising():
+async def test_processing_error_drains_other_rollouts_before_raising(rollout_kwargs):
     finished = []
 
-    async def fake_rollout(config, gateway, client, payload, group_index, sample_index):
+    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, **kwargs):
         if sample_index == 0:
             raise ValueError("broken processing code")
         await asyncio.sleep(0.01)
@@ -31,26 +36,36 @@ async def test_processing_error_drains_other_rollouts_before_raising():
 
     with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
         with pytest.raises(ValueError, match="broken processing code"):
-            await collect_batch(SimpleNamespace(group_size=2), None, None, [{}])
+            await collect_batch(SimpleNamespace(group_size=2), None, None, [{}], **rollout_kwargs)
     assert finished == [1]
 
 
-@pytest.mark.parametrize("reward", [None, True, "1", float("nan"), float("inf")])
-def test_invalid_rewards_are_not_silently_zeroed(reward):
-    with pytest.raises(ValueError, match="finite scalar"):
-        agent_reward({"rewards": reward})
+@pytest.mark.parametrize("reward", [None, True, "1", "invalid", float("nan"), float("inf")])
+@pytest.mark.asyncio
+async def test_invalid_rewards_are_not_silently_zeroed(reward, rollout_kwargs):
+    record = TraceRecord(token_ids=[10, 11], loss_mask=[1], logprobs=[-0.2])
+    gateway = SimpleNamespace(
+        create_session=Mock(), finish_session=AsyncMock(return_value=[record]), drop_session=AsyncMock()
+    )
+    handle = SimpleNamespace(result=AsyncMock(return_value={"reward": reward}))
+    client = SimpleNamespace(invoke=AsyncMock(return_value=handle), stop_session=AsyncMock())
+    config = SimpleNamespace(max_new_tokens=2, max_context_tokens=8, rollout_timeout=60, base_model="model")
+    with pytest.raises(ValueError, match="reward"):
+        await rollout(config, gateway, client, {}, 0, 0, **rollout_kwargs)
+    client.stop_session.assert_awaited_once()
+    gateway.drop_session.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
     "failure",
     [
-        {"status_code": 500, "stop_reason": "Model stopped generating due to maximum token limit."},
+        InvocationError("sid", {"invocation_id": "inv", "status": "completed", "error": "token limit"}),
         TimeoutError("result timed out"),
     ],
 )
 @pytest.mark.parametrize("has_trace", [True, False])
 @pytest.mark.asyncio
-async def test_failed_invocation_preserves_trace_or_returns_unscored_failure(failure, has_trace):
+async def test_failed_invocation_preserves_trace_or_returns_unscored_failure(failure, has_trace, rollout_kwargs):
     record = TraceRecord(token_ids=[10, 11, 12], loss_mask=[1, 1], logprobs=[-0.2, -0.3])
     gateway = SimpleNamespace(
         create_session=Mock(),
@@ -58,10 +73,10 @@ async def test_failed_invocation_preserves_trace_or_returns_unscored_failure(fai
         drop_session=AsyncMock(),
     )
     result_async = AsyncMock(side_effect=failure) if isinstance(failure, Exception) else AsyncMock(return_value=failure)
-    future = SimpleNamespace(result_async=result_async)
-    client = SimpleNamespace(invoke_async=AsyncMock(return_value=future))
-    config = SimpleNamespace(max_new_tokens=2, max_context_tokens=8, rollout_timeout=60)
-    episode = await rollout(config, gateway, client, {}, 0, 0)
+    future = SimpleNamespace(result=result_async)
+    client = SimpleNamespace(invoke=AsyncMock(return_value=future), stop_session=AsyncMock())
+    config = SimpleNamespace(max_new_tokens=2, max_context_tokens=8, rollout_timeout=60, base_model="model")
+    episode = await rollout(config, gateway, client, {}, 0, 0, **rollout_kwargs)
     if not has_trace:
         assert episode.reward is None
         assert episode.records == []
@@ -77,23 +92,23 @@ async def test_failed_invocation_preserves_trace_or_returns_unscored_failure(fai
 
 
 @pytest.mark.asyncio
-async def test_cancellation_is_not_converted_to_a_failed_episode():
+async def test_cancellation_is_not_converted_to_a_failed_episode(rollout_kwargs):
     gateway = SimpleNamespace(
         create_session=Mock(), finish_session=AsyncMock(return_value=[]), drop_session=AsyncMock()
     )
-    future = SimpleNamespace(result_async=AsyncMock(side_effect=asyncio.CancelledError()))
-    client = SimpleNamespace(invoke_async=AsyncMock(return_value=future))
-    config = SimpleNamespace(max_new_tokens=2, max_context_tokens=8, rollout_timeout=60)
+    future = SimpleNamespace(result=AsyncMock(side_effect=asyncio.CancelledError()))
+    client = SimpleNamespace(invoke=AsyncMock(return_value=future), stop_session=AsyncMock())
+    config = SimpleNamespace(max_new_tokens=2, max_context_tokens=8, rollout_timeout=60, base_model="model")
     with pytest.raises(asyncio.CancelledError):
-        await drain_rollouts([rollout(config, gateway, client, {}, 0, 0)])
+        await drain_rollouts([rollout(config, gateway, client, {}, 0, 0, **rollout_kwargs)])
     gateway.drop_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_evaluation_includes_partial_batch_once_per_prompt(tmp_path):
+async def test_evaluation_includes_partial_batch_once_per_prompt(tmp_path, rollout_kwargs):
     seen = []
 
-    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, *, temperature):
+    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, *, temperature, **kwargs):
         seen.append((payload["index"], group_index, sample_index, temperature))
         record = TraceRecord(
             token_ids=[10, 11], loss_mask=[1], logprobs=[-0.3], metadata={"truncated": sample_index == 1}
@@ -105,7 +120,7 @@ async def test_evaluation_includes_partial_batch_once_per_prompt(tmp_path):
     config = SimpleNamespace(output_dir=str(tmp_path), evaluation_batch_size=2, evaluation_temperature=0.6)
     payloads = [{"index": i, "reward": reward} for i, reward in enumerate([1.0, 0.0, 1.0])]
     with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
-        metrics = await evaluate(config, None, None, payloads, step=10)
+        metrics = await evaluate(config, None, None, payloads, step=10, **rollout_kwargs)
     assert sorted(seen) == [(i, i, i, 0.6) for i in range(3)]
     assert metrics["eval/reward_mean"] == pytest.approx(2 / 3)
     assert metrics["eval/episodes"] == 3
@@ -119,12 +134,12 @@ async def test_evaluation_includes_partial_batch_once_per_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_evaluation_persists_completed_results_while_other_requests_are_pending(tmp_path):
+async def test_evaluation_persists_completed_results_while_other_requests_are_pending(tmp_path, rollout_kwargs):
     first_finished = asyncio.Event()
     release_slow = asyncio.Event()
     path = tmp_path / "evaluation-0010.jsonl"
 
-    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, *, temperature):
+    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, **kwargs):
         if sample_index == 0:
             await release_slow.wait()
             return Episode("missing", None, [], error="502")
@@ -133,7 +148,7 @@ async def test_evaluation_persists_completed_results_while_other_requests_are_pe
 
     config = SimpleNamespace(output_dir=str(tmp_path), evaluation_batch_size=2, evaluation_temperature=0.6)
     with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
-        task = asyncio.create_task(evaluate(config, None, None, [{}, {}], step=10))
+        task = asyncio.create_task(evaluate(config, None, None, [{}, {}], step=10, **rollout_kwargs))
         try:
             await asyncio.wait_for(first_finished.wait(), timeout=2)
             rows = [json.loads(line) for line in path.read_text().splitlines()]

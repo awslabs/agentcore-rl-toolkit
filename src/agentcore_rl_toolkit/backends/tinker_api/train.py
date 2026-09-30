@@ -17,13 +17,17 @@ from pathlib import Path
 
 import tinker
 from aiohttp import web
+from pydantic import ValidationError
 from transformers import AutoTokenizer
 
-from agentcore_rl_toolkit.client import RolloutClient
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter, RateLimiter
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, HfTemplateRenderer
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway
 from agentcore_rl_toolkit.rollout_gateway.sampling_backends.tinker_sdk import TinkerSdkBackend
 from agentcore_rl_toolkit.rollout_gateway.server import FilteredAccessLogger
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
+from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
+from agentcore_rl_toolkit.runtime import AgentCoreHttpClient
 
 from .data import Episode, training_data
 
@@ -37,7 +41,6 @@ class Config:
     tokenizer: str
     dataset: str
     agent_runtime_arn: str
-    s3_bucket: str
     gateway_host: str
     output_dir: str
     tokenizer_revision: str | None = None
@@ -52,7 +55,7 @@ class Config:
     max_new_tokens: int = 2048
     max_context_tokens: int = 16384
     rollout_timeout: float = 180.0
-    tps_limit: int = 4
+    tps_limit: int = 4  # New Runtime sessions per second.
     evaluation_dataset: str | None = None
     evaluation_batch_size: int = 256
     evaluation_temperature: float = 0.6
@@ -81,7 +84,7 @@ class Config:
 
 def agent_reward(result: dict) -> float:
     """Validate the reward contract of a successful invocation."""
-    reward = result.get("rewards")
+    reward = result.get("reward")
     if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(reward):
         raise ValueError(f"Expected a finite scalar agent reward, got {reward!r}")
     return float(reward)
@@ -90,14 +93,25 @@ def agent_reward(result: dict) -> float:
 async def rollout(
     config: Config,
     gateway: RolloutGateway,
-    client: RolloutClient,
+    client: AgentCoreHttpClient,
     payload: dict,
     group_index: int,
     sample_index: int,
     *,
+    base_url: str,
+    session_rate_limiter: RateLimiter,
     temperature: float = 1.0,
 ) -> Episode:
     sid = str(uuid.uuid4())
+    task = {
+        **payload,
+        "_config": {
+            **payload.get("_config", {}),
+            "base_url": base_url,
+            "model_id": config.base_model,
+            "api_key": sid,
+        },
+    }
     gateway.create_session(
         sid,
         sampling_defaults={"max_new_tokens": config.max_new_tokens, "temperature": temperature, "top_p": 1.0},
@@ -107,22 +121,16 @@ async def rollout(
         result = {}
         error = None
         try:
-            future = await client.invoke_async(
-                payload,
-                session_id=sid,
-                input_id=sid,
-                api_key=sid,
-                sampling_params={
-                    "max_completion_tokens": config.max_new_tokens,
-                    "temperature": temperature,
-                    "top_p": 1.0,
-                },
-            )
-            result = await future.result_async(timeout=config.rollout_timeout)
+            async with AgentCoreHttpSession(sid, client=client) as session:
+                await session_rate_limiter.wait_async()
+                async with asyncio.timeout(config.rollout_timeout):
+                    dump = await session.run(task)
+            result = dump.task_output or {}
+            error = dump.exception
+        except (RolloutContractError, ValidationError):
+            raise
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
-        if result.get("status_code", 200) != 200:
-            error = f"agent returned status_code={result['status_code']}: {result.get('stop_reason', 'unknown')}"
         if error:
             logger.warning("rollout=%s invocation failed: %s", sid, error)
         records = await gateway.finish_session(
@@ -154,10 +162,27 @@ async def drain_rollouts(coroutines):
     return results
 
 
-async def collect_batch(config: Config, gateway: RolloutGateway, client: RolloutClient, payloads: list[dict]):
+async def collect_batch(
+    config: Config,
+    gateway: RolloutGateway,
+    client: AgentCoreHttpClient,
+    payloads: list[dict],
+    *,
+    base_url: str,
+    session_rate_limiter: RateLimiter,
+):
     results = await drain_rollouts(
         [
-            rollout(config, gateway, client, payload, group_index, group_index * config.group_size + i)
+            rollout(
+                config,
+                gateway,
+                client,
+                payload,
+                group_index,
+                group_index * config.group_size + i,
+                base_url=base_url,
+                session_rate_limiter=session_rate_limiter,
+            )
             for group_index, payload in enumerate(payloads)
             for i in range(config.group_size)
         ]
@@ -165,7 +190,16 @@ async def collect_batch(config: Config, gateway: RolloutGateway, client: Rollout
     return [results[i : i + config.group_size] for i in range(0, len(results), config.group_size)]
 
 
-async def evaluate(config: Config, gateway: RolloutGateway, client: RolloutClient, payloads: list[dict], step: int):
+async def evaluate(
+    config: Config,
+    gateway: RolloutGateway,
+    client: AgentCoreHttpClient,
+    payloads: list[dict],
+    step: int,
+    *,
+    base_url: str,
+    session_rate_limiter: RateLimiter,
+):
     """Evaluate each held-out prompt once without constructing training data."""
     start = time.monotonic()
     summaries = []
@@ -174,7 +208,15 @@ async def evaluate(config: Config, gateway: RolloutGateway, client: RolloutClien
 
         async def evaluate_one(index, payload):
             episode = await rollout(
-                config, gateway, client, payload, index, index, temperature=config.evaluation_temperature
+                config,
+                gateway,
+                client,
+                payload,
+                index,
+                index,
+                base_url=base_url,
+                session_rate_limiter=session_rate_limiter,
+                temperature=config.evaluation_temperature,
             )
             summary = {
                 "input_index": index,
@@ -263,21 +305,18 @@ async def train(config: Config):
     runner = web.AppRunner(gateway.app, handler_cancellation=True, access_log_class=FilteredAccessLogger)
     await runner.setup()
     wandb_run = None
+    # Shared Runtime API budget for this training run.
+    request_rate_limiter = LocalRateLimiter(100)
+    client = AgentCoreHttpClient(
+        config.agent_runtime_arn, max_pool_connections=512, request_rate_limiter=request_rate_limiter
+    )
+    session_rate_limiter = LocalRateLimiter(config.tps_limit)
     updates = 0
     try:
         await web.TCPSite(runner, host=config.gateway_host, port=config.gateway_port).start()
         bound_port = runner.addresses[0][1]
         gateway_url = f"http://{config.gateway_host}:{bound_port}/v1"
         logger.info("Gateway listening on %s", gateway_url)
-        client = RolloutClient(
-            agent_runtime_arn=config.agent_runtime_arn,
-            s3_bucket=config.s3_bucket,
-            exp_id=config.exp_id,
-            base_url=gateway_url,
-            model_id=config.base_model,
-            tps_limit=config.tps_limit,
-            max_pool_connections=max(10, config.batch_size * config.group_size, config.evaluation_batch_size),
-        )
         if config.wandb_project:
             import wandb
 
@@ -295,7 +334,15 @@ async def train(config: Config):
             (output / "wandb-url.txt").write_text(wandb_run.url + "\n")
 
         if evaluation_payloads:
-            metrics = await evaluate(config, gateway, client, evaluation_payloads, step=0)
+            metrics = await evaluate(
+                config,
+                gateway,
+                client,
+                evaluation_payloads,
+                step=0,
+                base_url=gateway_url,
+                session_rate_limiter=session_rate_limiter,
+            )
             (output / "evaluation-before.json").write_text(json.dumps(metrics) + "\n")
             logger.info("Initial evaluation: %s", json.dumps(metrics))
             if wandb_run:
@@ -304,7 +351,9 @@ async def train(config: Config):
         for step in range(config.steps):
             start = time.monotonic()
             batch = payloads[step * config.batch_size : (step + 1) * config.batch_size]
-            groups = await collect_batch(config, gateway, client, batch)
+            groups = await collect_batch(
+                config, gateway, client, batch, base_url=gateway_url, session_rate_limiter=session_rate_limiter
+            )
             # Persist raw IDs/masks for auditing the actual sampled/trained data.
             (output / f"rollouts-{step:04d}.json").write_text(
                 json.dumps(
@@ -343,7 +392,15 @@ async def train(config: Config):
                     wandb_run.summary["checkpoint_path"] = checkpoint_path
                     wandb_run.summary["optimizer_steps"] = updates
             if evaluation_payloads and (completed % config.evaluation_interval == 0 or completed == config.steps):
-                evaluation_metrics = await evaluate(config, gateway, client, evaluation_payloads, completed)
+                evaluation_metrics = await evaluate(
+                    config,
+                    gateway,
+                    client,
+                    evaluation_payloads,
+                    completed,
+                    base_url=gateway_url,
+                    session_rate_limiter=session_rate_limiter,
+                )
                 if wandb_run:
                     wandb_run.log({"step": completed, **evaluation_metrics})
 
@@ -353,7 +410,10 @@ async def train(config: Config):
             wandb_run = None
         raise
     finally:
-        await runner.cleanup()
+        try:
+            await client.aclose()
+        finally:
+            await runner.cleanup()
         if wandb_run:
             wandb_run.finish()
 

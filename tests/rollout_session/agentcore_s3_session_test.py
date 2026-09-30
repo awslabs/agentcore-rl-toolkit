@@ -12,9 +12,9 @@ import unittest
 from unittest import IsolatedAsyncioTestCase, mock
 
 from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
-from agentcore_rl_toolkit.client import ACRRateLimiter
 from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 from agentcore_rl_toolkit.rollout_session import agentcore_s3_session as mod
 from agentcore_rl_toolkit.rollout_session.agentcore_s3_session import AgentCoreS3Session
 from agentcore_rl_toolkit.rollout_session.factory import make_session
@@ -544,7 +544,7 @@ class ClientCacheTest(unittest.TestCase):
     def test_the_unthrottled_limiter_costs_no_wait(self):
         # The whole point of the constant: at the client's default of 25 TPS these calls
         # would take 8 seconds between them.
-        limiter = ACRRateLimiter(mod.UNTHROTTLED_TPS)
+        limiter = LocalRateLimiter(mod.UNTHROTTLED_TPS)
         start = time.perf_counter()
         for _ in range(200):
             limiter.wait_sync()

@@ -17,6 +17,8 @@ import pytest
 from botocore.config import Config
 from botocore.exceptions import ReadTimeoutError
 
+from agentcore_rl_toolkit import AgentCoreHttpClient
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("RUNTIME_TEST_ARN"), reason="set RUNTIME_TEST_ARN for live ACR coverage"
 )
@@ -131,3 +133,18 @@ def test_live_background_survives_idle_timeout(client, session):
     time.sleep(80)
     saved = result(client, session, "busy")
     assert saved["result"] == {**ordinary, "call_count": 2}
+
+
+@pytest.mark.asyncio
+async def test_live_http_client_recovers_a_handle():
+    session_id = str(uuid.uuid4())
+    async with AgentCoreHttpClient(os.environ["RUNTIME_TEST_ARN"]) as client:
+        try:
+            handle = await client.invoke({"delay": 2, "value": "http-client"}, session_id=session_id, background=True)
+            restored = client.get_invocation(session_id=session_id, invocation_id=handle.invocation_id)
+            result = await restored.result(timeout=30)
+            assert result["value"] == "http-client"
+            assert result["session_id"] == session_id
+            assert await handle.result(timeout=30) == result
+        finally:
+            await client.stop_session(session_id)

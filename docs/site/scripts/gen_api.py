@@ -69,8 +69,7 @@ MODULES: list[ModuleSpec] = [
         description="AgentCoreRLApp and the @rollout_entrypoint decorator.",
         include=("AgentCoreRLApp",),
     ),
-    # client: the trainer/evaluator-side surface. Drop ACRRateLimiter
-    # (internal throttling helper).
+    # client: the trainer/evaluator-side surface.
     ModuleSpec(
         dotted_paths=("agentcore_rl_toolkit.client",),
         out_path="core/client.md",

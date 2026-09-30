@@ -22,7 +22,6 @@ async def test_existing_run_is_not_overwritten(tmp_path):
         tokenizer="tokenizer",
         dataset="unused",
         agent_runtime_arn="runtime",
-        s3_bucket="bucket",
         gateway_host="127.0.0.1",
         output_dir=str(tmp_path),
     )
@@ -81,7 +80,7 @@ async def test_invoke_failures_do_not_interrupt_subsequent_updates(
                 "InvokeAgentRuntime",
             )
         sessions[session_id] = [TraceRecord(token_ids=[10, 11], loss_mask=[1], logprobs=[-0.3])]
-        return SimpleNamespace(result_async=AsyncMock(return_value={"rewards": reward}))
+        return SimpleNamespace(result=AsyncMock(return_value={"reward": reward}))
 
     training_client = SimpleNamespace(
         save_weights_and_get_sampling_client_async=AsyncMock(return_value=object()),
@@ -92,7 +91,8 @@ async def test_invoke_failures_do_not_interrupt_subsequent_updates(
     monkeypatch.setattr(recipe.AutoTokenizer, "from_pretrained", Mock())
     monkeypatch.setattr(recipe, "HfTemplateRenderer", Mock())
     monkeypatch.setattr(recipe, "RolloutGateway", Gateway)
-    monkeypatch.setattr(recipe, "RolloutClient", lambda **kwargs: SimpleNamespace(invoke_async=invoke))
+    client = SimpleNamespace(invoke=invoke, stop_session=AsyncMock(), aclose=AsyncMock())
+    monkeypatch.setattr(recipe, "AgentCoreHttpClient", lambda *args, **kwargs: client)
     monkeypatch.setattr(recipe, "update_policy", update)
     monkeypatch.setattr(recipe, "save_checkpoint", AsyncMock(return_value="tinker://checkpoint"))
     config = recipe.Config(
@@ -101,7 +101,6 @@ async def test_invoke_failures_do_not_interrupt_subsequent_updates(
         tokenizer="tokenizer",
         dataset=str(train_path),
         agent_runtime_arn="runtime",
-        s3_bucket="bucket",
         gateway_host="127.0.0.1",
         output_dir=str(output),
         steps=2,
@@ -122,4 +121,6 @@ async def test_invoke_failures_do_not_interrupt_subsequent_updates(
     assert aggregate["eval/reward_mean"] == (None if len(failed_evaluation_inputs) == 3 else 1.0)
     assert aggregate["eval/failed_episodes"] == len(failed_evaluation_inputs)
     assert json.loads((output / "evaluation-0002.json").read_text())["eval/scored_episodes"] == 3
+    assert client.stop_session.await_count == sum(calls.values())
+    client.aclose.assert_awaited_once()
     assert not sessions

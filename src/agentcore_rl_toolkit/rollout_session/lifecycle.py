@@ -24,11 +24,11 @@ from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 @runtime_checkable
 class RolloutSession(Protocol):
     async def setup(self, task: dict) -> None:
-        """Provision the container and prepare the task environment inside it."""
+        """Prepare the session when required by the backend; may be a no-op."""
         ...
 
     async def run(self, task: dict) -> RolloutDumpResponse:
-        """Run one agent rollout in the prepared container and return its dump."""
+        """Run one agent rollout, starting compute if needed, and return its dump."""
         ...
 
     async def shutdown(self) -> None:

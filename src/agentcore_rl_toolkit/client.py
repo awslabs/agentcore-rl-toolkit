@@ -13,66 +13,14 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
+
 logger = logging.getLogger(__name__)
 
 
 def _format_exception(exc: BaseException) -> str:
     """Format an exception with its full traceback."""
     return "".join(traceback.format_exception(exc))
-
-
-class ACRRateLimiter:
-    """Unified rate limiter for all ACR API calls (invoke + stop).
-
-    Since invoke_agent_runtime and stop_runtime_session share a single
-    per-runtime-ARN rate limit on the ACR service, all calls must go
-    through the same limiter to avoid throttling.
-
-    Provides both sync and async interfaces. The async interface uses
-    an asyncio.Lock to serialize timing checks without blocking the
-    event loop during the sleep interval.
-    """
-
-    def __init__(self, tps_limit: int = 25):
-        self.tps_limit = tps_limit
-        self._min_interval = 1.0 / tps_limit
-        self._last_call_time = 0.0
-        # Async lock and its event loop (lazily created)
-        self._async_lock = None
-        self._async_lock_loop = None
-
-    def _get_async_lock(self) -> asyncio.Lock:
-        """Lazily create and return the async rate-limiting lock.
-
-        Detects when the running event loop has changed (e.g., due to a new
-        ``asyncio.run()`` call) and recreates the lock for the current loop.
-        """
-        loop = asyncio.get_running_loop()
-        if self._async_lock is None or self._async_lock_loop is not loop:
-            self._async_lock = asyncio.Lock()
-            self._async_lock_loop = loop
-        return self._async_lock
-
-    def wait_sync(self):
-        """Block until the next call is allowed under the TPS limit."""
-        now = time.time()
-        elapsed = now - self._last_call_time
-        if elapsed < self._min_interval:
-            time.sleep(self._min_interval - elapsed)
-        self._last_call_time = time.time()
-
-    async def wait_async(self):
-        """Async wait until the next call is allowed under the TPS limit.
-
-        Uses a lock to serialize timing checks. The lock is held only during
-        the timing check and sleep, so concurrent callers queue up properly.
-        """
-        async with self._get_async_lock():
-            now = time.time()
-            elapsed = now - self._last_call_time
-            if elapsed < self._min_interval:
-                await asyncio.sleep(self._min_interval - elapsed)
-            self._last_call_time = time.time()
 
 
 @dataclass
@@ -109,7 +57,7 @@ class RolloutFuture:
         input_id: str = None,
         agentcore_client=None,
         agent_runtime_arn: str = None,
-        rate_limiter: ACRRateLimiter = None,
+        rate_limiter: LocalRateLimiter = None,
     ):
         self.s3_client = s3_client
         self.s3_bucket = s3_bucket
@@ -414,7 +362,7 @@ class RolloutClient:
         # Unified rate limiter for all ACR API calls (invoke + stop).
         # invoke_agent_runtime and stop_runtime_session share a single
         # per-runtime-ARN rate limit on the ACR service.
-        self._rate_limiter = ACRRateLimiter(tps_limit)
+        self._rate_limiter = LocalRateLimiter(tps_limit)
 
     def _parse_response(self, response: dict) -> dict:
         """Parse ACR invocation response."""

@@ -24,7 +24,7 @@ from agentcore_rl_toolkit.aws_tools.persistent_dict import DynamoDBPersister, Pe
 from agentcore_rl_toolkit.aws_tools.s3_tools import upload_object
 from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore
-from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 
 # BaseTrace/TraceRecord are torch-free and aiohttp-free; the heavy gateway pieces are
 # imported lazily in VllmGatewayEndpoint.start() so a Bedrock-only run stays light.
@@ -389,7 +389,7 @@ def local_bounds(config: EvalConfig) -> RolloutSessionBounds:
         rollout_semaphore=LocalPrioritySemaphore(config.rollout_concurrency or config.concurrency),
         container_priority_assigner=LocalPriorityAssigner(),
         rollout_priority_assigner=LocalPriorityAssigner(),
-        session_rate_limiter=ACRRateLimiter(config.session_create_rate),
+        session_rate_limiter=LocalRateLimiter(config.session_create_rate),
         container_setup_timeout=config.container_setup_timeout,
         agent_run_timeout=config.timeout,
     )

@@ -6,7 +6,6 @@
   "dataset": "/path/to/gsm8k-train.jsonl",
   "evaluation_dataset": "/path/to/gsm8k-test.jsonl",
   "agent_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:ACCOUNT:runtime/RUNTIME_ID",
-  "s3_bucket": "ROLLOUT_BUCKET",
   "gateway_host": "CPU_NODE_PRIVATE_IP",
   "gateway_port": 0,
   "history_mode": "linear",

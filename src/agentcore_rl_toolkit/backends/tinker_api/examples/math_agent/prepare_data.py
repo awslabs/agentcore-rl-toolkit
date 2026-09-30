@@ -1,4 +1,4 @@
-"""Write GSM8K invocation payloads for examples/strands_math_agent."""
+"""Write GSM8K invocation payloads for the HTTP math agent."""
 
 import argparse
 import json

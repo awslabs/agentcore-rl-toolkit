@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, AsyncGenerator
 
 from agentcore_rl_toolkit.concurrency.priority_assigner import LocalPriorityAssigner
 from agentcore_rl_toolkit.concurrency.priority_semaphore import LocalPrioritySemaphore
-from agentcore_rl_toolkit.concurrency.rate_limiter import ACRRateLimiter
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 
 if TYPE_CHECKING:
     from ray.actor import ActorProxy
@@ -53,7 +53,7 @@ class RayPriorityAssigner:
 class RayRateLimiter:
     """Adapts a Ray actor handle to the :class:`~.rate_limiter.RateLimiter` interface."""
 
-    def __init__(self, actor: "ActorProxy[ACRRateLimiter]") -> None:
+    def __init__(self, actor: "ActorProxy[LocalRateLimiter]") -> None:
         self._actor = actor
 
     async def wait_async(self) -> None:
