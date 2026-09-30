@@ -1,0 +1,475 @@
+{
+  "models": {
+    "assistant": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "My status bar shows no signal."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "c86b7d86a00f70b3c731e0c1665b16fa2a400d2cc814b8c9f1afe7600598ea39",
+          "tool_choice": null,
+          "tool_names": [
+            "get_customer_by_phone",
+            "get_customer_by_id",
+            "get_customer_by_name",
+            "get_details_by_id",
+            "suspend_line",
+            "resume_line",
+            "get_bills_for_customer",
+            "send_payment_request",
+            "get_data_usage",
+            "enable_roaming",
+            "disable_roaming",
+            "transfer_to_human_agents",
+            "refuel_data"
+          ],
+          "tool_specs_sha256": "2cbe3e5d0b51cfefb35451cd90812b20afbce428b0ab292b8a6b41c8d288fea0"
+        }
+      ],
+      "init_kwargs": {
+        "client_args": {
+          "api_key": "EMPTY",
+          "base_url": "http://assistant.test:4000/v1"
+        },
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      }
+    },
+    "user": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "e0341cef733331ed04c865955bc21be4bed237518f0fd4ce12443f4f026c99a5",
+          "tool_choice": null,
+          "tool_names": [
+            "check_status_bar",
+            "check_network_status",
+            "check_network_mode_preference",
+            "set_network_mode_preference",
+            "run_speed_test",
+            "toggle_airplane_mode",
+            "check_sim_status",
+            "reseat_sim_card",
+            "toggle_data",
+            "toggle_roaming",
+            "check_data_restriction_status",
+            "toggle_data_saver_mode",
+            "check_apn_settings",
+            "set_apn_settings",
+            "reset_apn_settings",
+            "check_wifi_status",
+            "toggle_wifi",
+            "check_wifi_calling_status",
+            "toggle_wifi_calling",
+            "check_vpn_status",
+            "connect_vpn",
+            "disconnect_vpn",
+            "check_installed_apps",
+            "check_app_status",
+            "check_app_permissions",
+            "grant_app_permission",
+            "can_send_mms",
+            "reboot_device",
+            "check_payment_request",
+            "make_payment"
+          ],
+          "tool_specs_sha256": "9669902ca086b3894a577c6ca682e5375d5a1eae86b3849f13735aa3f92a8655"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "No service on my phone. ###STOP###"
+                },
+                {
+                  "toolUse": {
+                    "input": {},
+                    "name": "check_status_bar",
+                    "toolUseId": "u-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "Status Bar: \u2708\ufe0f Airplane Mode | \ud83d\udd0b 80%"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "u-1"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "e0341cef733331ed04c865955bc21be4bed237518f0fd4ce12443f4f026c99a5",
+          "tool_choice": null,
+          "tool_names": [
+            "check_status_bar",
+            "check_network_status",
+            "check_network_mode_preference",
+            "set_network_mode_preference",
+            "run_speed_test",
+            "toggle_airplane_mode",
+            "check_sim_status",
+            "reseat_sim_card",
+            "toggle_data",
+            "toggle_roaming",
+            "check_data_restriction_status",
+            "toggle_data_saver_mode",
+            "check_apn_settings",
+            "set_apn_settings",
+            "reset_apn_settings",
+            "check_wifi_status",
+            "toggle_wifi",
+            "check_wifi_calling_status",
+            "toggle_wifi_calling",
+            "check_vpn_status",
+            "connect_vpn",
+            "disconnect_vpn",
+            "check_installed_apps",
+            "check_app_status",
+            "check_app_permissions",
+            "grant_app_permission",
+            "can_send_mms",
+            "reboot_device",
+            "check_payment_request",
+            "make_payment"
+          ],
+          "tool_specs_sha256": "9669902ca086b3894a577c6ca682e5375d5a1eae86b3849f13735aa3f92a8655"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "No service on my phone. ###STOP###"
+                },
+                {
+                  "toolUse": {
+                    "input": {},
+                    "name": "check_status_bar",
+                    "toolUseId": "u-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "Status Bar: \u2708\ufe0f Airplane Mode | \ud83d\udd0b 80%"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "u-1"
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "My status bar shows no signal."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Please try toggling airplane mode."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "e0341cef733331ed04c865955bc21be4bed237518f0fd4ce12443f4f026c99a5",
+          "tool_choice": null,
+          "tool_names": [
+            "check_status_bar",
+            "check_network_status",
+            "check_network_mode_preference",
+            "set_network_mode_preference",
+            "run_speed_test",
+            "toggle_airplane_mode",
+            "check_sim_status",
+            "reseat_sim_card",
+            "toggle_data",
+            "toggle_roaming",
+            "check_data_restriction_status",
+            "toggle_data_saver_mode",
+            "check_apn_settings",
+            "set_apn_settings",
+            "reset_apn_settings",
+            "check_wifi_status",
+            "toggle_wifi",
+            "check_wifi_calling_status",
+            "toggle_wifi_calling",
+            "check_vpn_status",
+            "connect_vpn",
+            "disconnect_vpn",
+            "check_installed_apps",
+            "check_app_status",
+            "check_app_permissions",
+            "grant_app_permission",
+            "can_send_mms",
+            "reboot_device",
+            "check_payment_request",
+            "make_payment"
+          ],
+          "tool_specs_sha256": "9669902ca086b3894a577c6ca682e5375d5a1eae86b3849f13735aa3f92a8655"
+        }
+      ],
+      "init_kwargs": {
+        "additional_request_fields": {
+          "thinking": {
+            "type": "disabled"
+          }
+        },
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "temperature": 1.0
+      }
+    }
+  },
+  "result": {
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Hello! How can I help you?"
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "No service on my phone. ###STOP###"
+          },
+          {
+            "toolUse": {
+              "input": {},
+              "name": "check_status_bar",
+              "toolUseId": "u-1"
+            }
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolResult": {
+              "content": [
+                {
+                  "text": "Status Bar: \u2708\ufe0f Airplane Mode | \ud83d\udd0b 80%"
+                }
+              ],
+              "status": "success",
+              "toolUseId": "u-1"
+            }
+          }
+        ],
+        "from": "user",
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "My status bar shows no signal."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "Please try toggling airplane mode."
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "###OUT-OF-SCOPE###"
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      }
+    ],
+    "meta": {
+      "assistant_model": {
+        "base_url": "http://assistant.test:4000/v1",
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      },
+      "terminated_reason": "###OUT-OF-SCOPE###",
+      "user_model": {
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "source": "bedrock",
+        "temperature": 1.0,
+        "thinking_budget": 1024,
+        "thinking_enabled": false
+      }
+    },
+    "reward_info": {
+      "action_checks": [
+        {
+          "action": {
+            "action_id": "toggle_airplane_mode_0",
+            "arguments": {},
+            "compare_args": null,
+            "info": null,
+            "name": "toggle_airplane_mode",
+            "requestor": "user"
+          },
+          "action_match": false,
+          "action_reward": 0.0
+        }
+      ],
+      "env_assertion_checks": [
+        {
+          "arguments": {
+            "expected_status": "connected"
+          },
+          "func_name": "assert_service_status",
+          "met": false
+        },
+        {
+          "arguments": {
+            "overdue_bill_id": "B1234321"
+          },
+          "func_name": "assert_no_overdue_bill",
+          "met": true
+        }
+      ],
+      "reward": 0.0,
+      "reward_basis": [
+        "ENV_ASSERTION"
+      ],
+      "reward_breakdown": {
+        "ENV_ASSERTION": 0.0
+      }
+    },
+    "rewards": 0.0
+  }
+}
