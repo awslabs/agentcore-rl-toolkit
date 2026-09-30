@@ -109,7 +109,7 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 - `AgentCoreHttpClient` drives this app; the existing `RolloutClient` still uses S3. See [the app design](designs/agentcore_runtime_app.md) for HTTP mapping and implementation decisions, and [RIP](designs/runtime_invocation_protocol.md) for the shared lifecycle contract.
 - Protocol `_config` becomes `context.config` for that invocation; omitted config is empty.
 - `AgentCoreHttpClient.invoke()` returns a foreground result or a background `InvocationHandle`.
-  Closing the client does not stop sessions. `AgentCoreHttpSession` owns per-rollout cleanup;
+  `AgentCoreHttpSession` owns per-rollout cleanup;
   the Tinker backend uses it with flat task payloads and singular `reward`.
 - Tests: `uv run pytest tests/runtime/`.
 - Live tests: deploy `tests/runtime/live_agent.py` with the checkout's package,
@@ -568,6 +568,19 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)
 - Implement reward functions as classes inheriting `RewardFunction`
+
+### Documentation
+
+- State concrete behavior directly. Do not add assurances about unrelated
+  side effects or explain nonexistent features. Include negative guarantees
+  only when readers need them to use the API correctly.
+- Avoid repeating explanations across design docs, READMEs, and docstrings.
+  Keep detailed contracts in one primary location and link to them elsewhere.
+- Design docs explain decisions and relevant tradeoffs, not conversation
+  history or implementation progress. Include rejected alternatives only
+  when they help explain a design decision.
+- Scope implementation choices to the implementation they describe.
+  Do not present defaults or example wiring as interface requirements.
 
 ### Symlink Note
 

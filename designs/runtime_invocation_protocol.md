@@ -701,7 +701,7 @@ manage messages or memory.
 The HTTP adapter exposes `AgentCoreHttpClient` and `InvocationHandle`; their
 API and plain HTTP compatibility are defined in the
 [app design](./agentcore_runtime_app.md#http-client). Sandbox retains
-`ExecHandle`. Consumers need not expose a shared `Retriever` abstraction.
+`ExecHandle`.
 
 ## Open questions
 

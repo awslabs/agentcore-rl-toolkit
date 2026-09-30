@@ -30,9 +30,9 @@ class InvocationError(RuntimeError):
 
 
 class InvocationHandle:
-    """One invocation, independent of the HTTP connection and session lifetime.
+    """A handle for one invocation.
 
-    ``result(timeout=...)`` limits local waiting; it never stops the session.
+    ``result(timeout=...)`` limits local waiting.
     A handle obtained from an ordinary JSON response holds a completed local
     result. Only RIP invocations support reconstruction via ``get_invocation``.
     """
@@ -83,8 +83,7 @@ class AgentCoreHttpClient:
     returns an already completed handle. Streaming responses are not supported.
 
     Session IDs and application configuration belong to the caller. Put any
-    configuration in the payload's ``_config`` field. Closing this client closes
-    connections, not Runtime sessions.
+    configuration in the payload's ``_config`` field.
     An optional ``request_rate_limiter`` gates invoke, get, and stop requests.
     """
 
@@ -171,7 +170,7 @@ class AgentCoreHttpClient:
         return InvocationHandle(self, session_id, invocation_id)
 
     async def stop_session(self, session_id: str) -> None:
-        """Explicitly stop one Runtime session; other sessions remain usable."""
+        """Stop the specified Runtime session."""
         client = await self._aws()
         if self._request_rate_limiter is not None:
             await self._request_rate_limiter.wait_async()

@@ -87,10 +87,9 @@ reserved envelope:
 
 The adapter removes `_agentcore_runtime` before calling the handler. An optional
 `_config` object becomes `context.config`; all other application fields pass
-through unchanged. Omitted `_config` means `{}` for that invocation. The app
-does not remember configuration from earlier calls or modify environment variables.
+through unchanged. Omitted `_config` means `{}` for that invocation.
 The client sends the complete payload supplied by the caller without changing it
-in place. Configuration values have no protocol-specific meaning.
+in place.
 
 The envelope requires integer `version: 1`, `operation`, and `invocation_id`.
 IDs are 1–128 ASCII letters, digits, underscores, or hyphens, starting with a
@@ -267,8 +266,7 @@ reconstructed remotely. Protocol responses are identified by their version,
 status, and matching invocation ID; applications should avoid that response shape.
 
 Closing the client closes connections. `stop_session(session_id)` explicitly
-stops compute. Neither collecting a result nor cancelling a local wait stops
-the Runtime session.
+stops compute.
 
 ## Session and workload integration
 
@@ -280,6 +278,4 @@ reward remains absent. `RolloutDumpResponse` validates these fields.
 
 `AgentCoreHttpSession.setup()` is a no-op. `run(task)` forwards the caller's
 complete task, including `_config`, and waits for a background handle's result.
-Applications decide where to prepare repositories or other task resources.
-`shutdown()` stops only this Runtime session, including after failed submissions;
-it never deletes the deployment or closes the shared client.
+`shutdown()` stops this Runtime session, including after failed submissions.

@@ -34,7 +34,7 @@ class AgentCoreHttpSession:
         await self.shutdown()
 
     async def setup(self, task: dict) -> None:
-        """No preparation is required by the HTTP contract."""
+        """No-op for this adapter."""
 
     async def run(self, task: dict) -> RolloutDumpResponse:
         invocation_id = uuid.uuid4().hex
