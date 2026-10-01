@@ -7,6 +7,7 @@ from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict
 from agentcore_rl_toolkit.runtime import AgentCoreHttpClient, InvocationError
 
 from .errors import RolloutContractError
+from .exception_utils import exception_to_string
 from .wire import RolloutDumpResponse
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class AgentCoreHttpSession:
             )
             result = await handle.result()
         except InvocationError as exc:
-            return RolloutDumpResponse(task_output=None, reward=None, exception=str(exc))
+            return RolloutDumpResponse(task_output=None, reward=None, exception=exception_to_string(exc))
         return to_dump(result)
 
     async def shutdown(self) -> None:

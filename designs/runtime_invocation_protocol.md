@@ -654,9 +654,7 @@ The HTTP migration has two corresponding replacements:
 
 The app and client contracts must migrate together. The S3-based `RolloutClient`
 requires the existing `AgentCoreRLApp` result contract. Callers retain that pair
-during the transition. The `agentcore_http` adapter speaks RIP; it is not
-wire-compatible with the older rollout-specific setup/status/start/dump HTTP
-adapter.
+during the transition.
 
 Session adapter names describe the interaction path. Storage is a separate
 choice: using an S3 mount for `AgentCoreRuntimeApp.state_dir` still retrieves

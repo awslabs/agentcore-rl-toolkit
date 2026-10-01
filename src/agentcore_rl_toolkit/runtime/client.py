@@ -116,9 +116,9 @@ class AgentCoreHttpClient:
     async def _aws(self):
         async with self._open_lock:
             if self._aws_client is None:
-                import aioboto3
+                from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
 
-                context = aioboto3.Session().client(
+                context = (await get_aioboto3_session()).client(
                     "bedrock-agentcore", region_name=self.runtime_arn.split(":")[3], config=self._config
                 )
                 self._aws_client = await context.__aenter__()
