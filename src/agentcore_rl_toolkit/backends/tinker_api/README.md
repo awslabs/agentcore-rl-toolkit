@@ -72,8 +72,7 @@ logprobs, sampler weight synchronization, and checkpoints.
 
 ## Run the math example
 
-Deploy [http_app.py](../../../../examples/strands_math_agent/http_app.py) from the
-Strands math example with its dependencies and the checkout's toolkit package.
+Deploy one of the [math test agents](../../../../tests/runtime/agents/math/README.md).
 The [example config](examples/math_agent/config.json.example) runs GSM8K
 training with Qwen3.5-4B, thinking disabled, held-out evaluation, and periodic
 checkpoints.

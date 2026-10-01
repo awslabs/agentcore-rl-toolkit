@@ -102,11 +102,12 @@ async def rollout(
     session_rate_limiter: RateLimiter,
     temperature: float = 1.0,
 ) -> Episode:
+    if "_config" in payload:
+        raise ValueError("Dataset payload must not contain reserved field '_config'")
     sid = str(uuid.uuid4())
     task = {
         **payload,
         "_config": {
-            **payload.get("_config", {}),
             "base_url": base_url,
             "model_id": config.base_model,
             "api_key": sid,

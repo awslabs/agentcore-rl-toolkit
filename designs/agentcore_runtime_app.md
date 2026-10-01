@@ -85,9 +85,8 @@ reserved envelope:
 }
 ```
 
-The adapter removes `_agentcore_runtime` before calling the handler. An optional
-`_config` object becomes `context.config`; all other application fields pass
-through unchanged. Omitted `_config` means `{}` for that invocation.
+The adapter removes `_agentcore_runtime` before calling the handler. All other
+application fields, including `_config`, pass through unchanged.
 The client sends the complete payload supplied by the caller without changing it
 in place.
 

@@ -3,12 +3,6 @@
 We provide instructions to run `basic_app.py` and `rl_app.py` both as local servers and as
 http endpoints deployed to AgentCore Runtime (ACR).
 
-`http_app.py` runs the same Strands calculator agent as `rl_app.py`, using
-`AgentCoreRuntimeApp` and HTTP result retrieval. It reads model settings from
-`context.config` and returns singular `reward`. See the
-[Tinker training example](../../src/agentcore_rl_toolkit/backends/tinker_api/README.md#run-the-math-example)
-for this path.
-
 ## Installation
 
 ```bash

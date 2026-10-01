@@ -57,18 +57,16 @@ async def connected(app):
 
 
 @pytest.mark.asyncio
-async def test_handle_recovery_wait_timeout_and_config_isolation(tmp_path, monkeypatch):
+async def test_handle_recovery_wait_timeout_and_payload_passthrough(tmp_path, monkeypatch):
     monkeypatch.setattr("agentcore_rl_toolkit.runtime.client.POLL_INTERVAL", 0.05)
     app = AgentCoreRuntimeApp(state_dir=tmp_path)
-    calls = []
 
     @app.entrypoint
-    async def handler(payload, context):
-        calls.append(payload)
+    async def handler(payload):
         # The SDK runs the handler on another loop, so use a thread event.
         if payload.get("blocked"):
             await asyncio.to_thread(gate.wait, 5)
-        return {"reward": 1, "config": context.config}
+        return payload
 
     gate = threading.Event()
     async with connected(app) as (client, aws, requests):
@@ -78,13 +76,11 @@ async def test_handle_recovery_wait_timeout_and_config_isolation(tmp_path, monke
             with pytest.raises(TimeoutError):
                 await handle.result(timeout=0.01)
             other = await client.invoke({"_config": {"model_id": "second"}}, session_id=SID)
-            assert other["config"] == {"model_id": "second"}
+            assert other == {"_config": {"model_id": "second"}}
             assert (await handle.status())["status"] == "in_progress"
             gate.set()
             restored = client.get_invocation(session_id=SID, invocation_id="same")
-            assert await restored.result(timeout=5) == {"reward": 1, "config": {"model_id": "first"}}
-            assert (await client.invoke({}, session_id=SID))["config"] == {}
-            assert all("_config" not in data for data in calls)
+            assert await restored.result(timeout=5) == payload
             assert payload == {"blocked": True, "_config": {"model_id": "first"}}
             aws.stop_runtime_session.assert_not_called()
         finally:

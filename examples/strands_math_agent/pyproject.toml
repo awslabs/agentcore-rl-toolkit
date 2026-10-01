@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["basic_app", "rl_app", "http_app", "models", "reward"]
+py-modules = ["basic_app", "rl_app", "models", "reward"]

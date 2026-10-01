@@ -6,18 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from bedrock_agentcore.runtime.context import RequestContext
-from pydantic import Field
 from starlette.responses import JSONResponse
 
 from .protocol import ENVELOPE_KEY, InvocationRequest, InvocationState, state
 from .store import InvocationStore
-
-
-class InvocationContext(RequestContext):
-    """The upstream request context plus application-supplied configuration."""
-
-    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentCoreRuntimeApp(BedrockAgentCoreApp):
@@ -51,17 +43,13 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
         context = self._build_request_context(http_request)
         try:
             request = InvocationRequest.parse(payload[ENVELOPE_KEY])
-            config = payload.get("_config", {})
-            if not isinstance(config, dict):
-                raise ValueError("_config must be an object")
-            context = InvocationContext(**context.model_dump(), config=config)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
         handler = self.handlers.get("main")
         if handler is None:
             return JSONResponse({"error": "No entrypoint defined"}, status_code=500)
-        application_payload = {key: value for key, value in payload.items() if key not in (ENVELOPE_KEY, "_config")}
+        application_payload = {key: value for key, value in payload.items() if key != ENVELOPE_KEY}
         # Own acceptance independently of the HTTP connection, including file I/O:
         # cancellation must not split a persisted start from task registration.
         task = asyncio.create_task(

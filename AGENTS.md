@@ -107,7 +107,6 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 - One app process serves one Runtime session; live tasks are keyed by invocation ID. Filesystem records retain session-specific paths; use a managed mount for stop/resume persistence.
 - Protocol handlers return JSON values; terminal errors use an `error` string. Terminal errors, `interrupted`, and `not_found` are HTTP 200 states, while storage failures are operation errors.
 - `AgentCoreHttpClient` drives this app; the existing `RolloutClient` still uses S3. See [the app design](designs/agentcore_runtime_app.md) for HTTP mapping and implementation decisions, and [RIP](designs/runtime_invocation_protocol.md) for the shared lifecycle contract.
-- Protocol `_config` becomes `context.config` for that invocation; omitted config is empty.
 - `AgentCoreHttpClient.invoke()` returns a foreground result or a background `InvocationHandle`.
   `AgentCoreHttpSession` owns per-rollout cleanup;
   the Tinker backend uses it with flat task payloads and singular `reward`.
