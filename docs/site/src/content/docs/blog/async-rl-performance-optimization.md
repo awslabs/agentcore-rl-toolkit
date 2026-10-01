@@ -26,10 +26,10 @@ of the trajectory-level latency has high variance, the tail can significantly
 reduce the actual concurrency and therefore inference throughput. In this scenario,
 increasing rollout batch size through off-policy training can improve inference throughput.
 
-For example, the following plots show the inference concurrency (top)
-and throughput (bottom) over the span of 3 hours of a training run. We see
+For example, the following plots show the inference concurrency (x-axis)
+and throughput (y-axis) over the span of a training run. We see
 that the variance of throughput is directly explained by the changes in concurrency.
-![Sync RL](../../../assets/blog/async-rl-performance-optimization/inference_throughput_and_concurrency.png)
+![Throughput vs Concurrency](../../../assets/blog/async-rl-performance-optimization/inference_throughput_and_concurrency.png)
 
 In this report, we will specifically compare (1) 1 mini-batch per step (less off-policy), and (2) 2 mini-batches per step (more off-policy). 
 We expect that **increasing mini-batch count per step will increase rollout throughput**, because higher inference concurrency will bring the hardware closer to the utilization saturation point.

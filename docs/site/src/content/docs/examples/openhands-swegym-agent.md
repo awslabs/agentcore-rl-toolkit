@@ -168,7 +168,7 @@ observe that trajectories became ~18% longer over the training run.
 | Response Length (Thousands) | 10.2 | 12.1 | +19.1% |
 | Turns | 49.8 | 58.8 | +18.1% |
 
-![Training Reward Curve](../../../assets/examples/openhands-swegym-agent/train_reward.png)
+![Training Reward Curve](../../../assets/examples/openhands-swegym-agent/reward_curve.png)
 
 ## Qualitative Analysis of Behavior Changes during Training
 
