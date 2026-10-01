@@ -15,6 +15,8 @@ setup latency with a two-stage pipeline.
 ~15% of tasks in SWE Gym are not aligned with the reward definition. We exclude them from training.
 * 🍰 In an ablation, we find that revealing the hidden SWE Gym tests to Qwen3 Coder 30B
 increases the fraction of tasks with reward variance (non-zero advantage) by 27%.
+* ℹ️ We use AgentCore Runtime Instances and allocate sufficient compute and storage resources
+for the SWE agent to execute CPU- and disk IO-intensive tasks.
 * ℹ️ We leverage the AgentCore's support for A2A protocol to handle long-running tasks on the remote agent server.
 
 :::
@@ -55,6 +57,15 @@ which could be enough to hit a public registry's pull-rate limits.
 The setup script pulls through an [ECR caching layer](https://docs.aws.amazon.com/AmazonECR/latest/userguide/pull-through-cache.html)
 instead, so only the very first pull of a given task image goes out to the origin registry; every
 rollout after that hits the ECR cache.
+
+The task setup stage in SWE Gym is bound by disk IO throughput during image extraction,
+while the agent run stage is bound by CPU during tool calling. Therefore, compute
+and storage resources are important dimensions of the RL environment design.
+We use [AgentCore Runtime Instances](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-how-it-works.html)
+to provision c5.large EC2 instance (2 vCPU / 4 GiB) and configure its root EBS volume
+with 600 MB/s of throughput and 2400 of IOPS. Without the capability to configure
+the desired compute and storage resources, the task setup and the agent run
+stages would be throttled by either CPU or disk IO, which would reduce the efficiency of RL training and evaluation.
 
 ## Hiding Setup Latency with Warm Pool
 
