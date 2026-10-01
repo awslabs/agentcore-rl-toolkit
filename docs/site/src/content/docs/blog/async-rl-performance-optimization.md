@@ -13,14 +13,14 @@ _By [Danylo Vashchilenko](https://github.com/hellodanylo) · October 13, 2026_
 
 ## RL Throughput and Concurrency of Inference and Training
 
-All other things being equal, we prefer an RL system with higher throughput per GPU, as measured in processed trajectories per GPU-hour. 
+All other things being equal, we prefer an RL system with higher throughput per GPU, as measured in processed trajectories per GPU-hour.
 In highly parallel systems, **throughput and concurrency are positively correlated** up to a certain level of concurrency (the saturation point).
 Measuring and maximizing concurrency is the primary method of optimizing the RL training system.
 
 For the inference servers, KV cache capacity of GPU memory is the bottleneck in SWE and other long-context tasks.
 For example, for Qwen3 Coder 30B on p6 node, there is ~5M tokens of capacity, which is only 78 trajectories at 64K context.
 However, the actual concurrency can be significantly lower than the capacity.
-For example, inference concurrency typically peaks right after a rollout batch is dispatched 
+For example, inference concurrency typically peaks right after a rollout batch is dispatched
 and reaches a low right before the next rollout batch is dispatched. When the distribution
 of the trajectory-level latency has high variance, the tail can significantly
 reduce the actual concurrency and therefore inference throughput. In this scenario,
@@ -31,7 +31,7 @@ and throughput (y-axis) over the span of a training run. We see
 that the variance of throughput is directly explained by the changes in concurrency.
 ![Throughput vs Concurrency](../../../assets/blog/async-rl-performance-optimization/inference_throughput_and_concurrency.png)
 
-In this report, we will specifically compare (1) 1 mini-batch per step (less off-policy), and (2) 2 mini-batches per step (more off-policy). 
+In this report, we will specifically compare (1) 1 mini-batch per step (less off-policy), and (2) 2 mini-batches per step (more off-policy).
 We expect that **increasing mini-batch count per step will increase rollout throughput**, because higher inference concurrency will bring the hardware closer to the utilization saturation point.
 
 ![Sync RL](../../../assets/blog/async-rl-performance-optimization/sync_rl.png)
@@ -47,8 +47,8 @@ It's previously been widely discussed that **RL is rollout-bound, but that's not
 | Training | parallel fwd+bwd | parallel fwd+bwd |
 | Inference | sequential fwd (slower) | parallel fwd (faster) |
 
-What we observe in this report's training scenario (Qwen3 Coder 30B on SWE Gym) is that in an average trajectory only ~20% of tokens are from the agent. 
-In this regime, the **inference and training servers can have roughly the same throughput per GPU**. 
+What we observe in this report's training scenario (Qwen3 Coder 30B on SWE Gym) is that in an average trajectory only ~20% of tokens are from the agent.
+In this regime, the **inference and training servers can have roughly the same throughput per GPU**.
 
 In short, the bottleneck is an async RL pipeline depends on many characteristics of the workload, but it's certainly not always rollout-bound.
 This observation is highly important for prioritizing training efficiency research, and for allocating hardware resources between training and inference servers in experiments.
@@ -96,7 +96,7 @@ We plot the learning curve of the Sync-1 and Async-2 training runs against the G
 
 ## Rollout Correction
 
-In this report, we used Verl's implementation of [rollout correction](https://verl.readthedocs.io/en/latest/algo/rollout_corr.html) 
+In this report, we used Verl's implementation of [rollout correction](https://verl.readthedocs.io/en/latest/algo/rollout_corr.html)
 with the following parameters: token-level importance ratio, masking threshold of 2, decoupled mode.
 
 In order to understand the off-policy dynamics of these training runs,
