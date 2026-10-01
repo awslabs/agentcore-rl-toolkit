@@ -3,7 +3,7 @@ title: Async RL Performance Optimization
 description: Improving training throughput with asynchronous reinforcement learning
 ---
 
-_By [Danylo Vashchilenko](https://github.com/hellodanylo) · October 13, 2026_
+_By [Danylo Vashchilenko](https://github.com/hellodanylo) · October 1, 2026_
 
 :::note[TL;DR]
 * 🚀 While training [SWE Gym](../../examples/openhands-swegym-agent) agent, we show that asynchronous RL enables higher learning throughput, leading to ~22% higher reward improvement per GPU-hour of training.

@@ -3,7 +3,7 @@ title: OpenHands SWE Gym Agent
 description: A training-ready agent for solving SWE tasks in containerized environments of SWE Gym dataset.
 ---
 
-_By [Danylo Vashchilenko](https://github.com/hellodanylo) · October 13, 2026_
+_By [Danylo Vashchilenko](https://github.com/hellodanylo) · October 1, 2026_
 
 :::note[TL;DR]
 
