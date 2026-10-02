@@ -5,7 +5,7 @@ adds create/release for a task's AgentCore runtime:
 
     sb = HarborSandboxClient.create("tmax/TMax-15K-Harbor", "task_000606_03976796")
     with sb.start() as s:
-        s.exec("uname -m")
+        s.exec(["uname", "-m"])
     sb.release()   # delete THIS client's runtime (the lease pattern)
 
 Self-contained: no local corpus or config files. A task's existence and

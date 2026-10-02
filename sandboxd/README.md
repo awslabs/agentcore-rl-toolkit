@@ -2,7 +2,7 @@
 
 A small, stdlib-only Go daemon that makes arbitrary images satisfy the
 [AgentCore Runtime container contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html).
-It owns shell commands and their results independently of client connections.
+It owns processes and their results independently of client connections.
 The Python Sandbox SDK calls it through `InvokeAgentRuntime`.
 
 For the SDK architecture and design decisions, see
@@ -28,13 +28,14 @@ For the SDK architecture and design decisions, see
     "invocation_id": "command-123",
     "background": true
   },
-  "command": "pytest -q",
-  "shell": "/bin/sh",
+  "command": ["pytest", "-q"],
+  "cwd": "/app",
+  "env": {"PYTHONUNBUFFERED": "1"},
   "timeout": 900
 }
 ```
 
-`version` identifies the RIP request/response format shared by the SDK and daemon.
+`version` identifies the RIP envelope shared by the SDK and daemon.
 Both currently support only version `1`; the daemon rejects other versions.
 SDK or daemon releases that keep the same protocol format keep this value.
 
@@ -59,9 +60,12 @@ published before reporting completion. Persistence failures never report success
 
 ## Process and storage scope
 
-Commands run as `<shell> -c <command>`, defaulting to `/bin/sh`, with inherited
-container environment and working directory. Completion waits for the shell to
-exit and stdout/stderr to reach EOF. The execution deadline defaults to 300 seconds
+`command` is a nonempty argv array. The daemon executes its first element with
+the remaining elements as literal arguments, without an implicit shell. Optional
+`cwd` sets the working directory; `env` overrides inherited environment variables.
+Shell scripts use an explicit command such as `["/bin/sh", "-c", "ls | head"]`.
+Completion waits for the direct process to exit and stdout/stderr to reach EOF.
+The execution deadline defaults to 300 seconds
 (range 1–3600), including output waiting. On expiry, only the direct process is
 killed and output readers are closed; the result has `timed_out=true` and captured
 output. Descendants may survive completion or timeout until session termination.
@@ -100,7 +104,7 @@ go test -race ./...
 ```
 
 Requires Go ≥1.21 or Docker (the build script can use a Go container).
-The binary is static and the sandbox image needs only the binary and a shell.
+The binary is static; the image must contain the programs requested by commands.
 
 ## Local smoke test
 
@@ -108,7 +112,7 @@ The binary is static and the sandbox image needs only the binary and a shell.
 go run . --state-dir "$TMPDIR/sandboxd-records" &
 curl -s localhost:8080/ping
 curl -s -X POST localhost:8080/invocations -d '{"action":"start"}'
-curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"demo","background":true},"command":"sleep 1; echo done"}'
+curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"demo","background":true},"command":["/bin/sh","-c","sleep 1; echo done"]}'
 curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":1,"operation":"get","invocation_id":"demo"}}'
 ```
 

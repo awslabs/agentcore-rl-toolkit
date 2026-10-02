@@ -1,4 +1,4 @@
-"""Sandbox SDK: run shell commands in arbitrary Docker images on AgentCore Runtime.
+"""Sandbox SDK: run programs in arbitrary Docker images on AgentCore Runtime.
 
 Pairs with ``agentcore-sandboxd`` (see ``sandboxd/`` at the repo root), which
 owns foreground/background commands and their persisted results.

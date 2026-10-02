@@ -29,7 +29,7 @@ class ExecResult:
 
 
 class SandboxProtocolError(RuntimeError):
-    """Unexpected response or stream from the sandbox runtime.
+    """Unexpected response from the sandbox runtime.
 
     Raised when the deployed container does not behave like agentcore-sandboxd
     (e.g. an agent image or an older sandboxd was deployed instead).

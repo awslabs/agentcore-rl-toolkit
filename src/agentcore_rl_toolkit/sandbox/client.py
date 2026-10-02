@@ -1,4 +1,4 @@
-"""Sync client for running shell commands in AgentCore Runtime sandbox sessions.
+"""Sync client for running processes in AgentCore Runtime sandbox sessions.
 
 A "sandbox" is an AgentCore Runtime session whose container runs the
 ``agentcore-sandboxd`` daemon (see ``sandboxd/`` at the repo root). Commands
@@ -10,7 +10,7 @@ Usage:
 
     client = SandboxClient(runtime_arn="arn:aws:bedrock-agentcore:...")
     with client.start() as sb:
-        result = sb.exec("cd /app && pytest -q", timeout=900)
+        result = sb.exec(["pytest", "-q"], cwd="/app", timeout=900)
         print(result.exit_code, result.stdout)
 """
 
@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shlex
 import time
 import uuid
 
@@ -33,41 +32,6 @@ logger = logging.getLogger(__name__)
 # runtimeSessionId constraints from the bedrock-agentcore service model.
 _SESSION_ID_MIN_LEN = 33
 _SESSION_ID_MAX_LEN = 256
-
-_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _compose_command(command: str, cwd: str = None, env: dict = None) -> str:
-    """Compose cwd/env into a shell command string.
-
-    Commands are stateless — each invocation runs in a fresh
-    shell, so working directory and environment variables must be re-established
-    per call. The user command is appended raw (it is already a shell string);
-    only ``cwd`` and env values are quoted.
-
-    Args:
-        command: The shell command to run.
-        cwd: Working directory to ``cd`` into first.
-        env: Environment variables to export first. Keys must be valid shell
-            identifiers; values are shell-quoted.
-
-    Returns:
-        The composed command string.
-
-    Raises:
-        ValueError: If an env key is not a valid shell identifier.
-    """
-    prefix = ""
-    # Exit before any part of the user command can run if setup fails.
-    if cwd is not None:
-        prefix += f"cd {shlex.quote(cwd)} || exit $?; "
-    if env:
-        for key in env:
-            if not _ENV_KEY_RE.match(key):
-                raise ValueError(f"Invalid environment variable name: {key!r}")
-        exports = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
-        prefix += f"export {exports} || exit $?; "
-    return prefix + command
 
 
 class SandboxClient:
@@ -87,11 +51,6 @@ class SandboxClient:
             900s so a long, silent command (a heavy verifier, or a runtime still
             warming up) is not cut off by boto3's short default.
         connect_timeout: TCP connect timeout in seconds.
-        shell: Shell used to interpret ``exec()`` commands in the container.
-            Defaults to ``/bin/sh`` (present in any image with a shell,
-            including busybox/alpine); set to ``/bin/bash`` if your image has
-            bash and your commands use bashisms. Overridable per call via
-            ``Sandbox.exec(shell=...)``.
     """
 
     @staticmethod
@@ -123,12 +82,10 @@ class SandboxClient:
         max_pool_connections: int = 10,
         read_timeout: int = 900,
         connect_timeout: int = 15,
-        shell: str = "/bin/sh",
     ):
         self.runtime_arn = runtime_arn
         self.region = region or self._parse_region_from_arn(runtime_arn)
         self.qualifier = qualifier
-        self.shell = shell
 
         config = Config(
             retries={"max_attempts": max_retry_attempts, "mode": "adaptive"},
@@ -210,26 +167,27 @@ class Sandbox:
 
     def exec(
         self,
-        command: str,
+        command: list[str],
         timeout: int = None,
         cwd: str = None,
         env: dict = None,
-        shell: str = None,
         *,
         background: bool = False,
         invocation_id: str = None,
     ) -> ExecResult | ExecHandle:
         """Run a managed command, waiting by default or returning a background handle.
 
-        Commands run in a fresh shell (default /bin/sh). ``cwd`` and ``env`` are
-        established per call. Nonzero exits return an ``ExecResult``. Execution
+        ``command`` is an argv list: the executable followed by literal arguments.
+        No shell is started implicitly; use ``["/bin/sh", "-c", script]`` for shell
+        syntax. ``cwd`` sets the working directory, and ``env`` overrides inherited
+        environment variables. Nonzero exits return an ``ExecResult``. Execution
         timeouts raise ``ExecTimeoutError`` with the captured result in ``.result``
         and the execution handle in ``.handle``. Each output stream retains its
         first 256 KiB; the result explicitly marks truncation.
 
         ``timeout`` is the daemon-enforced execution deadline in seconds
         (1–3600, default 300), independent of ``ExecHandle.result(timeout=...)``.
-        It includes output waiting after shell exit. Expiry kills only the
+        It includes output waiting after process exit. Expiry kills only the
         direct process and stops reading output; child processes may survive.
         ``invocation_id`` defaults to a UUID generated before the request. Reuse
         it to address an existing execution; a repeated start ignores the new
@@ -238,14 +196,17 @@ class Sandbox:
 
         ``ExecError.handle`` permits recovery after an ambiguous submission or
         foreground connection failure. Session termination remains explicit
-        (including context-manager exit). Requires a RIP-capable sandboxd image.
+        (including context-manager exit). Requires an argv-capable sandboxd image.
         """
         self._ensure_active()
+        if not isinstance(command, list) or any(not isinstance(arg, str) for arg in command):
+            raise TypeError("command must be a list of strings")
         handle = self.get_exec(invocation_id if invocation_id is not None else str(uuid.uuid4()))
-        body = {
-            "command": _compose_command(command, cwd=cwd, env=env),
-            "shell": shell or self._client.shell,
-        }
+        body = {"command": command}
+        if cwd is not None:
+            body["cwd"] = cwd
+        if env is not None:
+            body["env"] = {key: str(value) for key, value in env.items()}
         if timeout is not None:
             body["timeout"] = timeout
         try:

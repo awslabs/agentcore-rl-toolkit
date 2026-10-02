@@ -1,13 +1,15 @@
-"""Real SDK -> botocore HTTP -> sandboxd -> shell contract tests.
+"""Real SDK -> botocore HTTP -> sandboxd -> process contract tests.
 
 Run locally/CI with Go installed. AWS routing/signing alone is replaced; the
 request encoding and response parser are the real botocore implementation.
 """
 
+import json
 import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -51,6 +53,7 @@ def daemon(tmp_path_factory):
             [str(binary), "--listen", address, "--state-dir", str(scratch / "records")],
             stdout=log,
             stderr=log,
+            env={**os.environ, "SANDBOX_INHERITED": "inherited", "SANDBOX_OVERRIDE": "original"},
         )
         try:
             deadline = time.monotonic() + 10
@@ -93,10 +96,37 @@ def sdk(daemon):
         transport.close()
 
 
+def test_sdk_native_argv_cwd_and_environment(sdk, tmp_path):
+    sandbox = sdk().start()
+    cwd = tmp_path / "directory with spaces"
+    cwd.mkdir()
+    (cwd / "python").symlink_to(sys.executable)
+    arguments = ["hello world", "", "'quoted'", "$HOME", "|", ">", "*.py", "; touch marker", "中文"]
+    script = (
+        "import json, os, sys; "
+        "print(json.dumps([sys.argv[1:], os.getcwd(), "
+        "os.environ['SANDBOX_INHERITED'], os.environ['SANDBOX_OVERRIDE'], os.environ['WITH-DASH']]))"
+    )
+    result = sandbox.exec(
+        ["./python", "-c", script, *arguments],
+        cwd=str(cwd),
+        env={"SANDBOX_OVERRIDE": "overridden", "WITH-DASH": "quotes ' $HOME"},
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == [arguments, str(cwd), "inherited", "overridden", "quotes ' $HOME"]
+
+
+def test_sdk_missing_cwd_does_not_execute(sdk, tmp_path):
+    marker = tmp_path / "must-not-run"
+    with pytest.raises(ExecError, match="execution_failed: start command: chdir"):
+        sdk().start().exec(["touch", str(marker)], cwd=str(tmp_path / "missing"))
+    assert not marker.exists()
+
+
 def test_sdk_foreground_preserves_shell_and_result(sdk, tmp_path):
     sandbox = sdk().start()
     result = sandbox.exec(
-        """printf '%s' "$MESSAGE"; pwd >&2; exit 7""",
+        ["/bin/sh", "-c", """printf '%s' "$MESSAGE"; pwd >&2; exit 7"""],
         cwd=str(tmp_path),
         env={"MESSAGE": """quotes: ' " $ \\ ;"""},
     )
@@ -109,7 +139,7 @@ def test_sdk_foreground_preserves_shell_and_result(sdk, tmp_path):
 def test_sdk_background_reconnect_and_retry(sdk, tmp_path):
     sandbox = sdk().start()
     handle = sandbox.exec(
-        "echo once >> counter; while [ ! -e release ]; do sleep 0.01; done; cat counter",
+        ["/bin/sh", "-c", "echo once >> counter; while [ ! -e release ]; do sleep 0.01; done; cat counter"],
         cwd=str(tmp_path),
         background=True,
     )
@@ -121,7 +151,7 @@ def test_sdk_background_reconnect_and_retry(sdk, tmp_path):
     other = sdk().attach(sandbox.session_id)
     result = other.get_exec(handle.invocation_id).result(timeout=5)
     assert result.stdout == "once\n"
-    repeated = other.exec("echo MUST_NOT_RUN", invocation_id=handle.invocation_id)
+    repeated = other.exec(["/bin/sh", "-c", "echo MUST_NOT_RUN"], invocation_id=handle.invocation_id)
     assert repeated == result
     assert (tmp_path / "counter").read_text() == "once\n"
     assert other.get_exec("unknown").status() == "not_found"
@@ -130,7 +160,7 @@ def test_sdk_background_reconnect_and_retry(sdk, tmp_path):
 def test_sdk_foreground_connection_loss_is_recoverable(sdk):
     sandbox = sdk(read_timeout=0.05).start()
     with pytest.raises(ExecError) as caught:
-        sandbox.exec("sleep 0.3; printf recovered")
+        sandbox.exec(["/bin/sh", "-c", "sleep 0.3; printf recovered"])
     handle = caught.value.handle
     recovered = sdk().attach(handle.session_id).get_exec(handle.invocation_id).result(timeout=5)
     assert recovered.stdout == "recovered"
@@ -141,7 +171,7 @@ def test_sdk_execution_timeout_survives_reattachment_and_retry(sdk, tmp_path, ba
     sandbox = sdk().start()
     with pytest.raises(ExecTimeoutError) as caught:
         handle = sandbox.exec(
-            "printf x >> count; printf early; printf warning >&2; (sleep 2; printf late) & exit 0",
+            ["/bin/sh", "-c", "printf x >> count; printf early; printf warning >&2; (sleep 2; printf late) & exit 0"],
             timeout=1,
             cwd=str(tmp_path),
             background=background,
@@ -158,6 +188,8 @@ def test_sdk_execution_timeout_survives_reattachment_and_retry(sdk, tmp_path, ba
     assert reread.value.result == error.result
     assert reread.value.handle is recovered
     with pytest.raises(ExecTimeoutError) as retry:
-        sandbox.exec("printf rerun >> count", cwd=str(tmp_path), invocation_id=error.handle.invocation_id)
+        sandbox.exec(
+            ["/bin/sh", "-c", "printf rerun >> count"], cwd=str(tmp_path), invocation_id=error.handle.invocation_id
+        )
     assert retry.value.result == error.result
     assert (tmp_path / "count").read_text() == "x"

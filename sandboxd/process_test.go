@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,10 +18,10 @@ import (
 	"time"
 )
 
-func request(id, command string, background bool) invocationRequest {
+func shellRequest(id, command string, background bool) invocationRequest {
 	return invocationRequest{
 		Runtime: &invocationConfig{Version: 1, Operation: "start", InvocationID: id, Background: background},
-		Command: command,
+		Command: []string{"/bin/sh", "-c", command},
 	}
 }
 
@@ -60,7 +59,7 @@ func waitFor(t *testing.T, condition func() bool) {
 
 func TestForegroundPersistsResult(t *testing.T) {
 	srv, s := newTestServer(t)
-	result := call(t, srv.URL, request("foreground", "printf hello; printf warning >&2; exit 3", false))
+	result := call(t, srv.URL, shellRequest("foreground", "printf hello; printf warning >&2; exit 3", false))
 	if result.Status != "completed" || result.Result.ExitCode != 3 ||
 		result.Result.Stdout != "hello" || result.Result.Stderr != "warning" || result.Result.TimedOut {
 		t.Fatalf("unexpected result: %+v", result)
@@ -83,7 +82,7 @@ func TestForegroundPersistsResult(t *testing.T) {
 func TestConcurrentStartsExecuteOnce(t *testing.T) {
 	_, s := newTestServer(t)
 	counter := filepath.Join(t.TempDir(), "count")
-	req := request("retry", fmt.Sprintf("echo run >> %q; sleep 0.1", counter), true)
+	req := shellRequest("retry", fmt.Sprintf("echo run >> %q; sleep 0.1", counter), true)
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
@@ -104,7 +103,7 @@ func TestConcurrentStartsExecuteOnce(t *testing.T) {
 	}
 	// Retry validation must not evaluate the replacement payload.
 	badTimeout := -1
-	req.Command, req.Timeout = "", &badTimeout
+	req.Command, req.Timeout = nil, &badTimeout
 	result, _, err := s.processes.start(req)
 	if err != nil || result.Status != "completed" {
 		t.Fatalf("retry: %+v, %v", result, err)
@@ -115,8 +114,8 @@ func TestIdenticalCommandsWithDistinctIDs(t *testing.T) {
 	srv, _ := newTestServer(t)
 	counter := filepath.Join(t.TempDir(), "count")
 	command := fmt.Sprintf("echo run >> %q", counter)
-	call(t, srv.URL, request("one", command, false))
-	call(t, srv.URL, request("two", command, false))
+	call(t, srv.URL, shellRequest("one", command, false))
+	call(t, srv.URL, shellRequest("two", command, false))
 	data, _ := os.ReadFile(counter)
 	if string(data) != "run\nrun\n" {
 		t.Fatalf("distinct invocations did not both execute: %q", data)
@@ -127,7 +126,7 @@ func TestDisconnectDoesNotCancelExecution(t *testing.T) {
 	srv, s := newTestServer(t)
 	marker := filepath.Join(t.TempDir(), "started")
 	release := filepath.Join(t.TempDir(), "release")
-	req := request("disconnect", fmt.Sprintf(
+	req := shellRequest("disconnect", fmt.Sprintf(
 		"echo started > %q; while [ ! -e %q ]; do sleep 0.01; done; printf finished", marker, release,
 	), false)
 	data, _ := json.Marshal(req)
@@ -180,7 +179,7 @@ func TestWaitsForDescendantOutput(t *testing.T) {
 			command := fmt.Sprintf(
 				"(sleep 2; printf late; printf warning >&2) & printf parent-done; exit %d", exitCode,
 			)
-			result := call(t, srv.URL, request("output-wait", command, false)).Result
+			result := call(t, srv.URL, shellRequest("output-wait", command, false)).Result
 			if result == nil || result.ExitCode != exitCode || result.TimedOut ||
 				result.Stdout != "parent-donelate" || result.Stderr != "warning" {
 				t.Fatalf("lost descendant output or shell exit code: %+v", result)
@@ -202,7 +201,7 @@ func TestChildSurvivesCompletionAndTimeout(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := newTestServer(t)
-			req := request(tc.name, "printf partial >&2; "+tc.command, false)
+			req := shellRequest(tc.name, "printf partial >&2; "+tc.command, false)
 			timeout := 2
 			req.Timeout = &timeout
 			start := time.Now()
@@ -242,7 +241,7 @@ func TestOutputEOFBeforeProcessExit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := newTestServer(t)
-			req := request(tc.name, "printf before; exec 1>&- 2>&-; "+tc.command, false)
+			req := shellRequest(tc.name, "printf before; exec 1>&- 2>&-; "+tc.command, false)
 			timeout := 1
 			req.Timeout = &timeout
 			result := call(t, srv.URL, req).Result
@@ -257,7 +256,7 @@ func TestOutputEOFBeforeProcessExit(t *testing.T) {
 func TestMissingAndInterruptedNeverExecute(t *testing.T) {
 	srv, s := newTestServer(t)
 	marker := filepath.Join(t.TempDir(), "must-not-exist")
-	req := request("missing", fmt.Sprintf("touch %q", marker), false)
+	req := shellRequest("missing", fmt.Sprintf("touch %q", marker), false)
 	req.Runtime.Operation = "get"
 	if result := call(t, srv.URL, req); result.Status != "not_found" {
 		t.Fatalf("missing: %+v", result)
@@ -280,7 +279,7 @@ func TestMissingAndInterruptedNeverExecute(t *testing.T) {
 
 func TestOutputLimitDrainsAndMarksTruncation(t *testing.T) {
 	srv, s := newTestServer(t)
-	result := call(t, srv.URL, request("output", "head -c 300000 /dev/zero; printf done >&2", false)).Result
+	result := call(t, srv.URL, shellRequest("output", "head -c 300000 /dev/zero; printf done >&2", false)).Result
 	if result == nil || result.ExitCode != 0 || len(result.Stdout) != outputLimit ||
 		!result.StdoutTruncated || result.StderrTruncated || result.Stderr != "done" {
 		t.Fatalf("output limit failed: %+v", result)
@@ -294,7 +293,7 @@ func TestOutputLimitDrainsAndMarksTruncation(t *testing.T) {
 func TestPersistenceFailureCannotReportSuccess(t *testing.T) {
 	srv, s := newTestServer(t)
 	release := filepath.Join(t.TempDir(), "release")
-	req := request("persist-failure", fmt.Sprintf("while [ ! -e %q ]; do sleep 0.01; done", release), true)
+	req := shellRequest("persist-failure", fmt.Sprintf("while [ ! -e %q ]; do sleep 0.01; done", release), true)
 	call(t, srv.URL, req)
 	// Make atomic result publication fail even though the command succeeds.
 	if err := os.Mkdir(filepath.Join(s.processes.store.dir("persist-failure"), "result.json"), 0700); err != nil {
@@ -317,7 +316,7 @@ func TestStartRecordFailureDoesNotExecute(t *testing.T) {
 	if err := os.Mkdir(s.processes.store.dir("blocked"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := s.processes.start(request("blocked", fmt.Sprintf("touch %q", marker), true))
+	_, run, err := s.processes.start(shellRequest("blocked", fmt.Sprintf("touch %q", marker), true))
 	if err == nil || run != nil {
 		t.Fatal("expected failed claim")
 	}
@@ -328,28 +327,28 @@ func TestStartRecordFailureDoesNotExecute(t *testing.T) {
 
 func TestSpawnFailureIsPersisted(t *testing.T) {
 	srv, _ := newTestServer(t)
-	req := request("spawn-failure", "echo hi", false)
-	req.Shell = "/nonexistent-shell"
+	req := shellRequest("spawn-failure", "echo hi", false)
+	req.Command = []string{"/nonexistent-program"}
 	result := call(t, srv.URL, req)
 	if result.Status != "completed" || result.Error == nil || result.Result != nil {
 		t.Fatalf("spawn failure: %+v", result)
 	}
+	req.Runtime.Operation = "get"
+	stored := call(t, srv.URL, req)
+	if stored.Status != "completed" || stored.Error == nil || *stored.Error != *result.Error {
+		t.Fatalf("spawn failure was not persisted: %+v", stored)
+	}
 }
 
-func TestOutputFailureWithNonzeroExit(t *testing.T) {
-	// exec.Cmd.Wait can prioritize an exit error over an output-copy error.
-	// A failed log write must still be surfaced, not returned as complete output.
+func TestOutputWriteFailureIsPreserved(t *testing.T) {
 	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer full.Close()
 	output := &outputFile{file: full, remaining: outputLimit}
-	cmd := exec.Command("/bin/sh", "-c", "printf data; exit 3")
-	cmd.Stdout = output
-	var exitErr *exec.ExitError
-	if err := cmd.Run(); !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
-		t.Fatalf("expected command exit 3, got %v", err)
+	if _, err := output.Write([]byte("data")); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("expected disk-full write error, got %v", err)
 	}
 	// Sync on /dev/full also fails, but that must not mask the original ENOSPC.
 	if _, err := output.finish(); !errors.Is(err, syscall.ENOSPC) {
@@ -363,7 +362,12 @@ func TestInvalidExecutionRequests(t *testing.T) {
 		`{"_agentcore_runtime":{"version":1,"operation":"get","invocation_id":"../escape"}}`,
 		`{"_agentcore_runtime":{"version":2,"operation":"get","invocation_id":"test"}}`,
 		`{"_agentcore_runtime":{"version":1,"operation":"delete","invocation_id":"test"}}`,
-		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":"echo hi","timeout":0}`,
+		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":["echo","hi"],"timeout":0}`,
+		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":"echo hi"}`,
+		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":[]}`,
+		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":[""]}`,
+		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":["echo",1]}`,
+		`{"_agentcore_runtime":{"version":1,"operation":"start","invocation_id":"test"},"command":["env"],"env":{"A=B":"invalid"}}`,
 	} {
 		code, _ := postJSON(t, srv.URL+"/invocations", payload)
 		if code != http.StatusBadRequest {
@@ -375,7 +379,7 @@ func TestInvalidExecutionRequests(t *testing.T) {
 func TestSessionHoldSurvivesCommandCompletion(t *testing.T) {
 	srv, _ := newTestServer(t)
 	postJSON(t, srv.URL+"/invocations", `{"action":"start"}`)
-	call(t, srv.URL, request("hold", "true", false))
+	call(t, srv.URL, shellRequest("hold", "true", false))
 	_, ping := getJSON(t, srv.URL+"/ping")
 	if ping["status"] != "HealthyBusy" {
 		t.Fatal("finishing a command must not release the session hold")
@@ -386,7 +390,7 @@ func TestForegroundPublicationFailure(t *testing.T) {
 	_, s := newTestServer(t)
 	scratch := t.TempDir()
 	marker, release := filepath.Join(scratch, "started"), filepath.Join(scratch, "release")
-	req := request("foreground-failure", fmt.Sprintf(
+	req := shellRequest("foreground-failure", fmt.Sprintf(
 		"echo started > %q; while [ ! -e %q ]; do sleep 0.01; done", marker, release,
 	), false)
 	recorder := httptest.NewRecorder()

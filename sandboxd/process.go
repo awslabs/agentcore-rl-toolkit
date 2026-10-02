@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,8 +22,9 @@ var invocationIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
 type invocationRequest struct {
 	Action  string            `json:"action,omitempty"`
 	Runtime *invocationConfig `json:"_agentcore_runtime,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Shell   string            `json:"shell,omitempty"`
+	Command []string          `json:"command,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 	Timeout *int              `json:"timeout,omitempty"`
 }
 
@@ -83,8 +85,13 @@ func (m *processManager) start(req invocationRequest) (invocationState, *executi
 	if req.Timeout != nil {
 		timeout = *req.Timeout
 	}
-	if req.Command == "" || timeout < 1 || timeout > 3600 {
-		return invocationState{}, nil, errInvalidCommand
+	if len(req.Command) == 0 || req.Command[0] == "" || timeout < 1 || timeout > 3600 {
+		return invocationState{}, nil, fmt.Errorf("%w: command must name an executable and timeout must be between 1 and 3600 seconds", errInvalidCommand)
+	}
+	for key := range req.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") {
+			return invocationState{}, nil, fmt.Errorf("%w: invalid environment variable name %q", errInvalidCommand, key)
+		}
 	}
 	if err := m.store.start(id); err != nil {
 		return invocationState{}, nil, err
@@ -97,7 +104,7 @@ func (m *processManager) start(req invocationRequest) (invocationState, *executi
 	return state(id, "in_progress"), run, nil
 }
 
-var errInvalidCommand = errors.New("command must be nonempty and timeout must be between 1 and 3600 seconds")
+var errInvalidCommand = errors.New("invalid execution request")
 
 func (m *processManager) busy() bool {
 	m.mu.Lock()
@@ -153,11 +160,14 @@ func (m *processManager) execute(ctx context.Context, id string, req invocationR
 	}
 	defer stderr.file.Close()
 
-	shell := req.Shell
-	if shell == "" {
-		shell = "/bin/sh"
+	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
+	cmd.Dir = req.Cwd
+	if len(req.Env) > 0 {
+		cmd.Env = cmd.Environ()
+		for key, value := range req.Env {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
 	}
-	cmd := exec.CommandContext(ctx, shell, "-c", req.Command)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -189,7 +199,7 @@ func (m *processManager) execute(ctx context.Context, id string, req invocationR
 		outCancel()
 	}()
 
-	// Descendants may hold the pipes after the shell exits. Wait for EOF or
+	// Descendants may hold the pipes after the process exits. Wait for EOF or
 	// cancellation before Wait closes the readers and reaps the direct process.
 	<-outCtx.Done()
 	err = cmd.Wait()

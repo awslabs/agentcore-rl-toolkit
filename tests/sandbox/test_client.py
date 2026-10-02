@@ -76,10 +76,6 @@ class TestSandboxClientInit:
         with pytest.raises(ValueError, match="Invalid ARN format"):
             SandboxClient(runtime_arn="not-an-arn")
 
-    def test_default_qualifier(self):
-        client, _ = make_client_and_mock()
-        assert client.qualifier == "DEFAULT"
-
     def test_boto3_client_config(self):
         with patch("agentcore_rl_toolkit.sandbox.client.boto3") as mock_boto3:
             SandboxClient(runtime_arn=FAKE_ARN, max_retry_attempts=7)
@@ -151,20 +147,20 @@ class TestExec:
     def test_foreground_uses_managed_invocation(self):
         client, mock_acr = make_client_and_mock()
         set_execution_response(mock_acr)
-        result = client.attach(FAKE_SESSION_ID).exec("echo hello")
+        result = client.attach(FAKE_SESSION_ID).exec(["echo", "hello"])
         assert (result.exit_code, result.stdout, result.stderr, result.timed_out) == (0, "hello", "warn", False)
         kwargs = mock_acr.invoke_agent_runtime.call_args.kwargs
         assert kwargs["agentRuntimeArn"] == FAKE_ARN
         assert kwargs["runtimeSessionId"] == FAKE_SESSION_ID
         assert kwargs["qualifier"] == "DEFAULT"
         payload = json.loads(kwargs["payload"])
-        assert payload["command"] == "echo hello"
-        assert payload["shell"] == "/bin/sh"
+        assert payload["command"] == ["echo", "hello"]
+        assert "shell" not in payload
+        assert "timeout" not in payload
         assert payload["_agentcore_runtime"]["version"] == 1
         assert payload["_agentcore_runtime"]["operation"] == "start"
         assert payload["_agentcore_runtime"]["background"] is False
         assert payload["_agentcore_runtime"]["invocation_id"]
-        mock_acr.invoke_agent_runtime_command.assert_not_called()
 
     @pytest.mark.parametrize("exit_code", [3, -1])
     def test_nonzero_exits_are_data(self, exit_code):
@@ -180,7 +176,7 @@ class TestExec:
                 "stderr_truncated": False,
             },
         )
-        result = client.attach(FAKE_SESSION_ID).exec("cmd")
+        result = client.attach(FAKE_SESSION_ID).exec(["cmd"])
         assert result.exit_code == exit_code
         assert not result.timed_out
         assert result.stdout == "partial"
@@ -200,35 +196,32 @@ class TestExec:
         }
         set_execution_response(mock_acr, result=result)
         with pytest.raises(ExecTimeoutError, match="execution timed out") as caught:
-            client.attach(FAKE_SESSION_ID).exec("cmd", invocation_id="deadline")
+            client.attach(FAKE_SESSION_ID).exec(["cmd"], invocation_id="deadline")
         assert caught.value.result == ExecResult(**result)
         assert caught.value.handle.invocation_id == "deadline"
         assert caught.value.handle.session_id == FAKE_SESSION_ID
 
-    def test_cwd_env_shell_and_timeout(self):
+    def test_native_command_settings(self):
         client, mock_acr = make_client_and_mock()
         set_execution_response(mock_acr)
-        client.attach(FAKE_SESSION_ID).exec(
-            "printf '%s' \"$FOO\"", timeout=600, cwd="/app", env={"FOO": "a b"}, shell="/bin/bash"
-        )
+        client.attach(FAKE_SESSION_ID).exec(["printf", "%s", "$FOO"], timeout=600, cwd="/app", env={"FOO": "a b"})
         payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
-        assert payload["command"] == "cd /app || exit $?; export FOO='a b' || exit $?; printf '%s' \"$FOO\""
-        assert payload["shell"] == "/bin/bash"
+        assert payload["command"] == ["printf", "%s", "$FOO"]
+        assert payload["cwd"] == "/app"
+        assert payload["env"] == {"FOO": "a b"}
         assert payload["timeout"] == 600
 
-    def test_client_shell_and_default_timeout(self):
+    @pytest.mark.parametrize("command", ["echo hello", ["echo", 1]])
+    def test_rejects_non_argv_input(self, command):
         client, mock_acr = make_client_and_mock()
-        client.shell = "/bin/bash"
-        set_execution_response(mock_acr)
-        client.attach(FAKE_SESSION_ID).exec("cmd")
-        payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
-        assert payload["shell"] == "/bin/bash"
-        assert "timeout" not in payload
+        with pytest.raises(TypeError, match="list of strings"):
+            client.attach(FAKE_SESSION_ID).exec(command)
+        mock_acr.invoke_agent_runtime.assert_not_called()
 
     def test_background_returns_handle_without_waiting(self):
         client, mock_acr = make_client_and_mock()
         set_execution_response(mock_acr, status="in_progress")
-        handle = client.attach(FAKE_SESSION_ID).exec("cmd", background=True, invocation_id="saved-id")
+        handle = client.attach(FAKE_SESSION_ID).exec(["cmd"], background=True, invocation_id="saved-id")
         assert isinstance(handle, ExecHandle)
         assert handle.invocation_id == "saved-id"
         assert handle.session_id == FAKE_SESSION_ID
@@ -242,7 +235,7 @@ class TestExec:
         )
         mock_acr.invoke_agent_runtime.side_effect = error
         with pytest.raises(ExecError) as caught:
-            client.attach(FAKE_SESSION_ID).exec("cmd")
+            client.attach(FAKE_SESSION_ID).exec(["cmd"])
         assert caught.value.__cause__ is error
         handle = caught.value.handle
         payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
@@ -257,12 +250,12 @@ class TestExec:
     @pytest.mark.parametrize(
         "body", [b"not json", b'{"status":"ok"}', b'{"version":1,"invocation_id":"wrong","status":"completed"}']
     )
-    def test_bad_or_old_daemon_response(self, body):
+    def test_invalid_execution_response(self, body):
         client, mock_acr = make_client_and_mock()
         stream = io.BytesIO(body)
         mock_acr.invoke_agent_runtime.return_value = {"response": stream}
         with pytest.raises(ExecError) as caught:
-            client.attach(FAKE_SESSION_ID).exec("cmd")
+            client.attach(FAKE_SESSION_ID).exec(["cmd"])
         assert isinstance(caught.value.__cause__, SandboxProtocolError)
         assert stream.closed
 
@@ -281,7 +274,7 @@ class TestExecHandle:
     def test_wait_timeout_keeps_execution_and_session(self):
         client, mock_acr = make_client_and_mock()
         set_execution_response(mock_acr, status="in_progress")
-        handle = client.attach(FAKE_SESSION_ID).exec("cmd", background=True)
+        handle = client.attach(FAKE_SESSION_ID).exec(["cmd"], background=True)
         with pytest.raises(TimeoutError):
             handle.result(timeout=0)
         mock_acr.stop_runtime_session.assert_not_called()
@@ -336,9 +329,9 @@ class TestExecHandle:
 
     def test_persisted_execution_error(self):
         client, mock_acr = make_client_and_mock()
-        set_execution_response(mock_acr, error={"code": "execution_failed", "message": "missing shell"})
+        set_execution_response(mock_acr, error={"code": "execution_failed", "message": "missing executable"})
         handle = client.attach(FAKE_SESSION_ID).get_exec("error")
-        with pytest.raises(ExecError, match="missing shell"):
+        with pytest.raises(ExecError, match="missing executable"):
             handle.result()
 
     @pytest.mark.parametrize("invocation_id", ["", "../escape", "bad/id", "a" * 129])
@@ -415,16 +408,17 @@ class TestExecAfterTerminate:
         mock_acr.invoke_agent_runtime.return_value = make_start_response({"status": "ok", "state": "healthy"})
         sandbox = client.attach(FAKE_SESSION_ID)
         sandbox.terminate()
+        mock_acr.invoke_agent_runtime.reset_mock()
         with pytest.raises(RuntimeError, match="is terminated"):
-            sandbox.exec("echo hi")
-        mock_acr.invoke_agent_runtime_command.assert_not_called()
+            sandbox.exec(["echo", "hi"])
+        mock_acr.invoke_agent_runtime.assert_not_called()
 
     def test_exec_after_context_exit_raises(self):
         client, _ = make_client_and_mock(make_start_response())
         with client.start() as sandbox:
             pass
         with pytest.raises(RuntimeError, match="is terminated"):
-            sandbox.exec("echo hi")
+            sandbox.exec(["echo", "hi"])
 
 
 class TestContextManager:

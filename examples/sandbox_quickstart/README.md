@@ -1,6 +1,6 @@
 # Sandbox Quickstart
 
-Run shell commands in an arbitrary Docker image deployed as a Bedrock AgentCore
+Run programs in an arbitrary Docker image deployed as a Bedrock AgentCore
 Runtime sandbox. This example wraps a plain `debian:bookworm-slim` image with the
 `agentcore-sandboxd` daemon and drives it with the sync sandbox client
 (`agentcore_rl_toolkit.sandbox.SandboxClient`).
@@ -10,10 +10,12 @@ How it works: `agentcore-sandboxd` (a tiny Go binary, source in
 (`/ping`, `/invocations` on port 8080) and manages the Healthy/HealthyBusy session
 state. Commands use RIP `start/get` over `InvokeAgentRuntime`; the daemon owns
 execution and saves results independently of the client connection. Rebuild the
-image when upgrading from the older health-only daemon.
+image when upgrading the daemon alongside the SDK.
 
-> **Note:** The base image must contain a shell (`/bin/sh`): commands are executed
-> as shell commands inside the container. `scratch`/distroless images will not work.
+Commands are argv lists: `sb.exec(["python", "script.py", "--name", "hello world"])`.
+For shell syntax, use `sb.exec(["/bin/sh", "-c", "ls | head"])`.
+The image must contain the requested executables; a shell is needed only when
+explicitly invoked.
 
 ## 1. Build the binary and push the image to ECR
 
@@ -25,7 +27,7 @@ With `.env` configured at the repo root (`ECR_REPO_NAME`, `AWS_REGION`,
 ```
 
 Note the sandbox image does **not** contain `agentcore-rl-toolkit` (unlike the agent
-examples) — the SDK runs client-side; the image only needs the sandboxd binary and a shell.
+examples) — the SDK runs client-side; the image needs sandboxd and the workload's programs.
 
 <details>
 <summary>What the wrapper runs (manual steps)</summary>
@@ -78,6 +80,7 @@ Expected output:
 
 ```text
 Sandbox session: 1f0e7a2c-...
+architecture: aarch64
 exit_code=0 timed_out=False
 stdout: hello from aarch64
 /app
@@ -86,7 +89,7 @@ stdout: hi from /tmp
 Sandbox terminated.
 ```
 
-Nonzero exits return results: `sb.exec("exit 3")` returns
+Nonzero exits return results: `sb.exec(["/bin/sh", "-c", "exit 3"])` returns
 `ExecResult(exit_code=3, ...)`. Execution timeouts raise `ExecTimeoutError`;
 its `.result` retains partial output and the exit code, and `.handle` identifies
 the execution.
@@ -96,7 +99,7 @@ from agentcore_rl_toolkit.sandbox import ExecTimeoutError
 
 with client.start() as sb:
     try:
-        result = sb.exec("printf before; sleep 5", timeout=1)
+        result = sb.exec(["/bin/sh", "-c", "printf before; sleep 5"], timeout=1)
     except ExecTimeoutError as error:
         print(error.result.stdout)  # before
 ```
@@ -105,7 +108,7 @@ with client.start() as sb:
 
 ```python
 with client.start() as sb:
-    handle = sb.exec("sleep 2; printf done", background=True)
+    handle = sb.exec(["/bin/sh", "-c", "sleep 2; printf done"], background=True)
     # Save sb.session_id and handle.invocation_id to transfer to another client.
     existing_handle = client.attach(sb.session_id).get_exec(handle.invocation_id)
     result = existing_handle.result(timeout=30)

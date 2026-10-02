@@ -122,10 +122,8 @@ func TestStartStopIdempotent(t *testing.T) {
 }
 
 func TestUnknownFieldsIgnored(t *testing.T) {
-	// Forward compatibility: a Phase 1 client sending ttl_seconds must work
-	// against this binary.
 	srv, _ := newTestServer(t)
-	code, body := postJSON(t, srv.URL+"/invocations", `{"action":"start","ttl_seconds":60}`)
+	code, body := postJSON(t, srv.URL+"/invocations", `{"action":"start","extra":"ignored"}`)
 	if code != http.StatusOK || body["state"] != "busy" {
 		t.Fatalf("got %d %v, want 200 busy", code, body)
 	}

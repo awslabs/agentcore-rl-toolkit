@@ -35,7 +35,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/backends/verl/` | verl backend: `AgentCoreAgentLoop` plugged into verl's standard main_ppo entrypoint via the rollout gateway |
 | `src/agentcore_rl_toolkit/backends/tinker_api/` | CPU training loop over a Tinker-compatible endpoint, with HF rendering and synchronous group-relative updates |
 | `src/agentcore_rl_toolkit/backends/experimental/slime/` | Experimental slime backend: `generate` + `normalize_episode_rewards` hooks for slime's `--custom-generate-function-path` / `--custom-reward-post-process-path` (see [Experimental slime backend](#experimental-slime-backend-backendsexperimentalslime)) |
-| `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run shell commands in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
+| `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run programs in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
 | `sandboxd/` | Go daemon (`agentcore-sandboxd`) for session health and recoverable command execution |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
@@ -312,7 +312,7 @@ See `examples/math_agent/SETUP.md` for the full walkthrough.
 
 ### Sandbox SDK
 
-The Sandbox SDK runs shell commands in arbitrary images on AgentCore Runtime.
+The Sandbox SDK executes argv lists in arbitrary images on AgentCore Runtime.
 The Python client calls an independent Go daemon inside each sandbox.
 
 **Code entry points:**
@@ -325,7 +325,7 @@ The Python client calls an independent Go daemon inside each sandbox.
 
 - Execution ownership is independent of HTTP connections. Retries reuse invocation
   IDs, `get` never executes work, and terminal results are persisted before completion.
-- Completion waits for shell exit and output EOF. Execution timeout kills only the
+- Completion waits for process exit and output EOF. Execution timeout kills only the
   direct process; descendants may survive until session termination.
 - Execution timeout raises `ExecTimeoutError` with the persisted result. Local
   `ExecHandle.result(timeout=...)` timeout raises `TimeoutError` and leaves work running.

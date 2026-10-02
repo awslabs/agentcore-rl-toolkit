@@ -6,7 +6,7 @@ SEPARATED agent, framework-run: a Strands ``Agent`` — backed by a Bedrock
 trainer-injected ``_rollout`` config (base_url/model_id/api_key) for RL
 training — reasons IN THIS PROCESS (arm64 microVM); its single tool,
 ``bash``, is overridden to ship each command into the task session via
-``SandboxClient.exec`` and return the output:
+``Sandbox.exec`` and return the output:
 
     launcher ──invoke──▶ THIS app (Strands Agent) ──bash tool = sb.exec──▶ task runtime
 
@@ -51,8 +51,8 @@ DEFAULT_AGENT_TIMEOUT_S = 3300
 # stays directly comparable (a hardcoded 180s silently truncated heavy verifiers).
 DEFAULT_VERIFIER_TIMEOUT_S = 900
 EXEC_TIMEOUT_MAX_S = 3600
-# Per-read idle timeout: must outlast the longest single command (the 3600s
-# verifier) so a long silent verifier isn't killed mid-run.
+# Foreground exec returns output on completion. Keep the HTTP read timeout above
+# the execution deadline to allow result delivery.
 SANDBOX_READ_TIMEOUT_S = EXEC_TIMEOUT_MAX_S + 300  # 3900
 
 SYSTEM_PROMPT = (
@@ -110,14 +110,12 @@ class _Budget(HookProvider):
 
 
 def _stage_b64(sb, b64: str, dest: str, chunk: int = 50000) -> None:
-    """Decode a base64 blob to <dest> inside the box, written in <=50000-char
-    slices so a large test tarball can't blow exec's 64KB command cap (the
-    base64 alphabet has no single-quotes, so '...'-wrapping is safe)."""
+    """Stage base64 in chunks inside the sandbox, then decode it to <dest>."""
     tmp = dest + ".b64"
-    sb.exec(f"rm -f {tmp}", timeout=30)
+    sb.exec(["/bin/sh", "-c", f"rm -f {tmp}"], timeout=30)
     for i in range(0, len(b64), chunk):
-        sb.exec(f"printf '%s' '{b64[i:i + chunk]}' >> {tmp}", timeout=60)
-    sb.exec(f"base64 -d {tmp} > {dest} && rm -f {tmp}", timeout=60)
+        sb.exec(["/bin/sh", "-c", f"printf '%s' '{b64[i:i + chunk]}' >> {tmp}"], timeout=60)
+    sb.exec(["/bin/sh", "-c", f"base64 -d {tmp} > {dest} && rm -f {tmp}"], timeout=60)
 
 
 def grade_with_verifier(sb, tests_tar_b64: str, verifier_timeout_s: float = DEFAULT_VERIFIER_TIMEOUT_S) -> dict:
@@ -128,11 +126,11 @@ def grade_with_verifier(sb, tests_tar_b64: str, verifier_timeout_s: float = DEFA
     if not tests_tar_b64:
         return {"reward": None, "rewards": None, "verifier_tail": "(no tests supplied)"}
     verify_s = min(int(verifier_timeout_s), EXEC_TIMEOUT_MAX_S)
-    sb.exec("rm -rf /tests && mkdir -p /tests /logs/verifier", timeout=30)
+    sb.exec(["/bin/sh", "-c", "rm -rf /tests && mkdir -p /tests /logs/verifier"], timeout=30)
     _stage_b64(sb, tests_tar_b64, "/tmp/_tests.tgz")
-    unpack = sb.exec("tar xzf /tmp/_tests.tgz -C /tests 2>&1", timeout=120)
-    run = sb.exec("bash /tests/test.sh 2>&1", timeout=verify_s)
-    reward_txt = sb.exec("cat /logs/verifier/reward.txt 2>/dev/null", timeout=30)
+    unpack = sb.exec(["/bin/sh", "-c", "tar xzf /tmp/_tests.tgz -C /tests 2>&1"], timeout=120)
+    run = sb.exec(["/bin/sh", "-c", "bash /tests/test.sh 2>&1"], timeout=verify_s)
+    reward_txt = sb.exec(["/bin/sh", "-c", "cat /logs/verifier/reward.txt 2>/dev/null"], timeout=30)
     reward = None
     try:
         reward = int(reward_txt.stdout.strip())
@@ -174,7 +172,7 @@ def run_rollout(
             """Run a shell command in the remote task sandbox and return its
             combined result (exit code, stdout, stderr)."""
             commands.append(command)
-            r = sb.exec(command, timeout=120)
+            r = sb.exec(["/bin/sh", "-c", command], timeout=120)
             return f"exit={r.exit_code}\nstdout:\n{r.stdout[:4000]}\nstderr:\n{r.stderr[:1500]}"
 
         rc = rollout_cfg or {}

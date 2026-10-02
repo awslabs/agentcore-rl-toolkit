@@ -1,5 +1,4 @@
-# A shell IS required in the base image: the sandbox SDK runs commands via
-# sandboxd process manager, which executes shell commands inside this container (scratch/distroless images would break exec).
+# Debian provides the programs and shell used by the quickstart commands.
 FROM public.ecr.aws/docker/library/debian:bookworm-slim
 
 # Prebuilt static binary — build it first with: ../../sandboxd/build.sh --stage .

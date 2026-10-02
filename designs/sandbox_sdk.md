@@ -37,9 +37,9 @@ separate proposal for loading task filesystems.
 
 ## Architecture
 
-sandboxd builds independently as a static Go binary that can be added to any
-image with a shell; the Python SDK runs on the client and is not required in
-the sandbox image.
+sandboxd builds independently as a static Go binary that can be added to an
+image containing the programs to execute. The Python SDK runs on the client
+and is not required in the sandbox image.
 
 ```text
 Python Sandbox SDK
@@ -48,7 +48,7 @@ Python Sandbox SDK
             -> session actions: start / stop / status
             -> RIP operations: start / get
                  -> process manager
-                      -> shell process
+                      -> process
                       -> local invocation records and output
 
 AgentCore /ping
@@ -80,13 +80,17 @@ from agentcore_rl_toolkit.sandbox import SandboxClient
 
 client = SandboxClient(runtime_arn="arn:aws:bedrock-agentcore:...:runtime/...")
 with client.start() as sandbox:
-    result = sandbox.exec("pytest -q", cwd="/app", timeout=900)
+    result = sandbox.exec(["pytest", "-q"], cwd="/app", timeout=900)
 
-    handle = sandbox.exec("pytest -q", cwd="/app", timeout=900, background=True)
+    handle = sandbox.exec(["pytest", "-q"], cwd="/app", timeout=900, background=True)
     # These two IDs can also be saved and passed to another client process.
     existing_handle = client.attach(handle.session_id).get_exec(handle.invocation_id)
     result = existing_handle.result(timeout=1200)
 ```
+
+`command` is a nonempty `list[str]`: the executable followed by literal
+arguments. For shell syntax, include the shell in argv:
+`sandbox.exec(["/bin/sh", "-c", "ls | head"])`.
 
 `existing_handle` is a new local `ExecHandle` referring to the same execution.
 Constructing it makes no network request and does not verify that the execution
@@ -107,7 +111,7 @@ truncation flags. Nonzero exit codes are returned as normal result data.
 
 An execution deadline raises `ExecTimeoutError`, a subclass of `ExecError`.
 Its `.result` contains the persisted `ExecResult`, including partial output and
-the shell's exit code; `.handle` identifies the completed invocation. Foreground
+the process's exit code; `.handle` identifies the completed invocation. Foreground
 `exec()` and `ExecHandle.result()` raise the same exception when they read a
 timed-out result, including after reattachment or a duplicate-ID start.
 The daemon still stores and returns the terminal result with `timed_out=true`.
@@ -122,7 +126,7 @@ the caller already holds the handle and can retry that read.
 ### Execution, waiting, and session lifetime
 
 - `exec(timeout=...)` limits remote command execution: default 300 seconds, range
-  1–3600, including output waiting after shell exit.
+  1–3600, including output waiting after process exit.
 - `handle.result(timeout=...)` limits local polling. A wait timeout leaves the
   command and session running and raises Python's built-in `TimeoutError`;
   the handle remains usable for a later wait. `ExecTimeoutError` represents a
@@ -167,16 +171,23 @@ the terminal, not every command typed into it.
 
 ## Process ownership, storage, and output
 
-Commands run in a fresh shell, defaulting to `/bin/sh`, with the container's
-environment and working directory. The SDK composes per-call `cwd` and `env`
-settings into the shell command; if either setup step fails, the shell exits
-before running the command.
+The daemon uses Go's `exec.CommandContext` to execute `command[0]` with
+`command[1:]` as its arguments. `cwd` sets the process's working directory;
+`env` overrides individual variables in the inherited container environment.
+They are applied through `Cmd.Dir` and `Cmd.Env`, without shell commands.
+An invalid working directory or missing executable fails before the program
+starts and produces a persisted execution error, surfaced as `ExecError`.
 
-Like envd's ordinary command path, completion waits for both shell exit and EOF
-on stdout/stderr. Descendants can keep those pipes open after the shell exits;
+Executable lookup follows Go's `os/exec`: bare names use the daemon's `PATH`;
+per-call `env["PATH"]` affects the child environment, not this initial lookup.
+Use an explicit executable path to select a program outside that search path.
+Relative executable paths containing `/` are resolved from `cwd`.
+
+Like envd's ordinary command path, completion waits for both process exit and EOF
+on stdout/stderr. Descendants can keep those pipes open after the process exits;
 the execution deadline still bounds that wait. Expiry kills only the direct
 process and closes the output readers. The result retains captured output and
-sets `timed_out=true`, even if the shell already exited with code 0.
+sets `timed_out=true`, even if the direct process already exited with code 0.
 
 The daemon does not kill descendants on completion or timeout. A background
 service with redirected output can continue running for later commands to use.
