@@ -1,0 +1,26 @@
+version: 2
+
+# Declare the public indexes from pyproject.toml so Dependabot's proxy allows
+# access during uv lock resolution. These indexes support anonymous access.
+registries:
+  pytorch-cpu:
+    type: python-index
+    url: https://download.pytorch.org/whl/cpu
+  astral-cu130:
+    type: python-index
+    url: https://wheels.astral.sh/simple/cu130/
+  verl-wheelhouse:
+    type: python-index
+    url: https://verl-project.github.io/verl-wheelhouse/simple/
+
+updates:
+  - package-ecosystem: uv
+    directory: /
+    registries:
+      - pytorch-cpu
+      - astral-cu130
+      - verl-wheelhouse
+    schedule:
+      interval: weekly
+    # Keep security updates enabled without opening routine version-update PRs.
+    open-pull-requests-limit: 0
