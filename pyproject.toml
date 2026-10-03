@@ -151,6 +151,7 @@ verl-ci = [
     "torchvision>=0.23.0",
 ]
 verl-megatron = [
+    "torch==2.11.0",  # Must match the Apex wheel index below.
     "apex",
     # Root-pin TE's transitive packages so uv applies the explicit Astral index to each.
     "transformer-engine[pytorch]==2.16.0",
@@ -238,7 +239,7 @@ explicit = true
 
 [[tool.uv.index]]
 name = "verl-wheelhouse"
-url = "https://verl-project.github.io/verl-wheelhouse/simple/"
+url = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.11/simple/"
 explicit = true
 
 
