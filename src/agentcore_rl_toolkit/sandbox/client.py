@@ -90,6 +90,7 @@ class SandboxClient:
         config = Config(
             retries={"max_attempts": max_retry_attempts, "mode": "adaptive"},
             max_pool_connections=max_pool_connections,
+            user_agent_extra="agentcore-rl-toolkit",
             read_timeout=read_timeout,
             connect_timeout=connect_timeout,
         )
