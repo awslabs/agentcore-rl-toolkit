@@ -97,17 +97,37 @@ def _http_status(exc: A2AError) -> int | None:
     return cause.response.status_code if isinstance(cause, httpx.HTTPStatusError) else None
 
 
+def _error_message(exc: A2AError) -> str:
+    """Keep HTTP error bodies in log messages and persisted exception strings.
+
+    a2a-sdk's HTTPStatusError wrapper only includes the status and URL. An httpx
+    response's repr also omits its body, so capturing traceback locals cannot recover
+    it later.
+    """
+    cause = exc.__cause__
+    if not isinstance(cause, httpx.HTTPStatusError):
+        return str(exc)
+
+    response = cause.response
+    try:
+        body = response.text
+    except httpx.ResponseNotRead:
+        body = "<response body not read>"
+    return f"{exc}; HTTP response body: {body!r}"
+
+
 def _reraise(exc: A2AError) -> None:
     """Re-raise an a2a-sdk error as a retryable conflict/throttle or a fatal client error."""
     code = _jsonrpc_code(exc)
     status = _http_status(exc)
+    message = _error_message(exc)
     # Prefer the JSON-RPC code (specific), then the HTTP status (in case ACR ever returns a
     # non-2xx with a body we can't decode).
     if code == SESSION_IN_PROGRESS_CODE or status == 409:
-        raise RetryableConflictError(str(exc)) from exc
+        raise RetryableConflictError(message) from exc
     if code == THROTTLE_CODE or status == 429:
-        raise RetryableThrottleError(str(exc)) from exc
-    raise RolloutA2AError(str(exc)) from exc
+        raise RetryableThrottleError(message) from exc
+    raise RolloutA2AError(message) from exc
 
 
 def _context(session_id: str) -> ClientCallContext:

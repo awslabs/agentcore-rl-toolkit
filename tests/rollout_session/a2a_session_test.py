@@ -13,6 +13,7 @@ from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, Persis
 from agentcore_rl_toolkit.rollout_session import a2a_client as client_mod
 from agentcore_rl_toolkit.rollout_session.a2a_client import A2ARolloutSession, RolloutA2AError, build_a2a_client
 from agentcore_rl_toolkit.rollout_session.a2a_executor import RolloutAgentExecutor, make_ping_handler
+from agentcore_rl_toolkit.rollout_session.exception_utils import describe_with_root_cause, exception_to_string
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
 SESSION_ID = "verl_" + "0" * 32
@@ -204,3 +205,71 @@ class TransientRetryTest(FastPollMixin, IsolatedAsyncioTestCase):
     async def test_fatal_error_is_not_retried(self):
         with self.assertRaises(RolloutA2AError):
             await self._send_setup_over([(400, -32000)])
+
+
+class HTTPErrorDiagnosticsTest(FastPollMixin, IsolatedAsyncioTestCase):
+    async def test_runtime_error_body_survives_polling_logs_and_dump(self):
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32055,
+                    "message": "Received error (502) from runtime",
+                    "data": {"reason": "upstream reset"},
+                },
+            }
+        )
+        transport = httpx.MockTransport(lambda request: httpx.Response(424, text=body))
+        async with httpx.AsyncClient(transport=transport) as http:
+            client = build_a2a_client(http, "http://a2a.test/")
+            try:
+                await client_mod.wait_terminal(client, "task-123", session_id=SESSION_ID)
+            except RolloutA2AError as error:
+                log_message = describe_with_root_cause(error)
+                persisted_exception = exception_to_string(error)
+            else:
+                self.fail("expected a rollout transport error")
+        for text in (log_message, persisted_exception):
+            self.assertIn(body, text)
+
+    async def test_setup_captures_non_json_and_empty_error_bodies(self):
+        for status, body in ((502, "<html>Bad Gateway: upstream closed connection</html>"), (504, "")):
+            with self.subTest(status=status):
+                transport = httpx.MockTransport(
+                    lambda request, status=status, body=body: httpx.Response(status, text=body)
+                )
+                async with httpx.AsyncClient(transport=transport) as http:
+                    client = build_a2a_client(http, "http://a2a.test/")
+                    with self.assertRaises(RolloutA2AError) as caught:
+                        await client_mod.send_setup(client, {"phase": "setup"}, session_id=SESSION_ID)
+                self.assertIn(f"HTTP response body: {body!r}", str(caught.exception))
+
+    async def test_exhausted_retries_keep_the_response_body(self):
+        for status, code, error_type, max_tries in (
+            (409, -32054, client_mod.RetryableConflictError, client_mod.CONFLICT_MAX_TRIES),
+            (429, -32053, client_mod.RetryableThrottleError, client_mod.THROTTLE_MAX_TRIES),
+        ):
+            with self.subTest(status=status):
+                calls = 0
+
+                def respond(request, status=status, code=code):
+                    nonlocal calls
+                    calls += 1
+                    return httpx.Response(status, json={"error": {"code": code, "message": "service detail"}})
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+                    client = build_a2a_client(http, "http://a2a.test/")
+                    with self.assertRaises(error_type) as caught:
+                        await client_mod.wait_terminal(client, "task-123", session_id=SESSION_ID)
+                self.assertEqual(calls, max_tries)
+                self.assertIn("service detail", str(caught.exception))
+
+    async def test_transport_timeouts_keep_the_original_error(self):
+        def timeout(request):
+            raise httpx.ReadTimeout("timed out waiting for headers", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(timeout)) as http:
+            client = build_a2a_client(http, "http://a2a.test/")
+            with self.assertRaises(RolloutA2AError) as caught:
+                await client_mod.wait_terminal(client, "task-123", session_id=SESSION_ID)
+        self.assertEqual(str(caught.exception), "Client Request timed out")
