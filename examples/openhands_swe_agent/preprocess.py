@@ -564,9 +564,7 @@ async def main():
         verl_dataset.to_parquet(output)
         print(f"wrote {verl_dataset.num_rows} {split_name} tasks to {output}")
         # After the parquet, so a lineage file never describes one that was not written.
-        print(
-            f"wrote {write_lineage(output, args, provenance, table, verl_dataset.num_rows, records, split_name)}"
-        )
+        print(f"wrote {write_lineage(output, args, provenance, table, verl_dataset.num_rows, records, split_name)}")
 
 
 if __name__ == "__main__":
