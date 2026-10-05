@@ -38,6 +38,7 @@ SILENT = RolloutDumpResponse(
 )
 # A row's identity fields: `task_id` is read off the row, not its position.
 TASK_ROW = {"task_id": "repo__proj-1", "instance_id": "repo__proj-1"}
+SESSION_BACKEND = {"backend": "some.module.Session", "capacity_provider_arn": "arn:capacity"}
 
 
 class FakeSession:
@@ -103,6 +104,15 @@ class LateBoundLlmSessionTest(IsolatedAsyncioTestCase):
             await wrapper.run({"index": 1})
         self.assertEqual(self.built, 1)
 
+    async def test_the_callers_task_never_holds_the_llm(self):
+        # The caller dumps its task to S3, and the llm config carries a bearer token.
+        wrapper = self.build({"api_key": "token"})
+        task = {"index": 1}
+        async with wrapper:
+            await wrapper.run(task)
+        self.assertEqual(task, {"index": 1})
+        self.assertEqual(self.inner.run_task, {"index": 1, "llm": {"api_key": "token"}})
+
     async def test_a_none_config_leaves_the_key_absent(self):
         # NullEndpoint has no inference; the key must stay unset rather than be None, so
         # a session that reads it fails loudly instead of talking to a stray model.
@@ -147,6 +157,8 @@ def eval_config(**overrides):
     kwargs = dict(
         experiment_name="unit-test",
         endpoint=bae.NullEndpoint(),
+        # `make_session` is faked wherever a session is built.
+        rollout_session_backend=dict(SESSION_BACKEND),
         dataset="unused.parquet",
         num_tasks=1,
         n=1,
@@ -161,6 +173,36 @@ def eval_config(**overrides):
     return bae.EvalConfig(**kwargs)
 
 
+class EvalMonitorTest(IsolatedAsyncioTestCase):
+    """The EC2 monitor watches the session backend's capacity provider, if it has one."""
+
+    ENV = {"agent_dynamodb_table": "sessions-table", "aws_region": "us-west-2"}
+
+    def setUp(self):
+        self.monitors = []
+        test = self
+
+        class FakeMonitor:
+            def __init__(self, capacity_provider_arn, table, **kwargs):
+                test.monitors.append((capacity_provider_arn, table))
+
+            async def start(self):
+                pass
+
+        original = bae.EC2Monitor
+        bae.EC2Monitor = FakeMonitor
+        self.addCleanup(setattr, bae, "EC2Monitor", original)
+
+    async def test_a_backend_with_a_capacity_provider_is_monitored(self):
+        self.assertIsNotNone(await bae.start_eval_ec2_monitor(eval_config(), self.ENV))
+        self.assertEqual(self.monitors, [("arn:capacity", "sessions-table")])
+
+    async def test_a_backend_without_one_is_not(self):
+        config = eval_config(rollout_session_backend={"backend": "some.module.Session"})
+        self.assertIsNone(await bae.start_eval_ec2_monitor(config, self.ENV))
+        self.assertEqual(self.monitors, [])
+
+
 class RunEvalDatasetTest(IsolatedAsyncioTestCase):
     async def test_seeded_shuffle_is_reproducible_and_precedes_task_limit(self):
         import polars as pl
@@ -173,7 +215,7 @@ class RunEvalDatasetTest(IsolatedAsyncioTestCase):
             seen_task_ids: list[list[int]] = []
 
             async def fake_run_one(config, *args):
-                task = args[3]
+                task = args[1]
                 seen_task_ids[-1].append(task["task_id"])
                 return {"resolved": False, "aborted": False}
 
@@ -195,8 +237,6 @@ class RunEvalDatasetTest(IsolatedAsyncioTestCase):
                 report_dir=report_dir,
             )
             env = {
-                "agentcore_runtime_arn": "arn:runtime",
-                "agentcore_capacity_provider_arn": "arn:capacity",
                 "agent_dynamodb_table": "sessions-table",
                 "aws_region": "us-west-2",
                 "rollout_output_s3": "s3://bucket/prefix",
@@ -220,9 +260,8 @@ class RunOneTest(IsolatedAsyncioTestCase):
     def setUp(self):
         self.uploads: dict[str, dict] = {}
         self.sessions: list[FakeSession] = []
-        self._originals = {
-            name: getattr(bae, name) for name in ("AgentCoreA2ASession", "upload_object", "DynamoDBPersister")
-        }
+        self.session_configs: list[dict] = []
+        self._originals = {name: getattr(bae, name) for name in ("make_session", "upload_object", "DynamoDBPersister")}
 
         async def fake_upload(s3_uri, region_name, data):
             self.uploads[s3_uri] = json.loads(data)
@@ -236,17 +275,16 @@ class RunOneTest(IsolatedAsyncioTestCase):
             setattr(bae, name, original)
 
     async def run_one(self, rollout: RolloutDumpResponse, error: Exception | None = None, **config_overrides):
-        def make_session(*args, **kwargs):
+        def make_session(session_id, cfg, meta):
+            self.session_configs.append(cfg)
             session = FakeSession(rollout=rollout, error=error)
             self.sessions.append(session)
             return session
 
-        bae.AgentCoreA2ASession = make_session
+        bae.make_session = make_session
         config = eval_config(**config_overrides)
         row = await bae.run_one(
             config,
-            "arn:runtime",
-            "arn:capacity",
             "2026-09-03T00:00:00",
             dict(TASK_ROW),
             0,
@@ -322,6 +360,11 @@ class RunOneTest(IsolatedAsyncioTestCase):
         self.assertIsNone(row["reward"])
         self.assertIsInstance(dumped["exception"], str)
 
+    async def test_the_session_is_the_one_the_config_names(self):
+        row, _ = await self.run_one(GOOD)
+        self.assertEqual(self.session_configs, [SESSION_BACKEND])
+        self.assertEqual(row["rollout_session_backend"], "some.module.Session")
+
     async def test_run_one_never_raises(self):
         # Callers gather every rollout: one failure must not take the batch down.
         row, _ = await self.run_one(FAILED)
@@ -336,12 +379,10 @@ class RunOneTest(IsolatedAsyncioTestCase):
         def make_session(*args, **kwargs):
             return SlowSession()
 
-        bae.AgentCoreA2ASession = make_session
+        bae.make_session = make_session
         config = eval_config(timeout=0.05)
         row = await bae.run_one(
             config,
-            "arn:runtime",
-            "arn:capacity",
             "2026-09-03T00:00:00",
             dict(TASK_ROW),
             0,
