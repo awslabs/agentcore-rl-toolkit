@@ -1,7 +1,9 @@
 """The execution role this recipe's AgentCore sessions assume, written out in full.
 
-Scoped by account, region and repository, but deliberately not by runtime name or image
-tag: one role serves every runtime this recipe deploys. Three non-obvious points:
+Scoped by account and repository, but deliberately not by region, runtime name or image
+tag: one role serves every runtime this recipe deploys, in every region. Each deploy
+reconciles the whole role, so a grant pinned to the deploying region would cut off the
+runtimes in every other region. Four non-obvious points:
 
 * AgentCore pulls the *agent* image with this role, not with anything belonging to the
   pool, so the read grant on that repository cannot be dropped.
@@ -10,6 +12,8 @@ tag: one role serves every runtime this recipe deploys. Three non-obvious points
   prefix). Without them, pulls work until the first image nobody has cached yet.
 * The trust policy also lets the account assume the role, which local docker runs use to
   hand a container the same permissions an AgentCore session gets.
+* There is no Bedrock grant: the agent's LLM credential is a bearer token in the rollout
+  payload, so model access never rides on this role.
 """
 
 # Also the key deciding which of the role's inline policies is ours and which are strays.
@@ -18,11 +22,11 @@ POLICY_NAME = "Policy"
 DESCRIPTION = "minimal permissions for AgentCore runtime with swe_agent"
 
 
-def trust_policy(account_id: str, region: str) -> dict:
+def trust_policy(account_id: str) -> dict:
     """Who may assume the execution role: AgentCore, and this account itself.
 
-    The service statement is conditioned on the source account and region so the role
-    cannot be used as a confused deputy by another account's runtime.
+    The service statement is conditioned on the source account so the role cannot be used
+    as a confused deputy by another account's runtime.
     """
     return {
         "Version": "2012-10-17",
@@ -34,7 +38,7 @@ def trust_policy(account_id: str, region: str) -> dict:
                 "Action": "sts:AssumeRole",
                 "Condition": {
                     "StringEquals": {"aws:SourceAccount": account_id},
-                    "ArnLike": {"aws:SourceArn": f"arn:aws:bedrock-agentcore:{region}:{account_id}:*"},
+                    "ArnLike": {"aws:SourceArn": f"arn:aws:bedrock-agentcore:*:{account_id}:*"},
                 },
             },
             {
@@ -47,14 +51,14 @@ def trust_policy(account_id: str, region: str) -> dict:
     }
 
 
-def permissions_policy(account_id: str, region: str, cache_prefix: str, agent_repository: str) -> dict:
+def permissions_policy(account_id: str, cache_prefix: str, agent_repository: str) -> dict:
     """What a rollout container may do, once it is running.
 
     ``cache_prefix`` (task images) and ``agent_repository`` (the agent image) are the only
-    two repositories this role can read. The ECR grants are region wildcarded on purpose:
-    a pull through cache is regional, and a session may run in any region deployed into.
+    two repositories this role can read. Every grant is region wildcarded on purpose: a
+    session may run in any region deployed into, and a pull through cache is regional.
     """
-    log_group = f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes"
+    log_group = f"arn:aws:logs:*:{account_id}:log-group:/aws/bedrock-agentcore/runtimes"
     return {
         "Version": "2012-10-17",
         "Statement": [
@@ -115,7 +119,7 @@ def permissions_policy(account_id: str, region: str, cache_prefix: str, agent_re
                 "Sid": "CloudWatchDescribeLogGroups",
                 "Effect": "Allow",
                 "Action": ["logs:DescribeLogGroups"],
-                "Resource": [f"arn:aws:logs:{region}:{account_id}:log-group:*"],
+                "Resource": [f"arn:aws:logs:*:{account_id}:log-group:*"],
             },
             {
                 "Sid": "CloudWatchMetrics",
@@ -144,20 +148,8 @@ def permissions_policy(account_id: str, region: str, cache_prefix: str, agent_re
                     "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
                 ],
                 "Resource": [
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default",
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/*",
-                ],
-            },
-            {
-                "Sid": "BedrockModelInvocation",
-                "Effect": "Allow",
-                "Action": [
-                    "bedrock:InvokeModel",
-                    "bedrock:InvokeModelWithResponseStream",
-                ],
-                "Resource": [
-                    "arn:aws:bedrock:*::foundation-model/*",
-                    f"arn:aws:bedrock:{region}:{account_id}:*",
+                    f"arn:aws:bedrock-agentcore:*:{account_id}:workload-identity-directory/default",
+                    f"arn:aws:bedrock-agentcore:*:{account_id}:workload-identity-directory/default/workload-identity/*",
                 ],
             },
         ],

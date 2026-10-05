@@ -126,12 +126,8 @@ async def ensure_execution_role(config: dict, region_name: str, account_id: str)
 
     return await ensure_role(
         role_name=agentcore["execution_role_name"],
-        trust_policy=iam_policy.trust_policy(account_id, region_name),
-        policies={
-            iam_policy.POLICY_NAME: iam_policy.permissions_policy(
-                account_id, region_name, cache_prefix(config), agent.path
-            )
-        },
+        trust_policy=iam_policy.trust_policy(account_id),
+        policies={iam_policy.POLICY_NAME: iam_policy.permissions_policy(account_id, cache_prefix(config), agent.path)},
         description=iam_policy.DESCRIPTION,
         region_name=region_name,
     )

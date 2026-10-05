@@ -5,6 +5,7 @@ One property in two halves: a rollout container can read the agent repository an
 pull-through cache namespace, and nothing else. No AWS.
 """
 
+import json
 import unittest
 
 # The recipe directory is on ``sys.path`` via its ``conftest.py``.
@@ -65,9 +66,18 @@ class NamespaceTest(unittest.TestCase):
 class PermissionsPolicyTest(unittest.TestCase):
     def setUp(self):
         # Scoped off the config exactly as the deploy scopes it.
-        self.policy = iam_policy.permissions_policy(
-            ACCOUNT, REGION, cache_prefix(CONFIG), agent_repository(CONFIG).path
-        )
+        self.policy = iam_policy.permissions_policy(ACCOUNT, cache_prefix(CONFIG), agent_repository(CONFIG).path)
+
+    def test_no_grant_is_pinned_to_a_region(self):
+        """One role serves every region's runtimes, and every deploy rewrites all of it."""
+        for policy in (self.policy, iam_policy.trust_policy(ACCOUNT)):
+            self.assertNotIn(REGION, json.dumps(policy))
+
+    def test_grants_no_model_access(self):
+        """The LLM credential is a bearer token in the payload, not this role."""
+        for statement_ in self.policy["Statement"]:
+            for action in as_list(statement_["Action"]):
+                self.assertFalse(action.startswith("bedrock:"), statement_["Sid"])
 
     def test_reads_only_the_agent_image_and_the_cache(self):
         # Region wildcarded (caches are per region), repository not.
