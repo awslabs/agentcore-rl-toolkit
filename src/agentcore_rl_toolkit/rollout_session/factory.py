@@ -1,89 +1,64 @@
-"""The single config -> :class:`RolloutSession` mapping, kept verl-free."""
+"""The single config -> :class:`RolloutSession` mapping, kept verl-free.
 
-from typing import Required, TypedDict
+``cfg["backend"]`` is the import path of the session class, e.g.
+``agentcore_rl_toolkit.rollout_session.agentcore_a2a_session.AgentCoreA2ASession``, and
+the class builds itself with a ``from_config(session_id, cfg, session_state)``
+classmethod. Nothing here lists the backends, so adding one -- in this package or any
+other importable one -- never touches this module. A backend's module is imported only
+when a config names it, so its optional dependencies stay optional.
+
+``cfg`` may also carry other backends' keys: each ``from_config`` reads its own by name
+and ignores the rest.
+"""
+
+import functools
+import importlib
+from collections.abc import Mapping
+from typing import Any
 
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict
 
 from .lifecycle import RolloutSession
 
-
-class SessionBackendConfig(TypedDict, total=False):
-    """The keys make_session reads, as a plain mapping so this module need not import
-    the trainer's config dataclass (which would pull in verl).
-
-    Each key belongs to one backend and only that backend's need setting, except
-    ``agentcore_runtime_arn``, which both ACR-backed backends read.
-    """
-
-    backend: Required[str]
-    agentcore_runtime_arn: str | None
-    capacity_provider_arn: str | None
-    agent_image_uri: str | None
-    docker_iam_role_arn: str | None
-    docker_log_group: str | None
-    docker_log_region: str | None
-    # agentcore_s3: where the agent writes its results and under what prefix
-    # (`{experiment_name}/{task_id}/{session_id}.json`), plus the boto3 pool size shared by
-    # every session of the process, since the client backing them is. There is deliberately
-    # no TPS knob: bounds.session_rate_limiter owns ACR throttling.
-    rollout_output_s3: str | None
-    experiment_name: str | None
-    max_pool_connections: int | None
+EXAMPLE_BACKEND = "agentcore_rl_toolkit.rollout_session.agentcore_a2a_session.AgentCoreA2ASession"
 
 
 def make_session(
     session_id: str,
-    cfg: SessionBackendConfig,
+    cfg: Mapping[str, Any],
     meta: PersistentDict,
 ) -> RolloutSession:
-    """Construct the rollout session named by ``cfg["backend"]``."""
-    kind = cfg["backend"]
-    if kind == "agentcore_a2a":
-        from .agentcore_a2a_session import AgentCoreA2ASession
+    """Construct the rollout session whose class ``cfg["backend"]`` names."""
+    return resolve_backend(cfg["backend"]).from_config(session_id, cfg, meta)
 
-        runtime_arn = cfg.get("agentcore_runtime_arn")
-        capacity_provider_arn = cfg.get("capacity_provider_arn")
-        assert runtime_arn is not None and capacity_provider_arn is not None
-        return AgentCoreA2ASession(
-            session_id,
-            session_state=meta,
-            runtime_arn=runtime_arn,
-            capacity_provider_arn=capacity_provider_arn,
-        )
-    if kind == "docker_a2a":
-        from .docker_a2a_session import DockerA2ASession
 
-        agent_image_uri = cfg.get("agent_image_uri")
-        iam_role_arn = cfg.get("docker_iam_role_arn")
-        log_group = cfg.get("docker_log_group")
-        log_region = cfg.get("docker_log_region")
-        assert agent_image_uri is not None and iam_role_arn is not None
-        assert log_group is not None and log_region is not None
-        return DockerA2ASession(
-            session_id,
-            session_state=meta,
-            agent_image_uri=agent_image_uri,
-            iam_role_arn=iam_role_arn,
-            log_group=log_group,
-            log_region=log_region,
+@functools.cache
+def resolve_backend(path: str) -> type:
+    """The session class at import path ``path``, which must have ``from_config``."""
+    module_name, _, attr = path.rpartition(".")
+    if not module_name:
+        raise ValueError(
+            f"rollout_session_backend.backend={path!r} is not an import path. Name the session "
+            f"class by its full path, e.g. {EXAMPLE_BACKEND!r}."
         )
-    if kind == "agentcore_s3":
-        from .agentcore_s3_session import AgentCoreS3Session, get_or_create_rollout_client
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        raise ValueError(f"rollout_session_backend.backend={path!r}: cannot import {module_name!r}") from e
+    cls = getattr(module, attr, None)
+    if cls is None:
+        raise ValueError(f"rollout_session_backend.backend={path!r}: {module_name!r} has no {attr!r}")
+    if not callable(getattr(cls, "from_config", None)):
+        raise ValueError(
+            f"rollout_session_backend.backend={path!r} has no from_config(session_id, cfg, session_state) "
+            "classmethod, so it cannot be built from config."
+        )
+    return cls
 
-        runtime_arn = cfg.get("agentcore_runtime_arn")
-        rollout_output_s3 = cfg.get("rollout_output_s3")
-        experiment_name = cfg.get("experiment_name")
-        assert runtime_arn is not None and rollout_output_s3 is not None and experiment_name is not None
-        client = get_or_create_rollout_client(
-            agentcore_runtime_arn=runtime_arn,
-            rollout_output_s3=rollout_output_s3,
-            experiment_name=experiment_name,
-            # RolloutClient's own default of 10 queues rollout bursts on the connection
-            # pool, so start where the AgentCore agent loop does; raise it toward
-            # rollout_concurrency.
-            max_pool_connections=cfg.get("max_pool_connections") or 100,
-        )
-        return AgentCoreS3Session(session_id, session_state=meta, client=client)
-    raise ValueError(
-        f"Unknown rollout_session_backend.backend={kind!r}, expected 'agentcore_a2a', 'agentcore_s3' or 'docker_a2a'"
-    )
+
+def require(cfg: Mapping[str, Any], backend: type, *names: str) -> list[Any]:
+    """The values of ``names`` in ``cfg``, raising if any is missing or None."""
+    missing = [name for name in names if cfg.get(name) is None]
+    if missing:
+        raise ValueError(f"rollout_session_backend for {backend.__name__} needs {missing}")
+    return [cfg[name] for name in names]

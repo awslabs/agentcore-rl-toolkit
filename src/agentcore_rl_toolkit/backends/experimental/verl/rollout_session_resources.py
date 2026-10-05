@@ -95,12 +95,13 @@ async def _start_ec2_monitor(cfg: RolloutSessionAgentLoopConfig) -> EC2Monitor |
 
     A single poller avoids exhausting the EC2 API rate limit at rollout scale. Nothing calls
     into it, so it is a background task on the caller's event loop rather than its own actor.
+    It watches the backend's capacity provider, so it runs only for a backend that has one.
     """
-    backend_cfg = cfg.rollout_session_backend
-    if backend_cfg["backend"] != "agentcore_a2a" or cfg.ec2_monitor_poll_interval <= 0 or cfg.dynamodb_table is None:
+    capacity_provider_arn = cfg.rollout_session_backend.get("capacity_provider_arn")
+    if capacity_provider_arn is None or cfg.ec2_monitor_poll_interval <= 0 or cfg.dynamodb_table is None:
         return None
     return await start_ec2_monitor(
-        backend_cfg["capacity_provider_arn"],
+        capacity_provider_arn,
         cfg.dynamodb_table,
         poll_interval=cfg.ec2_monitor_poll_interval,
         region_name=cfg.aws_region,

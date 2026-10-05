@@ -39,7 +39,7 @@ from agentcore_rl_toolkit.aws_tools.s3_tools import upload_object
 from agentcore_rl_toolkit.backends.verl.gateway_host import GatewayHandle, get_or_start_gateway
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, TraceRecord
 from agentcore_rl_toolkit.rollout_session.exception_utils import describe_with_root_cause, exception_to_string
-from agentcore_rl_toolkit.rollout_session.factory import SessionBackendConfig, make_session
+from agentcore_rl_toolkit.rollout_session.factory import make_session
 from agentcore_rl_toolkit.rollout_session.lifecycle import (
     RolloutSession,
     run_rollout_with_bounds,
@@ -216,11 +216,7 @@ class RolloutSessionAgentLoop(AgentLoopBase):
         self.rollout_session: RolloutSession = self._make_session()
 
     def _make_session(self) -> RolloutSession:
-        return make_session(
-            self.session_id,
-            SessionBackendConfig(**self.loop_config.rollout_session_backend),
-            self.meta,
-        )
+        return make_session(self.session_id, self.loop_config.rollout_session_backend, self.meta)
 
     def _validate_token_budgets(self) -> None:
         """Reject length budgets a trajectory could not be stored in, at construction."""

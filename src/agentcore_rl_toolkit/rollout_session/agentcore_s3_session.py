@@ -28,6 +28,7 @@ What that contract costs, all accepted deliberately:
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
@@ -39,6 +40,7 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.client import RolloutClient, RolloutFuture
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
+from agentcore_rl_toolkit.rollout_session.factory import require
 from agentcore_rl_toolkit.rollout_session.lifecycle import RolloutSession
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 
@@ -153,6 +155,26 @@ class AgentCoreS3Session(RolloutSession):
         # Whether an ACR session may exist for this rollout, which is what shutdown has to
         # act on when there is no future to ride.
         self._started = False
+
+    @classmethod
+    def from_config(
+        cls, session_id: str, cfg: Mapping[str, Any], session_state: PersistentDict
+    ) -> "AgentCoreS3Session":
+        """Reads ``agentcore_runtime_arn``, ``rollout_output_s3``, ``experiment_name`` and the
+        optional ``max_pool_connections``; sessions of one config share the process client."""
+        runtime_arn, rollout_output_s3, experiment_name = require(
+            cfg, cls, "agentcore_runtime_arn", "rollout_output_s3", "experiment_name"
+        )
+        client = get_or_create_rollout_client(
+            agentcore_runtime_arn=runtime_arn,
+            rollout_output_s3=rollout_output_s3,
+            experiment_name=experiment_name,
+            # RolloutClient's own default of 10 queues rollout bursts on the connection
+            # pool, so start where the AgentCore agent loop does; raise it toward
+            # rollout_concurrency.
+            max_pool_connections=cfg.get("max_pool_connections") or 100,
+        )
+        return cls(session_id, session_state=session_state, client=client)
 
     async def __aenter__(self) -> "AgentCoreS3Session":
         return self
