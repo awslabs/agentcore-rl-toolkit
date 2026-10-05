@@ -10,6 +10,6 @@ data:
   filter_overlong_prompts: true
   max_prompt_length: ${data.max_response_length}
   max_response_length: 64000
-  train_files: ${oc.env:dataset_path_prefix}/swe_gym_train_qwen3_coder_30b_challenged.parquet
-  val_files: ${oc.env:dataset_path_prefix}/swe_gym_train_qwen3_coder_30b_challenged.parquet
+  train_files: ${oc.env:dataset_path_prefix}/swe_gym.parquet
+  val_files: ${oc.env:dataset_path_prefix}/swe_gym_test.parquet
   truncation: error

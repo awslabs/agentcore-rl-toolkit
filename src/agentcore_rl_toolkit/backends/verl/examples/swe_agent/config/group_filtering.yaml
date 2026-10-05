@@ -1,0 +1,9 @@
+algorithm:
+  filter_groups:
+    enable: True
+    metric: reward_score
+
+    # this allows more agent loops to start as soon
+    # as a group is determined to be zero-advantage.
+    # otherwise, in sync mode, ReplayBuffer will limit concurrency.
+    max_inflight_gen_batches: 2
