@@ -6,7 +6,7 @@ import unittest
 from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
 from agentcore_rl_toolkit.rollout_session.agentcore_a2a_session import AgentCoreA2ASession
 from agentcore_rl_toolkit.rollout_session.docker_a2a_session import DockerA2ASession
-from agentcore_rl_toolkit.rollout_session.factory import make_session, require, resolve_backend
+from agentcore_rl_toolkit.rollout_session.factory import make_session, resolve_backend
 
 SESSION_ID = "verl_" + "0" * 32
 RUNTIME_ARN = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/agent-abc"
@@ -25,14 +25,8 @@ class OutOfTreeSession:
         self.session_state = session_state
         self.endpoint = endpoint
 
-    @classmethod
-    def from_config(cls, session_id, cfg, session_state):
-        (endpoint,) = require(cfg, cls, "endpoint")
-        return cls(session_id, session_state, endpoint=endpoint)
 
-
-class NotABackend:
-    pass
+NOT_A_BACKEND = object()
 
 
 HERE = __name__
@@ -46,14 +40,15 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual((session.session_id, session.endpoint), (SESSION_ID, "http://h:1"))
         self.assertIs(session.session_state, meta)
 
-    def test_other_backends_keys_are_ignored(self):
+    def test_unknown_backend_keys_are_rejected(self):
         cfg = {"backend": f"{HERE}.OutOfTreeSession", "endpoint": "http://h:1", "agent_image_uri": "img"}
-        self.assertEqual(make_session(SESSION_ID, cfg, state()).endpoint, "http://h:1")
+        with self.assertRaises(TypeError) as caught:
+            make_session(SESSION_ID, cfg, state())
+        self.assertIn("agent_image_uri", str(caught.exception))
 
     def test_a_missing_key_names_the_backend_and_the_key(self):
-        with self.assertRaises(ValueError) as caught:
-            make_session(SESSION_ID, {"backend": f"{HERE}.OutOfTreeSession", "endpoint": None}, state())
-        self.assertIn("OutOfTreeSession", str(caught.exception))
+        with self.assertRaises(TypeError) as caught:
+            make_session(SESSION_ID, {"backend": f"{HERE}.OutOfTreeSession"}, state())
         self.assertIn("endpoint", str(caught.exception))
 
     def test_a_bare_name_asks_for_an_import_path(self):
@@ -66,14 +61,14 @@ class ResolveTest(unittest.TestCase):
         for path, expected in (
             ("no_such_package.Session", "cannot import 'no_such_package'"),
             (f"{HERE}.NoSuchSession", "has no 'NoSuchSession'"),
-            (f"{HERE}.NotABackend", "from_config"),
+            (f"{HERE}.NOT_A_BACKEND", "not a class"),
         ):
             with self.subTest(path=path), self.assertRaises(ValueError) as caught:
                 resolve_backend(path)
             self.assertIn(expected, str(caught.exception))
 
 
-class A2AFromConfigTest(unittest.TestCase):
+class A2AConstructorTest(unittest.TestCase):
     def test_agentcore_reads_its_keys(self):
         cfg = {
             "backend": "agentcore_rl_toolkit.rollout_session.agentcore_a2a_session.AgentCoreA2ASession",
@@ -85,8 +80,8 @@ class A2AFromConfigTest(unittest.TestCase):
         self.assertEqual((session.runtime_arn, session.capacity_provider_arn), (RUNTIME_ARN, CAPACITY_PROVIDER_ARN))
 
     def test_agentcore_needs_a_capacity_provider(self):
-        with self.assertRaises(ValueError) as caught:
-            AgentCoreA2ASession.from_config(SESSION_ID, {"agentcore_runtime_arn": RUNTIME_ARN}, state())
+        with self.assertRaises(TypeError) as caught:
+            AgentCoreA2ASession(SESSION_ID, state(), agentcore_runtime_arn=RUNTIME_ARN)
         self.assertIn("capacity_provider_arn", str(caught.exception))
 
     def test_docker_reads_its_keys(self):

@@ -6,7 +6,6 @@ Speaks JSON-RPC to the agent's A2A server over the runtime's ``…/invocations/`
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
 
@@ -21,7 +20,6 @@ from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
 from agentcore_rl_toolkit.aws_tools.boto3_tools import shared_sigv4_httpx_client
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.rollout_session.a2a_client import A2ARolloutSession, build_a2a_client
-from agentcore_rl_toolkit.rollout_session.factory import require
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +41,18 @@ class AgentCoreA2ASession(A2ARolloutSession):
         self,
         session_id: str,
         session_state: PersistentDict,
-        runtime_arn: str,
+        *,
+        agentcore_runtime_arn: str,
         capacity_provider_arn: str,
     ):
         super().__init__(session_id, session_state)
         # Runtime and provider must share a region (they always do); checked here because
         # nothing later reads the provider region.
-        self.region = region_of(runtime_arn)
+        self.region = region_of(agentcore_runtime_arn)
         assert region_of(capacity_provider_arn) == self.region, "runtime and capacity provider are in two regions"
-        self.runtime_arn = runtime_arn
+        self.runtime_arn = agentcore_runtime_arn
         self.capacity_provider_arn = capacity_provider_arn
-        self._url = runtime_invocations_url(runtime_arn)
-
-    @classmethod
-    def from_config(
-        cls, session_id: str, cfg: Mapping[str, Any], session_state: PersistentDict
-    ) -> "AgentCoreA2ASession":
-        """Reads ``agentcore_runtime_arn`` and ``capacity_provider_arn``."""
-        runtime_arn, capacity_provider_arn = require(cfg, cls, "agentcore_runtime_arn", "capacity_provider_arn")
-        return cls(
-            session_id,
-            session_state=session_state,
-            runtime_arn=runtime_arn,
-            capacity_provider_arn=capacity_provider_arn,
-        )
+        self._url = runtime_invocations_url(agentcore_runtime_arn)
 
     async def _client(self) -> Client:
         return build_a2a_client(await shared_sigv4_httpx_client(self.region, ACR_SERVICE), self._url)

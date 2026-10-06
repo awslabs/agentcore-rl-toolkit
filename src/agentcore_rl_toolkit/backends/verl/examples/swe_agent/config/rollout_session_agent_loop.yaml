@@ -50,8 +50,8 @@ rollout_session_agent_loop:
     # includes task-specific setup
     container_setup_timeout: 1200
 
-  # `backend` is the import path of the session class, which reads its own keys below
-  # (see its from_config); only that backend's keys have to be set
+  # `backend` is the import path of the session class; the remaining keys are expanded
+  # into its constructor, so missing and unknown keys are errors
   rollout_session_backend:
     backend: agentcore_rl_toolkit.rollout_session.agentcore_a2a_session.AgentCoreA2ASession
     agentcore_runtime_arn: "${oc.env:agentcore_runtime_arn}"

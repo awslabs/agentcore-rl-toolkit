@@ -148,7 +148,14 @@ def state(session_id: str = SESSION_ID) -> PersistentDict:
 
 
 def make(client: FakeClient, session_id: str = SESSION_ID) -> AgentCoreS3Session:
-    return AgentCoreS3Session(session_id, state(session_id), client=client)  # type: ignore[arg-type]
+    with mock.patch.object(mod, "get_or_create_rollout_client", return_value=client):
+        return AgentCoreS3Session(
+            session_id,
+            state(session_id),
+            agentcore_runtime_arn=RUNTIME_ARN,
+            rollout_output_s3=BUCKET,
+            experiment_name="exp-1",
+        )
 
 
 async def run_rollout(client: FakeClient, task_dict: dict | None = None):

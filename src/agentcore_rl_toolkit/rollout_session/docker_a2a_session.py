@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
-from typing import Any
 
 import backoff
 import httpx
@@ -15,7 +13,6 @@ from a2a.client import Client
 from agentcore_rl_toolkit.aws_tools.boto3_tools import get_role_credentials
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict, measure_span_persistent
 from agentcore_rl_toolkit.rollout_session.a2a_client import A2ARolloutSession, build_a2a_client
-from agentcore_rl_toolkit.rollout_session.factory import require
 
 logger = logging.getLogger(__name__)
 
@@ -29,35 +26,20 @@ class DockerA2ASession(A2ARolloutSession):
         session_state: PersistentDict,
         *,
         agent_image_uri: str,
-        iam_role_arn: str,
-        log_group: str,
-        log_region: str,
+        docker_iam_role_arn: str,
+        docker_log_group: str,
+        docker_log_region: str,
     ):
         super().__init__(session_id, session_state)
         self.agent_image_uri = agent_image_uri
-        self.iam_role_arn = iam_role_arn
-        self.log_group = log_group
-        self.log_region = log_region
+        self.iam_role_arn = docker_iam_role_arn
+        self.log_group = docker_log_group
+        self.log_region = docker_log_region
 
         # Set once `docker run` succeeds so shutdown skips a container that never started.
         self._running = False
         self.endpoint: str | None = None
         self._httpx: httpx.AsyncClient | None = None
-
-    @classmethod
-    def from_config(cls, session_id: str, cfg: Mapping[str, Any], session_state: PersistentDict) -> "DockerA2ASession":
-        """Reads ``agent_image_uri``, ``docker_iam_role_arn``, ``docker_log_group`` and ``docker_log_region``."""
-        agent_image_uri, iam_role_arn, log_group, log_region = require(
-            cfg, cls, "agent_image_uri", "docker_iam_role_arn", "docker_log_group", "docker_log_region"
-        )
-        return cls(
-            session_id,
-            session_state=session_state,
-            agent_image_uri=agent_image_uri,
-            iam_role_arn=iam_role_arn,
-            log_group=log_group,
-            log_region=log_region,
-        )
 
     async def _client(self) -> Client:
         assert self.endpoint is not None, "client requested before the container started"
