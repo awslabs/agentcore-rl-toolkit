@@ -105,7 +105,7 @@ verl = [
     "verl==0.9.0",
     # verl 0.9.0 declares its core dependencies, but still omits these dependencies
     # required at import time on our training path:
-    "transferqueue==0.1.8",  # required by the v1 trainer
+    "transferqueue==0.1.10",  # required by the v1 trainer
     "orjson",  # required for tracking
     "aiohttp>=3.9",
     # The gateway's schema derender needs tokenizer.parse_response (transformers >=5.0).
@@ -135,7 +135,7 @@ verl-ci = [
     # CI uses CPU torch and omits inference-only dependencies because the
     # integration tests fake the LLM-server seam.
     "verl==0.9.0",
-    "transferqueue==0.1.8",
+    "transferqueue==0.1.10",
     "orjson",
     # verl deps the full extra gets transitively via vllm: fastapi/uvicorn are
     # in verl's requirements.txt (not its setup.py); cachetools is undeclared

@@ -408,7 +408,7 @@ requires-dist = [
     { name = "tokenizers", marker = "extra == 'gateway'", specifier = ">=0.22.2" },
     { name = "torch", marker = "extra == 'verl'", specifier = ">=2.10.0" },
     { name = "torchvision", marker = "extra == 'verl'", specifier = ">=0.23.0" },
-    { name = "transferqueue", marker = "extra == 'verl'", specifier = "==0.1.8" },
+    { name = "transferqueue", marker = "extra == 'verl'", specifier = "==0.1.10" },
     { name = "transformers", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "transformers", marker = "extra == 'gateway'", specifier = ">=5.0" },
     { name = "transformers", marker = "extra == 'verl'", specifier = "==5.12.1" },
@@ -433,7 +433,7 @@ verl-ci = [
     { name = "ray" },
     { name = "torch", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "agentcore-rl-toolkit", group = "verl-ci" } },
     { name = "torchvision", specifier = ">=0.23.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "agentcore-rl-toolkit", group = "verl-ci" } },
-    { name = "transferqueue", specifier = "==0.1.8" },
+    { name = "transferqueue", specifier = "==0.1.10" },
     { name = "transformers", specifier = "==5.12.1" },
     { name = "uvicorn" },
     { name = "verl", specifier = "==0.9.0" },
@@ -8656,7 +8656,7 @@ wheels = [
 
 [[package]]
 name = "transferqueue"
-version = "0.1.8"
+version = "0.1.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "hydra-core" },
@@ -8672,7 +8672,7 @@ dependencies = [
     { name = "tensordict" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/7f/de3403bb53616cec07e0ec1dbdb6a88d5bcae121215bcdd4076f488cc4a7/transferqueue-0.1.8-py3-none-any.whl", hash = "sha256:078c4a63ba0c222fe684e96844c937dcd97f45ac94340a9c92eb03cfbc48cffd", size = 313524, upload-time = "2026-06-08T02:30:31.939Z" },
+    { url = "https://files.pythonhosted.org/packages/42/6b/374c1ce1078baa628314d068fe0994a58380a020d57b9b0427cc2560c98f/transferqueue-0.1.10-py3-none-any.whl", hash = "sha256:a8efceb971fe57d52ac7ddd86d9a6ef63f1824819dddc2ea980a96b73ff2f8ea", size = 360774, upload-time = "2026-08-21T21:23:24.561Z" },
 ]
 
 [[package]]
