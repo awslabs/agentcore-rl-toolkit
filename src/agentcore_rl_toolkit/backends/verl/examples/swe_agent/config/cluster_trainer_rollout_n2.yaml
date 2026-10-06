@@ -4,7 +4,7 @@ actor_rollout_ref:
     free_cache_engine: true
 
     # these are model/dataset specific
-    gpu_memory_utilization: 0.8
+    gpu_memory_utilization: 0.7
     nnodes: 1
 
     checkpoint_engine:
