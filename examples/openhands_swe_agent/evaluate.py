@@ -42,54 +42,57 @@ REPORT_DIR = str(LOCAL_DIR)
 # --- dataset slices -----------------------------------------------------------
 # Built parquets by dataset key, so a rebuilt dataset is the one the next eval reads. A
 # filtered cut lives under its own name and is the case for stating a path.
-SWE_GYM = str(dataset_parquet("swegym_tps_r2"))
+SWE_GYM = str(dataset_parquet("swegym"))
 # SWE_BENCH = str(dataset_parquet("swebench"))
 
 
-def implies(a, b):
-    return b if a else True
-
-
-# Task matrix: one EvalConfig per experiment run (edit and re-run).
-EVAL_CONFIGS = [
-    EvalConfig(
-        experiment_name=f"eval_gym_{endpoint.model.split('/')[-1]}_n{n}_{agent}_tpa_r1",
-        endpoint=endpoint,
-        dataset=SWE_GYM,
-        num_tasks=None,
-        n=n,
-        concurrency=128,
-        session_create_rate=1,
-        timeout=1800,
-        report_dir=REPORT_DIR,
-        task_kwargs=dict(
-            agent=agent,
-            docker_image_namespace=TASK_IMAGE_NAMESPACE,
-            # Lets the agent see the tests it's graded on; grading resets them either way.
-            test_patch_applied=True,
-        ),
-    )
-    for endpoint in [
-        # NullEndpoint(),
-        # BedrockMantleEndpoint(model="openai/qwen.qwen3-coder-30b-a3b-instruct", region="us-west-2"),
-        # BedrockMantleEndpoint(model="openai/qwen.qwen3-coder-30b-a3b-instruct", region="us-west-2"),
-        BedrockConverseEndpoint(model="us.anthropic.claude-sonnet-4-6", region="us-west-2"),
-        # VllmGatewayEndpoint(
-        #     model="qwen.qwen3-coder-30b-a3b-instruct",
-        #     vllm_url="http://INFERENCE_SERVER:8000",
-        #     tokenizer_path="Qwen/Qwen3-Coder-30B-A3B-Instruct",
-        # ),
+# Task matrix: one EvalConfig per experiment run (edit and re-run). A function of `env`
+# because the session backend names the runtime and capacity provider the deploy created.
+def eval_configs(env: dict) -> list[EvalConfig]:
+    rollout_session_backend = {
+        "backend": "agentcore_rl_toolkit.rollout_session.agentcore_a2a_session.AgentCoreA2ASession",
+        "agentcore_runtime_arn": env["agentcore_runtime_arn"],
+        "capacity_provider_arn": env["agentcore_capacity_provider_arn"],
+    }
+    return [
+        EvalConfig(
+            experiment_name=f"eval_gym_{endpoint.model.split('/')[-1]}_{agent}",
+            endpoint=endpoint,
+            dataset=SWE_GYM,
+            num_tasks=None,
+            n=1,
+            concurrency=128,
+            session_create_rate=1,
+            timeout=1800,
+            report_dir=REPORT_DIR,
+            rollout_session_backend=rollout_session_backend,
+            task_kwargs=dict(
+                agent=agent,
+                docker_image_namespace=TASK_IMAGE_NAMESPACE,
+                # Lets the agent see the tests it's graded on; grading resets them either way.
+                test_patch_applied=True,
+            ),
+        )
+        for endpoint in [
+            NullEndpoint(),
+            # BedrockConverseEndpoint(model="us.anthropic.claude-sonnet-4-6", region="us-west-2"),
+            # BedrockMantleEndpoint(model="openai/qwen.qwen3-coder-30b-a3b-instruct", region="us-west-2"),
+            # VllmGatewayEndpoint(
+            #     model="qwen.qwen3-coder-30b-a3b-instruct",
+            #     vllm_url="http://INFERENCE_SERVER:8000",
+            #     tokenizer_path="Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            # ),
+        ]
+        for agent in ["oracle", "noop", "openhands"]
+        if (endpoint.kind == "null") == (agent in ["oracle", "noop"])
     ]
-    for n in [1, 4]
-    for agent in ["oracle", "noop", "openhands"]
-    if (n == 1) == (endpoint.kind == "null") == (agent in ["oracle", "noop"])
-]
 
 
 async def main():
     env = await resolve_env(CONFIG)
-    pprint.pprint(EVAL_CONFIGS)
-    for config in EVAL_CONFIGS:
+    configs = eval_configs(env)
+    pprint.pprint(configs)
+    for config in configs:
         await run_eval(config, env)
 
 
