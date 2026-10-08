@@ -138,8 +138,7 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 
 `src/agentcore_rl_toolkit/rollout_gateway/` is an in-repo, backend-agnostic layer that
 captures **token-level, loss-maskable trajectories** from agent rollouts for RL training.
-It is the successor to the `rllm-model-gateway` dependency used by the current
-`backends/{slime,verl}` integrations.
+It is used by the toolkit's `backends/{slime,verl,tinker_api}` integrations.
 
 **Why it exists.** RL training needs per-token ids, logprobs, and a loss mask for every
 model turn — not just the final text. The gateway captures these transparently: an agent
@@ -223,6 +222,13 @@ the **verl backend** (`backends/verl/`, see below), the **Tinker API backend**
 (`backends/slime/`, see below). Other
 backends' dispatch/reward-join glue is not yet on the main branch — a prototype
 dispatcher is parked on the `wip/online-rl-dispatch` branch.
+
+### Native Framework Integrations
+
+[rLLM natively integrates with AgentCore Runtime](https://docs.rllm-project.com/agent-runtimes/agentcore).
+rLLM maintains its installation, configuration, training, and troubleshooting
+instructions upstream. This repository provides agent adaptation and deployment
+guides; its training integrations and rollout gateway are maintained separately.
 
 ### verl backend (`backends/verl/`)
 
@@ -595,6 +601,4 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - **bedrock-agentcore-starter-toolkit** (CLI tools, Dockerfile generation): https://github.com/aws/bedrock-agentcore-starter-toolkit
 - **Runtime SDK Overview**: https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html
 - **HTTP Protocol Contract**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http
-- **rLLM SDK (reference)**: https://rllm-project.readthedocs.io/en/latest/core-concepts/sdk/#1-define-your-agent-function
-- **rllm-model-gateway** (token capture proxy for RL training): https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway | [PyPI](https://pypi.org/project/rllm-model-gateway/)
-- **AgentCore math training example** (rllm + Tinker backend): https://github.com/rllm-org/rllm/blob/main/examples/agentcore_math/train_agentcore_math_tinker.sh
+- **rLLM native AgentCore integration**: https://docs.rllm-project.com/agent-runtimes/agentcore

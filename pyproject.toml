@@ -80,20 +80,6 @@ a2a = [
     "agentcore-rl-toolkit[a2a-server]",
     "agentcore-rl-toolkit[rollout]",
 ]
-rllm = [
-    # rllm training framework. Not on PyPI — installed from GitHub.
-    # rllm pulls in rllm-model-gateway transitively for trajectory capture.
-    # Users still need to install a training backend (verl or Tinker)
-    # separately per rllm's instructions.
-    #
-    # NOTE: do not depend on rllm's own [agentcore] extra here — it pulls
-    # in agentcore-rl-toolkit, which would create a circular dependency.
-    #
-    # The git source is declared in [tool.uv.sources] below rather than inline
-    # here, because PyPI rejects direct-reference (git URL) dependencies in
-    # uploaded packages. uv reads the source when installing from the repo.
-    "rllm",
-]
 verl = [
     # For backends/verl — see its README for design and install notes.
     "verl==0.9.0",
@@ -176,12 +162,10 @@ conflicts = [
     ],
     [
         { extra = "verl" },
-        { extra = "rllm" },
         { group = "verl-ci" },
     ],
     # Installed alongside verl, so it needs a separate conflict group.
     [
-        { extra = "rllm" },
         { group = "verl-ci" },
         { group = "verl-megatron" },
     ],
@@ -207,12 +191,6 @@ version = "0.5.0"
 requires-dist = []
 
 [tool.uv.sources]
-# rllm is not published to PyPI; install it from GitHub. The git source is
-# declared here rather than inline in [project.optional-dependencies] so the
-# published package metadata stays free of direct-reference (git URL)
-# dependencies, which PyPI rejects. uv reads this source when installing the
-# [rllm] extra from a checkout of this repo.
-rllm = { git = "https://github.com/rllm-org/rllm.git" }
 # CI group only: CPU torch wheels so the CUDA distribution (plus nvidia-* wheels)
 # never resolves on GitHub runners. The other extras keep the default index.
 torch = [
@@ -243,11 +221,6 @@ name = "verl-wheelhouse"
 url = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.11/simple/"
 explicit = true
 
-
-[tool.hatch.metadata]
-# Required so the [rllm] optional extra can pin rllm via a git URL
-# (PEP 508 direct reference). Hatchling rejects these by default.
-allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
 include = ["src/"]

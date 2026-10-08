@@ -13,7 +13,7 @@ supported-markers = [
 
 [[package]]
 name = "agentcore-rl-toolkit"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "../../../../" }
 dependencies = [
     { name = "bedrock-agentcore" },
@@ -61,24 +61,29 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "qwen-vl-utils", marker = "extra == 'verl'" },
     { name = "ray", marker = "extra == 'verl'" },
-    { name = "rllm", marker = "extra == 'rllm'", git = "https://github.com/rllm-org/rllm.git" },
-    { name = "rllm-model-gateway", marker = "extra == 'slime'", specifier = ">=0.1.0" },
     { name = "tinker", marker = "extra == 'tinker-api'", specifier = "==0.30.1" },
     { name = "tinker", marker = "extra == 'tinker-skyrl'", specifier = "==0.24.1" },
     { name = "tokenizers", marker = "extra == 'dev'", specifier = ">=0.22.2" },
     { name = "tokenizers", marker = "extra == 'gateway'", specifier = ">=0.22.2" },
     { name = "torch", marker = "extra == 'verl'", specifier = ">=2.10.0" },
     { name = "torchvision", marker = "extra == 'verl'", specifier = ">=0.23.0" },
-    { name = "transferqueue", marker = "extra == 'verl'", specifier = "==0.1.8" },
+    { name = "transferqueue", marker = "extra == 'verl'", specifier = "==0.1.10" },
     { name = "transformers", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "transformers", marker = "extra == 'gateway'", specifier = ">=5.0" },
     { name = "transformers", marker = "extra == 'verl'", specifier = "==5.12.1" },
     { name = "verl", marker = "extra == 'verl'", specifier = "==0.9.0" },
     { name = "vllm", marker = "extra == 'verl'", specifier = "==0.24.0" },
 ]
-provides-extras = ["dev", "gateway", "tinker-api", "tinker-skyrl", "rollout", "a2a-server", "a2a", "slime", "rllm", "verl"]
+provides-extras = ["dev", "gateway", "tinker-api", "tinker-skyrl", "rollout", "a2a-server", "a2a", "verl"]
 
 [package.metadata.requires-dev]
+sagemaker-integration = [
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "sagemaker-train", specifier = ">=1.13.0" },
+]
 swe-agent = [
     { name = "aws-bedrock-token-generator", specifier = ">=1.1.0" },
     { name = "datasets" },
@@ -94,16 +99,17 @@ verl-ci = [
     { name = "ray" },
     { name = "torch", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "agentcore-rl-toolkit", group = "verl-ci" } },
     { name = "torchvision", specifier = ">=0.23.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "agentcore-rl-toolkit", group = "verl-ci" } },
-    { name = "transferqueue", specifier = "==0.1.8" },
+    { name = "transferqueue", specifier = "==0.1.10" },
     { name = "transformers", specifier = "==5.12.1" },
     { name = "uvicorn" },
     { name = "verl", specifier = "==0.9.0" },
 ]
 verl-megatron = [
-    { name = "apex", marker = "python_full_version == '3.12.*'", index = "https://verl-project.github.io/verl-wheelhouse/simple/" },
+    { name = "apex", marker = "python_full_version == '3.12.*'", index = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.11/simple/" },
     { name = "megatron-bridge", marker = "python_full_version == '3.12.*'", specifier = "==0.5.0" },
     { name = "megatron-core", marker = "python_full_version == '3.12.*'", specifier = "==0.18.0" },
     { name = "nvidia-modelopt", marker = "python_full_version == '3.12.*'", specifier = ">=0.37.0" },
+    { name = "torch", marker = "python_full_version == '3.12.*'", specifier = "==2.11.0" },
     { name = "transformer-engine", extras = ["pytorch"], marker = "python_full_version == '3.12.*'", specifier = "==2.16.0", index = "https://wheels.astral.sh/simple/cu130/" },
     { name = "transformer-engine-cu13", marker = "python_full_version == '3.12.*'", specifier = "==2.16.0", index = "https://wheels.astral.sh/simple/cu130/" },
     { name = "transformer-engine-torch", marker = "python_full_version == '3.12.*'", specifier = "==2.16.0", index = "https://wheels.astral.sh/simple/cu130/" },
