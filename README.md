@@ -16,7 +16,7 @@ Both components use S3 as their data layer, but the complexity is fully abstract
 
 ## Training Integrations
 
-### Toolkit Integrations
+### Native Integrations
 
 Training integrations maintained in this repository use ART's rollout gateway for token-level trajectory capture.
 
@@ -29,7 +29,7 @@ Training integrations maintained in this repository use ART's rollout gateway fo
 
 SkyRL and Tinker share the toolkit's Tinker-compatible API integration.
 
-### Native Framework Integrations
+### External Integrations
 
 **[rLLM](https://docs.rllm-project.com/agent-runtimes/agentcore)** natively integrates with AWS Bedrock AgentCore Runtime. Follow the rLLM documentation for installation, configuration, and training. Use ART to [prepare and deploy your agent](#agent-side-adapting-your-agent-for-rl).
 

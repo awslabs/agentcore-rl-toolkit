@@ -12,11 +12,11 @@ rewiring the agent for RL.
 
 The AgentCore RL Toolkit's goal: **the agent you train is the agent
 you deploy**. Keep your [Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) agent
-and connect it to a [training integration](#training-integrations).
+and connect it to a [training backend of your choice](#training-integrations).
 
 ## Training Integrations
 
-### Toolkit Integrations
+### Native Integrations
 
 Training integrations maintained in this repository use ART's rollout gateway for token-level trajectory capture.
 
@@ -29,7 +29,7 @@ Training integrations maintained in this repository use ART's rollout gateway fo
 
 SkyRL and Tinker share the toolkit's Tinker-compatible API integration.
 
-### Native Framework Integrations
+### External Integrations
 
 **[rLLM](https://docs.rllm-project.com/agent-runtimes/agentcore)** natively integrates with AWS Bedrock AgentCore Runtime. Follow the rLLM documentation for installation, configuration, and training. Use ART to [prepare and deploy your agent](/agentcore-rl-toolkit/guides/agent-adaptation/).
 

@@ -223,7 +223,7 @@ the **verl backend** (`backends/verl/`, see below), the **Tinker API backend**
 backends' dispatch/reward-join glue is not yet on the main branch — a prototype
 dispatcher is parked on the `wip/online-rl-dispatch` branch.
 
-### Native Framework Integrations
+### External Integrations
 
 [rLLM natively integrates with AgentCore Runtime](https://docs.rllm-project.com/agent-runtimes/agentcore).
 rLLM maintains its installation, configuration, training, and troubleshooting
