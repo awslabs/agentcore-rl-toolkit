@@ -60,18 +60,14 @@ that scale horizontally and clean up after themselves.
 
 The figure below shows the diagram of our system end-to-end. The training
 backend (right) submits prompts to ACR (left), which runs N parallel agent
-rollouts. Each rollout's agent calls models through a **trajectory gateway**
-(center), which handles OpenAI-compatible model requests and records generated
-token IDs and logprobs for training. The trainer uses loss masks to identify
-the generated tokens to optimize. The agent writes its scalar reward to
+rollouts. Each rollout's agent calls models through the **model-gateway**
+(center), which proxies OpenAI-compatible requests to the backend's inference
+servers and transparently captures rollout data — token IDs, logprobs, expert
+masks, and rewards — at the HTTP layer. The agent writes its scalar reward to
 S3. The training engine consumes the rollout data plus rewards, runs a policy
 update, and syncs new weights back to the inference servers.
 
-For the toolkit's current rollout gateway and setup guides, see
-[Training Integrations](/agentcore-rl-toolkit/guides/overview/#training-integrations).
-[rLLM maintains its native AgentCore integration upstream](https://docs.rllm-project.com/agent-runtimes/agentcore).
-
-<figure class="art-diagram" role="img" aria-label="Training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models through a trajectory gateway (center), which records generated token IDs and logprobs. Agents save rewards to S3. The training engine consumes rollout data and rewards and syncs updated weights to the inference servers.">
+<figure class="art-diagram" role="img" aria-label="Training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via model-gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
   <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="dg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -116,8 +112,8 @@ For the toolkit's current rollout gateway and setup guides, see
     {/* ── Center column — shared data plane ── */}
     {/* Gateway — top */}
     <rect class="dg-node dg-node-accent" x="340" y="100" width="220" height="60" rx="4" />
-    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">Trajectory Gateway</text>
-    <text class="dg-sublabel" x="450" y="145" text-anchor="middle">model calls + token capture</text>
+    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">model-gateway</text>
+    <text class="dg-sublabel" x="450" y="145" text-anchor="middle">v1/chat proxy + capture</text>
 
     {/* Rollout Data — middle */}
     <rect class="dg-node" x="340" y="200" width="220" height="140" rx="4" />
@@ -125,7 +121,7 @@ For the toolkit's current rollout gateway and setup guides, see
     <line class="dg-divider" x1="360" y1="234" x2="540" y2="234" />
     <text class="dg-sublabel" x="450" y="254" text-anchor="middle">Token IDs</text>
     <text class="dg-sublabel" x="450" y="276" text-anchor="middle">Logprobs</text>
-    <text class="dg-sublabel" x="450" y="298" text-anchor="middle">Loss masks</text>
+    <text class="dg-sublabel" x="450" y="298" text-anchor="middle">Expert masks</text>
     <text class="dg-sublabel" x="450" y="320" text-anchor="middle">Rewards</text>
 
     {/* S3 — bottom */}
@@ -212,21 +208,22 @@ The cleanest part of the design, in our view, is that the agent itself never
 imports anything RL-specific. Inside the entrypoint, agents create a standard
 `OpenAIModel` (Strands, LangGraph, or any other OpenAI-compatible client) and
 point it at a `base_url` passed in via the rollout payload. That URL points to
-the **trajectory gateway**, which handles model requests and records the
-generated token IDs and logprobs that the trainer needs.
+the **model-gateway**, which sits between the agent and the actual inference
+server, forwards every chat completion call, and silently captures the token
+IDs, logprobs, and assistant/tool masks that the trainer needs.
 
 This split keeps agent containers small, dependency-light, and
 indistinguishable from their production counterparts — exactly what we want
 when the agent's job is to faithfully reproduce production behavior during
 rollout.
 
-Separating model calls and result delivery from agent logic lets training
-frameworks drive AgentCore rollouts. The toolkit maintains
-[slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) and
-[verl](/agentcore-rl-toolkit/guides/verl-backend-setup/) integrations;
-[rLLM](https://docs.rllm-project.com/agent-runtimes/agentcore) maintains its
-native integration upstream. Each training framework collects trajectories
-and rewards, performs its policy update, and syncs new weights to its sampler.
+Because the data plane (model-gateway and S3) is decoupled from the trainer, we
+can plug in any of the popular open-source RL stacks without modifying the
+agent: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/),
+[rllm](https://docs.rllm-project.com/agent-runtimes/agentcore), or
+[verl](/agentcore-rl-toolkit/guides/verl-backend-setup/). The training engine
+reads rollout data from the gateway, performs its policy update, and syncs new
+weights to the inference servers — closing the loop.
 
 ## Experiments
 
