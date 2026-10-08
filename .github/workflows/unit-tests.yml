@@ -31,3 +31,24 @@ jobs:
         run: uv run pytest tests/ -v
         env:
           AWS_DEFAULT_REGION: us-west-2
+
+  sagemaker-rft:
+    name: SageMaker RFT SDK Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --group sagemaker-integration
+
+      - name: Run SageMaker RFT tests
+        run: uv run --no-sync pytest tests/runtime/test_sagemaker_rft.py -v
+        env:
+          AWS_DEFAULT_REGION: us-west-2

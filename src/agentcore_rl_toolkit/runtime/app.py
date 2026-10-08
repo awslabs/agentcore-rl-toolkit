@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from starlette.responses import JSONResponse
@@ -15,8 +16,10 @@ from .store import InvocationStore
 class AgentCoreRuntimeApp(BedrockAgentCoreApp):
     """Add persisted start/get invocations to ``@app.entrypoint``.
 
-    Requests without ``_agentcore_runtime`` retain upstream HTTP behavior.
-    Protocol invocations require a JSON-serializable return value, and persist
+    Set ``background=True`` to run requests without
+    ``_agentcore_runtime`` in the background with server-generated IDs.
+    Otherwise upstream HTTP behavior applies; explicit envelopes follow the protocol.
+    Managed invocations require a JSON-serializable return value, and persist
     results in ``state_dir`` (default: ``.agentcore_runtime`` under the OS temp
     directory). Use a managed mount for records that survive compute replacement.
 
@@ -26,8 +29,9 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
     invocation completion never stop the Runtime session.
     """
 
-    def __init__(self, *, state_dir: str | Path | None = None, **kwargs):
+    def __init__(self, *, background: bool = False, state_dir: str | Path | None = None, **kwargs):
         super().__init__(**kwargs)
+        self._background = background
         self._store = InvocationStore(state_dir)
         self._lock = asyncio.Lock()
         self._live: dict[str, asyncio.Task] = {}
@@ -38,18 +42,22 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
             payload = await http_request.json()
         except ValueError:
             return await super()._handle_invocation(http_request)
-        if not isinstance(payload, dict) or ENVELOPE_KEY not in payload:
+        if not isinstance(payload, dict) or (ENVELOPE_KEY not in payload and not self._background):
             return await super()._handle_invocation(http_request)
+        if ENVELOPE_KEY in payload:
+            try:
+                request = InvocationRequest.parse(payload[ENVELOPE_KEY])
+            except ValueError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+            application_payload = {key: value for key, value in payload.items() if key != ENVELOPE_KEY}
+        else:
+            request = InvocationRequest(operation="start", invocation_id=uuid4().hex, background=True)
+            application_payload = payload
         context = self._build_request_context(http_request)
-        try:
-            request = InvocationRequest.parse(payload[ENVELOPE_KEY])
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
 
         handler = self.handlers.get("main")
         if handler is None:
             return JSONResponse({"error": "No entrypoint defined"}, status_code=500)
-        application_payload = {key: value for key, value in payload.items() if key != ENVELOPE_KEY}
         # Own acceptance independently of the HTTP connection, including file I/O:
         # cancellation must not split a persisted start from task registration.
         task = asyncio.create_task(

@@ -57,15 +57,58 @@ async def invoke(payload, context):
     return {"answer": payload["question"], "reward": 1.0}
 ```
 
-Requests without `_agentcore_runtime` follow upstream HTTP behavior, including
-streaming. Protocol requests use the same handler, but persist its JSON return
-value inside `result`. The app treats that value as opaque: `reward`, agent
-output, and other application fields are saved without renaming or injection.
-It does not automatically persist the input payload.
+By default, requests without `_agentcore_runtime` follow upstream HTTP behavior,
+including streaming. Protocol requests use the same handler, but persist its
+JSON return value inside `result`. The app treats that value as opaque: `reward`,
+agent output, and other application fields are saved without renaming or
+injection. It does not automatically persist the input payload.
 
 Intercepting the envelope at the HTTP endpoint lets `get` bypass application
 logic and keeps protocol responses separate from ordinary response handling.
 Both synchronous and asynchronous handlers use upstream handler dispatch.
+
+### Background execution without an envelope
+
+Callers that use `InvokeAgentRuntime` directly without ART's `AgentCoreHttpClient`
+or the `_agentcore_runtime` envelope can enable background execution with
+`AgentCoreRuntimeApp(background=True)`. They keep their existing payload format
+and receive an immediate response while the handler runs in the background.
+
+With this option enabled, each payload without an envelope uses the existing
+background `start` path with a generated invocation ID and an HTTP 200
+`in_progress` response. The handler receives the original payload and its
+JSON-serializable result is persisted. The option defaults to `False`.
+Explicit envelopes, including those sent by
+`AgentCoreHttpClient`, continue to select execution mode per request.
+
+**Retry limitation:** each such request gets a new ID, so retrying after a lost
+response may execute the handler again. Deduplication requires the caller to
+reuse an invocation ID through the envelope within the same Runtime session.
+
+### SageMaker RFT example
+
+The same decorator composition works with `AgentCoreRuntimeApp()` for ordinary
+foreground requests. Setting `background=True` runs the entire decorated
+handler in the background, including the SDK's completion and reward reporting.
+
+Given application functions `run_agent` and `compute_reward`:
+
+```python
+from agentcore_rl_toolkit import AgentCoreRuntimeApp
+from sagemaker.train.rft import sagemaker_rft_handler
+
+app = AgentCoreRuntimeApp(background=True)  # omit setting background=True to run quick rollouts in the foreground.
+
+@app.entrypoint
+@sagemaker_rft_handler
+def invoke(payload):
+    result = run_agent(payload)
+    return {"reward": compute_reward(result)}
+```
+
+Use the SDK's single-argument handler signature and follow the
+[SageMaker agent integration guide](https://docs.aws.amazon.com/sagemaker/latest/dg/model-customize-mtrl-agent.html)
+for model authentication, tracking headers, and inference parameters.
 
 ## HTTP mapping
 

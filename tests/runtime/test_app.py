@@ -72,6 +72,64 @@ async def test_ordinary_http_and_protocol_share_async_handler(app, client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("async_handler", [False, True])
+async def test_plain_background_requests_preserve_payload_and_start_separate_invocations(tmp_path, async_handler):
+    app = AgentCoreRuntimeApp(background=True, state_dir=tmp_path)
+    release = threading.Event()
+    calls = []
+
+    def run(payload, context):
+        calls.append((payload, context.session_id))
+        assert release.wait(5)
+        return {"answer": 42}
+
+    async def run_async(payload, context):
+        return await asyncio.to_thread(run, payload, context)
+
+    app.entrypoint(run_async if async_handler else run)
+    payload = {"prompt": "same", "metadata": {"opaque": "unchanged"}}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://agent") as client:
+        try:
+            responses = [
+                await client.post("/invocations", json=payload, headers={SESSION_HEADER: "session-a"}) for _ in range(2)
+            ]
+            for response in responses:
+                assert response.status_code == 200
+                assert response.json()["status"] == "in_progress"
+            ids = [response.json()["invocation_id"] for response in responses]
+            assert ids[0] != ids[1]
+            assert (await client.get("/ping")).json()["status"] == "HealthyBusy"
+        finally:
+            release.set()
+        for invocation_id in ids:
+            assert (await terminal(client, invocation_id))["result"] == {"answer": 42}
+        assert calls == [(payload, "session-a"), (payload, "session-a")]
+        assert (await client.get("/ping")).json()["status"] == "Healthy"
+
+
+@pytest.mark.asyncio
+async def test_explicit_envelope_overrides_app_background(tmp_path):
+    app = AgentCoreRuntimeApp(background=True, state_dir=tmp_path)
+    calls = []
+
+    @app.entrypoint
+    def handler(payload):
+        calls.append(payload)
+        return payload
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://agent") as client:
+        for invocation_id, background in [("default", None), ("foreground", False)]:
+            response = await invoke(client, invocation_id, background=background, value=42)
+            assert response.json()["status"] == "completed"
+            assert response.json()["result"] == {"value": 42}
+            assert (await invoke(client, invocation_id, operation="get")).json() == response.json()
+
+        invalid = await client.post("/invocations", json={"_agentcore_runtime": None})
+        assert invalid.status_code == 400
+        assert calls == [{"value": 42}, {"value": 42}]
+
+
+@pytest.mark.asyncio
 async def test_background_deduplicates_by_id_and_keeps_busy_through_publication(app, client, monkeypatch):
     entered, release, publishing, publish = (threading.Event() for _ in range(4))
     calls = []

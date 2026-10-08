@@ -102,6 +102,11 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 
 **AgentCoreRuntimeApp** (`src/agentcore_rl_toolkit/runtime/`)
 - Exported from `agentcore_rl_toolkit`; retains `@app.entrypoint` and ordinary HTTP behavior.
+- `background=True` runs requests without `_agentcore_runtime` in the background
+  with generated invocation IDs; ordinary retries may execute again. Explicit
+  envelopes retain their protocol behavior. See the
+  [SageMaker RFT example](designs/agentcore_runtime_app.md#sagemaker-rft-example)
+  and [integration tests](tests/runtime/test_sagemaker_rft.py).
 - Requests with `_agentcore_runtime` use versioned `start/get`, foreground/background execution, and session-scoped invocation IDs.
 - Records live under configurable `state_dir`, defaulting to `.agentcore_runtime` under the OS temporary directory (`TMPDIR`).
 - One app process serves one Runtime session; live tasks are keyed by invocation ID. Filesystem records retain session-specific paths; use a managed mount for stop/resume persistence.
@@ -562,7 +567,7 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - GitHub pull request descriptions must not hard-wrap prose at a fixed column width. Write each Markdown paragraph as one physical line, regardless of length, and let GitHub handle visual wrapping.
 - In pull request descriptions, insert newlines only for Markdown structure: paragraph boundaries, headings, list items, blockquotes, tables, code blocks, and similar constructs.
 - This pull request formatting rule does not apply to git commit messages or repository documentation; follow their existing wrapping conventions.
-- When implementing or changing behavior covered by a document in `designs/`, update that document and its `Implementation` status in the same change.
+- When implementing or changing behavior covered by a document in `designs/`, update the relevant design content in the same change. Do not change its `Implementation` status unless explicitly requested.
 - Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)
