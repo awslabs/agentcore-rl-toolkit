@@ -42,7 +42,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Prepare agent for RL', slug: 'guides/agent-adaptation' },
 						{
-							label: 'Training Integrations',
+							label: 'Training Backends',
 							items: [
 								{ label: 'verl', slug: 'guides/verl-backend-setup' },
 								{ label: 'slime', slug: 'guides/slime-backend-setup' },
@@ -108,7 +108,7 @@ export default defineConfig({
 					label: 'Troubleshooting',
 					items: [
 						{
-							label: 'Training Integrations',
+							label: 'Training Backends',
 							items: [
 								{ label: 'slime', slug: 'troubleshooting/slime' },
 							],

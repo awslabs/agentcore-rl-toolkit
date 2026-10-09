@@ -14,7 +14,7 @@ LLM agent rollouts are long-running — an agent may run for minutes or hours ma
 
 Both components use S3 as their data layer, but the complexity is fully abstracted — your code never reads from or writes to S3 directly.
 
-## Training Integrations
+## Training Backends
 
 ### Native Integrations
 
@@ -148,7 +148,7 @@ In practice, this is infrastructure managed by the training framework:
 - **During training**: the training engine points `base_url` through the gateway automatically
 - **During evaluation**: `base_url` points directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` via the Bedrock API — no gateway involved
 
-The gateway is included in the toolkit's `gateway` extra. Follow your [integration's setup guide](#training-integrations) for its dependencies and configuration.
+The gateway is included in the toolkit's `gateway` extra. Follow your [integration's setup guide](#training-backends) for its dependencies and configuration.
 
 ## Client-Side: Invoking Agents and Collecting Results
 
@@ -287,7 +287,7 @@ The training architecture follows a **decoupled design** where agent rollouts an
 
 This architecture enables parallel and highly efficient rollouts with secure execution during RL training. The decoupled design means training libraries only need the agent's container image to start training—agent code and dependencies stay completely separate from the training library.
 
-Choose a setup guide from [Training Integrations](#training-integrations).
+Choose a setup guide from [Training Backends](#training-backends).
 
 ### Prepare Your Agent Container
 

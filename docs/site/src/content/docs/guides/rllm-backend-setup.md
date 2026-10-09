@@ -12,4 +12,4 @@ follow the upstream installation instructions instead; that extra has been remov
 
 Use ART's [agent adaptation and deployment guide](/agentcore-rl-toolkit/guides/agent-adaptation/)
 to prepare your agent, or browse the toolkit's
-[Training Integrations](/agentcore-rl-toolkit/guides/overview/#training-integrations).
+[Training Backends](/agentcore-rl-toolkit/guides/overview/#training-backends).
