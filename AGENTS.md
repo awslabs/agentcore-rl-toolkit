@@ -601,4 +601,3 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - **bedrock-agentcore-starter-toolkit** (CLI tools, Dockerfile generation): https://github.com/aws/bedrock-agentcore-starter-toolkit
 - **Runtime SDK Overview**: https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html
 - **HTTP Protocol Contract**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http
-- **rLLM native AgentCore integration**: https://docs.rllm-project.com/agent-runtimes/agentcore
