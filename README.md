@@ -240,7 +240,7 @@ See [`examples/strands_migration_agent/evaluate_async.py`](examples/strands_migr
 
 ### High-Level Training Architecture
 
-The training architecture follows a **decoupled design** where agent rollouts and the training engine run separately. The diagram shows the S3 result delivery used by the toolkit's verl and slime integrations. SkyRL and Tinker use the same rollout gateway with HTTP result delivery through `AgentCoreRuntimeApp`; see their [training guide](src/agentcore_rl_toolkit/backends/tinker_api/README.md).
+The training architecture follows a **decoupled design** where agent rollouts and the training engine run separately:
 
 ```
 ┌────────────────────────────────────────────────────────────────┐

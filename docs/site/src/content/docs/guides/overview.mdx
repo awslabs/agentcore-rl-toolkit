@@ -63,13 +63,7 @@ properties matter, all available in AgentCore Runtime without bespoke infrastruc
 AgentCore Runtime handles hosting; the toolkit wires the
 **training-data pipeline** that makes an agent trainable.
 
-The diagram shows the S3 result delivery used by the toolkit's verl and slime
-integrations. SkyRL and Tinker use the same rollout gateway with HTTP result
-delivery through `AgentCoreRuntimeApp`; their
-[training guide](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/backends/tinker_api/README.md)
-covers that agent setup.
-
-<figure class="art-diagram" role="img" aria-label="Training topology for the toolkit's verl and slime integrations: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each agent calls the rollout gateway (center), which renders messages to token IDs and samples from the backend's inference servers. The gateway records token IDs, logprobs, and loss masks. Agents save rewards to S3. The training engine consumes trajectories and rewards and syncs updated weights to the inference servers.">
+<figure class="art-diagram" role="img" aria-label="Example training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via the rollout gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
   <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="dg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
