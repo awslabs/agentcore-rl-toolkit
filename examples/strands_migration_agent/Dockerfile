@@ -66,6 +66,10 @@ RUN uv pip install .
 RUN uv pip install aws-opentelemetry-distro==0.12.2
 
 
+# Inherited by both agent tools and reward subprocesses.
+RUN ln -s "/usr/lib/jvm/java-17-openjdk-$(dpkg --print-architecture)" /opt/java-home
+ENV JAVA_HOME=/opt/java-home GIT_PAGER=cat PAGER=cat
+
 # Create non-root user
 RUN useradd -m -u 1000 bedrock_agentcore
 USER bedrock_agentcore
