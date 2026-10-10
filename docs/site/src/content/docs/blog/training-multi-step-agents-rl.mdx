@@ -220,7 +220,7 @@ rollout.
 Because the data plane (model-gateway and S3) is decoupled from the trainer, we
 can plug in any of the popular open-source RL stacks without modifying the
 agent: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/),
-[rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/), or
+[rllm](https://docs.rllm-project.com/agent-runtimes/agentcore), or
 [verl](/agentcore-rl-toolkit/guides/verl-backend-setup/). The training engine
 reads rollout data from the gateway, performs its policy update, and syncs new
 weights to the inference servers — closing the loop.

@@ -11,9 +11,27 @@ trainer needs (token IDs, logprobs, rewards), and doing it without
 rewiring the agent for RL.
 
 The AgentCore RL Toolkit's goal: **the agent you train is the agent
-you deploy**. Keep your [Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) agent, swap [one decorator](/agentcore-rl-toolkit/guides/agent-adaptation/),
-and any training backend ([slime](/agentcore-rl-toolkit/guides/slime-backend-setup/), [rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/), or [verl](/agentcore-rl-toolkit/guides/verl-backend-setup/)) can drive
-it.
+you deploy**. Keep your [Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) agent
+and connect it to a [training backend](#training-backends) of your choice.
+
+## Training Backends
+
+### Native Integrations
+
+Training integrations maintained in this repository use ART's rollout gateway for token-level trajectory capture.
+
+| Integration | Description | Get Started |
+|---|---|---|
+| **verl** | Self-hosted training with verl | [Setup guide](/agentcore-rl-toolkit/guides/verl-backend-setup/) |
+| **slime** | Self-hosted training with slime | [Setup guide](/agentcore-rl-toolkit/guides/slime-backend-setup/) |
+| **SkyRL** | Self-hosted training through its Tinker-compatible API | [Training guide](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/backends/tinker_api/README.md) · [Deployment example](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/backends/tinker_api/skyrl/README.md) |
+| **Tinker** | Managed training through the official Tinker API | [Training guide](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/backends/tinker_api/README.md) |
+
+SkyRL and Tinker share the toolkit's Tinker-compatible API integration.
+
+### External Integrations
+
+**[rLLM](https://docs.rllm-project.com/agent-runtimes/agentcore)** natively integrates with AWS Bedrock AgentCore Runtime. Follow the rLLM documentation for installation, configuration, and training. Use ART to [prepare and deploy your agent](/agentcore-rl-toolkit/guides/agent-adaptation/).
 
 ## Why AgentCore Runtime
 
@@ -45,7 +63,7 @@ properties matter, all available in AgentCore Runtime without bespoke infrastruc
 AgentCore Runtime handles hosting; the toolkit wires the
 **training-data pipeline** that makes an agent trainable.
 
-<figure class="art-diagram" role="img" aria-label="Training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via model-gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
+<figure class="art-diagram" role="img" aria-label="Example training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via the rollout gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
   <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="dg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -90,8 +108,8 @@ AgentCore Runtime handles hosting; the toolkit wires the
     {/* ── Center column — shared data plane ── */}
     {/* Gateway — top */}
     <rect class="dg-node dg-node-accent" x="340" y="100" width="220" height="60" rx="4" />
-    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">model-gateway</text>
-    <text class="dg-sublabel" x="450" y="145" text-anchor="middle">v1/chat proxy + capture</text>
+    <text class="dg-label dg-label-accent" x="450" y="127" text-anchor="middle">Rollout Gateway</text>
+    <text class="dg-sublabel" x="450" y="145" text-anchor="middle">render + sample + capture</text>
 
     {/* Rollout Data — middle */}
     <rect class="dg-node" x="340" y="200" width="220" height="140" rx="4" />
@@ -99,7 +117,7 @@ AgentCore Runtime handles hosting; the toolkit wires the
     <line class="dg-divider" x1="360" y1="234" x2="540" y2="234" />
     <text class="dg-sublabel" x="450" y="254" text-anchor="middle">Token IDs</text>
     <text class="dg-sublabel" x="450" y="276" text-anchor="middle">Logprobs</text>
-    <text class="dg-sublabel" x="450" y="298" text-anchor="middle">Expert masks</text>
+    <text class="dg-sublabel" x="450" y="298" text-anchor="middle">Loss masks</text>
     <text class="dg-sublabel" x="450" y="320" text-anchor="middle">Rewards</text>
 
     {/* S3 — bottom */}
@@ -114,7 +132,7 @@ AgentCore Runtime handles hosting; the toolkit wires the
     {/* ── Right column — Training Backend ── */}
     <rect class="dg-group" x="620" y="20" width="260" height="440" rx="8" />
     <text class="dg-group-label" x="750" y="44" text-anchor="middle">Training Backend</text>
-    <text class="dg-note" x="750" y="62" text-anchor="middle">slime · rllm · verl</text>
+    <text class="dg-note" x="750" y="62" text-anchor="middle">verl · slime</text>
 
     <rect class="dg-node" x="640" y="100" width="220" height="80" rx="4" />
     <text class="dg-label" x="750" y="136" text-anchor="middle">Inference Servers</text>
@@ -157,14 +175,14 @@ The diagram has three parts, left to right:
   is a session with an `Agent` ↔ `Environment` tool-use loop that
   ends in an `Evaluate` step. Your code lives here, unchanged from
   deployment.
-- **Shared data plane** (center) —
-  [`model-gateway`](https://github.com/rllm-org/rllm/tree/main/rllm-model-gateway)
-  is what lets the agent on AgentCore Runtime keep using the
-  **standard OpenAI chat interface** with no awareness of training.
-  The agent makes plain `v1/chat` calls; the gateway transparently
-  proxies them to the training backend's inference servers and, on
-  the side, captures the training-only signals (token IDs, logprobs,
-  expert masks) that the agent never sees or handles.
+- **Rollout gateway** (center) — ART's
+  [`RolloutGateway`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/rollout_gateway)
+  accepts standard OpenAI- and Anthropic-compatible chat requests.
+  It renders messages into prompt token IDs, samples through a token-in/token-out
+  backend, and records generated token IDs and logprobs. A session key in the
+  API-key field groups calls into trajectories with loss masks, preserving the
+  original generated tokens across turns and branches. The trainer joins these
+  trajectories with the agent's rewards.
 - **Training backend** (right) — `Inference Servers` serve the
   current policy; the `Training Engine` consumes rollout data +
   rewards and syncs updated weights back via `Weight Sync`.
@@ -183,8 +201,5 @@ OfficeBench, with the largest gains on the hardest multi-app tasks.
 
 ## Next
 
-Start with [Prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/),
-then pick a backend:
-[slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) ·
-[rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/) ·
-[verl](/agentcore-rl-toolkit/guides/verl-backend-setup/).
+Choose a guide from [Training Backends](#training-backends) for
+agent preparation and training setup.

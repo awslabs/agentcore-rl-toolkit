@@ -104,13 +104,10 @@ hero:
 
 **Isolated, auto-scaling rollouts** — every rollout runs in its own [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) microVM with its own dependencies; thousands in parallel without contending for your machine.
 
-**Framework-agnostic training** — works with verl, rllm, or slime; `model-gateway` captures token IDs, logprobs, and expert masks transparently while the agent keeps its original chat interface.
+**Flexible training integrations** — use verl, slime, SkyRL, or Tinker with ART's rollout gateway for token IDs, logprobs, and loss masks. [rLLM natively integrates with AgentCore Runtime](https://docs.rllm-project.com/agent-runtimes/agentcore).
 
 **Any agent framework** — [Strands](https://strandsagents.com/), [LangGraph](https://langchain-ai.github.io/langgraph/), [OpenHands](https://openhands.dev), and more. The agent's runtime is independent of the training library.
 
 New here? Start with the [math agent example](/agentcore-rl-toolkit/examples/strands-math-agent/)
 or read the [overview](/agentcore-rl-toolkit/guides/overview/). Already have an agent?
-Jump straight to [prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/) and
-Kick off RL with any training backend: [slime](/agentcore-rl-toolkit/guides/slime-backend-setup/) ·
-[rllm](/agentcore-rl-toolkit/guides/rllm-backend-setup/) ·
-[verl](/agentcore-rl-toolkit/guides/verl-backend-setup/).
+Choose a setup guide from [Training Backends](/agentcore-rl-toolkit/guides/overview/#training-backends).

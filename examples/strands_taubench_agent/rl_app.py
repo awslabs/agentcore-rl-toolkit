@@ -271,8 +271,7 @@ def invoke_agent(payload: dict) -> dict:
     ``@rollout_entrypoint``, which automatically runs this in the background,
     saves the returned dict to S3, and records errors for the client.
 
-    Token IDs are captured server-side by the rllm-model-gateway HTTP proxy
-    (no client-side token collection in agent code).
+    The training gateway captures token IDs for this rollout.
 
     Args:
         payload: The rollout request (see ``_setup_rollout`` for the schema).
@@ -286,7 +285,7 @@ def invoke_agent(payload: dict) -> dict:
     logger.info("Starting rollout: domain=%s, model=%s", ctx.domain, ctx.model_id)
 
     # Run conversation — if the rollout throws, return reward=0
-    # (token IDs are captured server-side by the rllm-model-gateway, not collected here)
+    # (the training gateway captures token IDs)
     try:
         global_messages, force_reward, terminated_reason = _run_conversation(ctx)
     except Exception:

@@ -44,9 +44,6 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "qwen-vl-utils", marker = "extra == 'verl'" },
     { name = "ray", marker = "extra == 'verl'" },
-    { name = "rllm", marker = "extra == 'rllm'", git = "https://github.com/rllm-org/rllm.git" },
-    { name = "rllm-model-gateway", marker = "extra == 'slime'", specifier = ">=0.1.0" },
-    { name = "rllm-model-gateway", marker = "extra == 'verl'", specifier = ">=0.1.0" },
     { name = "torch", marker = "extra == 'verl'", specifier = ">=2.10.0" },
     { name = "torchvision", marker = "extra == 'verl'", specifier = ">=0.23.0" },
     { name = "transformers", marker = "extra == 'dev'", specifier = ">=4.44" },
@@ -55,7 +52,7 @@ requires-dist = [
     { name = "verl", marker = "extra == 'verl'", specifier = "==0.8.0" },
     { name = "vllm", marker = "extra == 'verl'", specifier = "==0.22.0" },
 ]
-provides-extras = ["dev", "gateway", "slime", "rllm", "verl"]
+provides-extras = ["dev", "gateway", "verl"]
 
 [[package]]
 name = "aiohappyeyeballs"
