@@ -198,6 +198,9 @@ keeps `/ping` busy through execution and terminal publication. Tracking is
 released only after publication succeeds or fails; detached task failures are
 consumed and logged.
 
+An ASGI middleware adds `X-AgentCore-Server-SDK: agentcore-rl-toolkit` to `/ping`
+responses to identify the server SDK independently of the caller.
+
 ## Filesystem storage and recovery
 
 `state_dir` selects the store root. Its default is
