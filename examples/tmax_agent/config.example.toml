@@ -1,0 +1,11 @@
+name = "tmax"
+region = "us-east-1"
+repository = "ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/tmax"
+verifier_bucket = "YOUR_VERIFIER_BUCKET"
+verifier_region = "us-east-1"
+harness_role = "arn:aws:iam::ACCOUNT:role/tmax-harness"
+task_role = "arn:aws:iam::ACCOUNT:role/tmax-task"
+subnets = ["subnet-PRIVATE"]
+# Allow TCP 0-65535 from the harness group into the cluster security group.
+harness_security_groups = ["sg-HARNESS"]
+task_security_groups = ["sg-TASK"]
