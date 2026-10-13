@@ -3,10 +3,8 @@ name = "tmax-agentcore-eval"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "agentcore-rl-toolkit[rollout]",
-    "openai==3.24.0",
-    "tenacity==9.1.2",
-    "PyYAML==6.0.3",
+    "agentcore-rl-toolkit[rollout]==0.1.6",
+    "mini-swe-agent==2.4.6",
     "boto3>=1.43.102",
     "botocore>=1.43.102",
 ]
@@ -14,9 +12,6 @@ dependencies = [
 [tool.uv]
 # As in the root project, aioboto3's older pin must not hold back the service model.
 override-dependencies = ["aiobotocore>=3.9.0", "botocore>=1.43.102"]
-
-[tool.uv.sources]
-agentcore-rl-toolkit = { path = "../..", editable = true }
 
 [dependency-groups]
 dev = ["ruff"]

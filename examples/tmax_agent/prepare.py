@@ -56,6 +56,8 @@ def prepare_task(task_dir, binary, repository, bucket, s3, scratch):
     with (context / "Dockerfile").open("a") as dockerfile:
         dockerfile.write(
             "\nENV TMPDIR=/var/tmp\n"
+            "RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \\\n"
+            "    && rm -rf /var/lib/apt/lists/*\n"
             "COPY --chmod=755 agentcore-sandboxd /usr/local/bin/agentcore-sandboxd\n"
             'EXPOSE 8080\nCMD ["/usr/local/bin/agentcore-sandboxd"]\n'
         )
@@ -91,7 +93,7 @@ def main():
     args = parser.parse_args()
     config = tomllib.loads(args.config.read_text())
     s3 = boto3.client("s3", region_name=config["verifier_region"])
-    with tempfile.TemporaryDirectory(prefix="tmax-build-", dir=os.environ["TMPDIR"]) as tmp:
+    with tempfile.TemporaryDirectory(prefix="tmax-build-") as tmp:
         scratch = Path(tmp)
         binary = scratch / "agentcore-sandboxd"
         command(
@@ -107,17 +109,8 @@ def main():
         )
         harness = scratch / "harness"
         harness.mkdir()
-        command("uv", "build", "--wheel", "--out-dir", str(harness), str(ROOT))
-        for name in (
-            "Dockerfile",
-            "app.py",
-            "harness.py",
-            "vanillux.py",
-            "vanillux_prompts.yaml",
-            "NOTICE.md",
-        ):
+        for name in ("Dockerfile", "app.py", "harness.py"):
             shutil.copy2(HERE / name, harness / name)
-        shutil.copy2(ROOT / "LICENSE", harness / "LICENSE")
         digest = hashlib.sha256()
         for file in sorted(harness.iterdir()):
             digest.update(file.name.encode())

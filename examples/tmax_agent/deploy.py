@@ -86,7 +86,7 @@ def main():
     for task in manifest["tasks"]:
         task["runtime_arn"] = ensure_runtime(
             client,
-            config["name"] + "_" + task["task_id"],
+            (config["name"] + "_" + task["task_id"]).replace("-", "_"),
             task["image_uri"],
             config["task_role"],
             task_network,

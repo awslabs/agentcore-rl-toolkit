@@ -1,7 +1,7 @@
 # Task compatibility limitations
 
-Known environment issues in the AgentCore evaluation of OpenThoughts-TBLite 2.0,
-as of 2026-10-06. Task sources are pinned to
+Known environment issues in the AgentCore evaluation of OpenThoughts-TBLite 2.0.
+Task sources are pinned to
 [`f075e463`](https://github.com/open-thoughts/OpenThoughts-TBLite/tree/f075e463472c7790b85793b392dff1fff20cc0e3).
 
 | Task | Attribution | Evidence and impact | Current handling |

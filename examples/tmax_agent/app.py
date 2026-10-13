@@ -1,11 +1,11 @@
 """Trusted harness runtime: model loop, then late verifier delivery."""
 
-import base64
 import os
+import shlex
 from dataclasses import asdict
 
 import boto3
-from harness import Bash, run
+from harness import run
 
 from agentcore_rl_toolkit import AgentCoreRuntimeApp
 from agentcore_rl_toolkit.sandbox import ExecTimeoutError, SandboxClient
@@ -15,13 +15,12 @@ app = AgentCoreRuntimeApp()
 
 def verify(sandbox, s3, bucket, task):
     # Created only after the final model turn; never added to the conversation.
-    response = s3.get_object(Bucket=bucket, Key=task["verifier_key"])
-    with response["Body"] as body:
-        archive = base64.b64encode(body.read()).decode()
-    command = (
-        f'printf "%s" "{archive}" | base64 -d | tar -xz -C /\n'
-        "mkdir -p /logs/verifier"
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": task["verifier_key"]},
+        ExpiresIn=300,
     )
+    command = f"curl -fsS {shlex.quote(url)} | tar -xz -C /\nmkdir -p /logs/verifier"
     result = sandbox.exec(["/bin/bash", "-eo", "pipefail", "-c", command], timeout=120)
     if result.exit_code:
         raise RuntimeError(f"Verifier delivery failed: {result.stderr}")
@@ -61,9 +60,8 @@ def invoke(payload, context):
     record = {"task_id": task["task_id"], "sandbox_session_id": session_id, "source": task["source"]}
     try:
         sandbox_client.start(session_id)
-        bash = Bash(sandbox)
         try:
-            run(task["instruction"], bash, payload["_config"], timeout=task["agent_timeout"], record=record)
+            run(task["instruction"], sandbox, payload["_config"], timeout=task["agent_timeout"], record=record)
         except TimeoutError as exc:
             record.update(stop_reason="timeout", error=f"{type(exc).__name__}: {exc}")
         reward, verifier = verify(sandbox, s3, bucket, task)
