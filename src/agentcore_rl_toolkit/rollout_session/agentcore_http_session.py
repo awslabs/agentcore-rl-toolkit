@@ -3,26 +3,50 @@
 import logging
 import uuid
 
+from agentcore_rl_toolkit.aws_tools.agentcore_tools import region_of, shared_agentcore_client
 from agentcore_rl_toolkit.aws_tools.persistent_dict import PersistentDict
 from agentcore_rl_toolkit.runtime import AgentCoreHttpClient, InvocationError
 
 from .errors import RolloutContractError
 from .exception_utils import exception_to_string
+from .lifecycle import RolloutSession
 from .wire import RolloutDumpResponse
 
 logger = logging.getLogger(__name__)
 
 
-class AgentCoreHttpSession:
-    """One Runtime session. The caller owns the client and application payload."""
+class AgentCoreHttpSession(RolloutSession):
+    """One Runtime session. The caller owns the application payload.
+
+    Constructed from config, a session invokes through the process-wide
+    ``bedrock-agentcore`` client (:func:`shared_agentcore_client`). A caller that owns
+    its client uses :meth:`with_client` instead.
+    """
 
     def __init__(
         self,
         session_id: str,
+        session_state: PersistentDict,
         *,
+        agentcore_runtime_arn: str,
+    ):
+        region = region_of(agentcore_runtime_arn)
+        client = AgentCoreHttpClient(agentcore_runtime_arn, aws_client=lambda: shared_agentcore_client(region))
+        self._init(session_id, session_state, client)
+
+    @classmethod
+    def with_client(
+        cls,
+        session_id: str,
         client: AgentCoreHttpClient,
         session_state: PersistentDict | None = None,
-    ):
+    ) -> "AgentCoreHttpSession":
+        """A session over a caller-owned client, which the caller also closes."""
+        session = cls.__new__(cls)
+        session._init(session_id, session_state, client)
+        return session
+
+    def _init(self, session_id: str, session_state: PersistentDict | None, client: AgentCoreHttpClient) -> None:
         self.session_id = session_id
         self._client = client
         self._session_state = session_state

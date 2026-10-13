@@ -91,6 +91,7 @@ def test_entrypoint_with_sync_handler():
 def test_response_includes_result_location_with_rollout_config():
     """Test that response includes s3_bucket and result_key when _rollout config is provided."""
     app = AgentCoreRLApp()
+    app.s3_client = MagicMock()
 
     @app.rollout_entrypoint
     async def handler(payload: dict):

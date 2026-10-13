@@ -321,3 +321,10 @@ reward remains absent. `RolloutDumpResponse` validates these fields.
 `AgentCoreHttpSession.setup()` is a no-op. `run(task)` forwards the caller's
 complete task, including `_config`, and waits for a background handle's result.
 `shutdown()` stops this Runtime session, including after failed submissions.
+
+As a `make_session` backend, `AgentCoreHttpSession` is configured by
+`agentcore_runtime_arn` alone and invokes through the process-wide
+`bedrock-agentcore` client from `aws_tools.agentcore_tools`, passed to
+`AgentCoreHttpClient` as its `aws_client` provider. A caller that owns its client,
+such as the Tinker backend, uses
+`AgentCoreHttpSession.with_client(session_id, client)` and closes the client itself.

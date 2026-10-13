@@ -96,7 +96,7 @@ async def test_plain_app_rollout_returns_result_without_polling():
         return {"status": "ok", "reward": 0.5, "metrics": {"turns": 2}, "prompt": payload["prompt"]}
 
     async with connected(app) as (client, aws, requests):
-        async with AgentCoreHttpSession(SID, client=client) as session:
+        async with AgentCoreHttpSession.with_client(SID, client) as session:
             await session.setup({})
             assert requests == []
             dump = await session.run({"prompt": "math"})
@@ -117,7 +117,7 @@ async def test_failed_and_cancelled_rollouts_stop_their_sessions(tmp_path, monke
         raise ValueError("bad input")
 
     async with connected(app) as (client, aws, _), asyncio.timeout(5):
-        async with AgentCoreHttpSession(SID, client=client) as session:
+        async with AgentCoreHttpSession.with_client(SID, client) as session:
             dump = await session.run({})
         assert "bad input" in dump.exception
         assert dump.reward is None
@@ -126,7 +126,7 @@ async def test_failed_and_cancelled_rollouts_stop_their_sessions(tmp_path, monke
 
         client.invoke = AsyncMock(side_effect=asyncio.CancelledError())
         with pytest.raises(asyncio.CancelledError):
-            async with AgentCoreHttpSession("another-session", client=client) as session:
+            async with AgentCoreHttpSession.with_client("another-session", client) as session:
                 await session.run({})
         assert [call.kwargs["runtimeSessionId"] for call in aws.stop_runtime_session.await_args_list] == [
             SID,

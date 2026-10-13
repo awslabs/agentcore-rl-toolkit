@@ -7,6 +7,7 @@ its AWS connection pool across sessions on the same asyncio event loop.
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from botocore.config import Config
@@ -85,6 +86,8 @@ class AgentCoreHttpClient:
     Session IDs and application configuration belong to the caller. Put any
     configuration in the payload's ``_config`` field.
     An optional ``request_rate_limiter`` gates invoke, get, and stop requests.
+    An optional ``aws_client`` provides an open ``bedrock-agentcore`` client owned
+    elsewhere; this client then neither configures nor closes one.
     """
 
     def __init__(
@@ -94,8 +97,10 @@ class AgentCoreHttpClient:
         max_pool_connections: int = 100,
         read_timeout: float = 900,
         request_rate_limiter: RateLimiter | None = None,
+        aws_client: Callable[[], Awaitable[Any]] | None = None,
     ):
         self.runtime_arn = runtime_arn
+        self._aws_client_provider = aws_client
         self._request_rate_limiter = request_rate_limiter
         self._config = Config(
             max_pool_connections=max_pool_connections,
@@ -114,6 +119,8 @@ class AgentCoreHttpClient:
         await self.aclose()
 
     async def _aws(self):
+        if self._aws_client_provider is not None:
+            return await self._aws_client_provider()
         async with self._open_lock:
             if self._aws_client is None:
                 from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session

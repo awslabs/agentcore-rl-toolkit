@@ -3,8 +3,10 @@
 
 import unittest
 
+from agentcore_rl_toolkit.aws_tools.agentcore_tools import close_shared_agentcore_clients, shared_agentcore_client
 from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
 from agentcore_rl_toolkit.rollout_session.agentcore_a2a_session import AgentCoreA2ASession
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
 from agentcore_rl_toolkit.rollout_session.docker_a2a_session import DockerA2ASession
 from agentcore_rl_toolkit.rollout_session.factory import make_session, resolve_backend
 
@@ -98,6 +100,30 @@ class A2AConstructorTest(unittest.TestCase):
             (session.agent_image_uri, session.iam_role_arn, session.log_group, session.log_region),
             ("repo:tag", "arn:aws:iam::123456789012:role/agent", "/agents", "us-west-2"),
         )
+
+
+class HttpConstructorTest(unittest.IsolatedAsyncioTestCase):
+    BACKEND = "agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession"
+
+    async def asyncSetUp(self):
+        self.addAsyncCleanup(close_shared_agentcore_clients)
+
+    async def test_reads_its_keys_and_invokes_through_the_shared_client(self):
+        meta = state()
+        cfg = {"backend": self.BACKEND, "agentcore_runtime_arn": RUNTIME_ARN}
+        first = make_session(SESSION_ID, cfg, meta)
+        second = make_session("verl_" + "1" * 32, cfg, state())
+        self.assertIsInstance(first, AgentCoreHttpSession)
+        self.assertIs(first._session_state, meta)
+        self.assertEqual(first._client.runtime_arn, RUNTIME_ARN)
+        shared = await shared_agentcore_client("us-west-2")
+        self.assertIs(await first._client._aws(), shared)
+        self.assertIs(await second._client._aws(), shared)
+
+    def test_needs_a_runtime_arn(self):
+        with self.assertRaises(TypeError) as caught:
+            make_session(SESSION_ID, {"backend": self.BACKEND}, state())
+        self.assertIn("agentcore_runtime_arn", str(caught.exception))
 
 
 if __name__ == "__main__":

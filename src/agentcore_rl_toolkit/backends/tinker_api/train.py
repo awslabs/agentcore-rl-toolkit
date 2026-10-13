@@ -122,7 +122,7 @@ async def rollout(
         result = {}
         error = None
         try:
-            async with AgentCoreHttpSession(sid, client=client) as session:
+            async with AgentCoreHttpSession.with_client(sid, client) as session:
                 await session_rate_limiter.wait_async()
                 async with asyncio.timeout(config.rollout_timeout):
                     dump = await session.run(task)
