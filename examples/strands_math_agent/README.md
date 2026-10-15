@@ -92,7 +92,7 @@ CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-4B-Instruct-2507 --max-model-len 81
 
 ### Setup S3
 
-As explained in the main [README](../../README.md#key-features), RL apps follow a fire-and-forget pattern where rollout and reward are saved to S3. The client polls S3 using efficient HEAD requests to detect when each result is available. We recommend setting up this resource and testing locally first to catch any issues early.
+RL apps follow a fire-and-forget pattern where rollout and reward are saved to S3. The client polls S3 using efficient HEAD requests to detect when each result is available. We recommend setting up this resource and testing locally first to catch any issues early.
 
 ```bash
 # Create S3 bucket
@@ -159,7 +159,7 @@ It's also possible that the inference servers are presented as public URLs. In t
 agentcore configure --entrypoint rl_app.py --name strands_math_agent_rl --requirements-file pyproject.toml --deployment-type container --disable-memory --non-interactive
 ```
 
-While this option is feasible thanks to the [decoupled design](../../README.md#high-level-training-architecture), we have not extensively tested it yet. We will explore this path in the near future, and potentially add API key auth option.
+While this option is feasible thanks to the decoupled design, we have not extensively tested it yet. We will explore this path in the near future, and potentially add API key auth option.
 
 Deploy the agent after it has been configured through either option mentioned above.
 
