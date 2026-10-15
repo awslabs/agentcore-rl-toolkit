@@ -195,6 +195,10 @@ for installation, configuration, and training.
 | Software engineering · SWE-Gym | OpenHands | [Guide](examples/openhands_swe_agent/README.md) |
 | Terminal tasks · Harbor / TMax | mini-swe-agent | [Guide](examples/tmax_agent/README.md) |
 
+The [biomedical database example](examples/strands_biomedical_db_agent/README.md)
+includes Open Targets and GWAS Catalog agents, MCP serving, AgentCore deployment,
+and a Codex main agent with both direct database tools and specialist delegation.
+
 **Terminal agents with separate sandboxes.** The
 [terminal agent example](examples/tmax_agent/README.md) uses the Sandbox SDK to
 run mini-swe-agent and its task environment in separate AgentCore sessions.

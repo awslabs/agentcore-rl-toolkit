@@ -1,0 +1,61 @@
+services:
+  opensearch:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.opensearch
+      args:
+        TAG: ${OT_OPENSEARCH_TAG}
+        UID: ${OT_OPENSEARCH_UID}
+        GID: ${OT_OPENSEARCH_GID}
+    environment:
+      network.host: 0.0.0.0
+      discovery.type: single-node
+      discovery.seed_hosts: "[]"
+      node.store.allow_mmap: "false"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms2g -Xmx4g
+    ports:
+      - 127.0.0.1:9200:9200
+    volumes:
+      - ${OT_DATA_ROOT:?Set OT_DATA_ROOT}/opensearch/data:/usr/share/opensearch/data
+    ulimits:
+      memlock: -1
+      nofile: 65536
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - http://127.0.0.1:9200/_cluster/health?wait_for_status=green
+      start_period: 30s
+
+  clickhouse:
+    restart: unless-stopped
+    image: clickhouse/clickhouse-server:${OT_CLICKHOUSE_TAG}
+    ports:
+      - 127.0.0.1:8123:8123
+    volumes:
+      - ${OT_DATA_ROOT:?Set OT_DATA_ROOT}/clickhouse/config.d:/etc/clickhouse-server/config.d
+      - ${OT_DATA_ROOT:?Set OT_DATA_ROOT}/clickhouse/users.d:/etc/clickhouse-server/users.d
+      - ./clickhouse-default-user.xml:/etc/clickhouse-server/users.d/default-user.xml
+      - ${OT_DATA_ROOT:?Set OT_DATA_ROOT}/clickhouse/data:/var/lib/clickhouse
+    ulimits:
+      nofile: 262144
+
+  api:
+    restart: unless-stopped
+    image: ${OT_API_IMAGE}:${OT_API_TAG}
+    environment:
+      SLICK_CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123
+      ELASTICSEARCH_HOST: opensearch
+      PLATFORM_API_IGNORE_CACHE: ${PLATFORM_API_IGNORE_CACHE}
+      META_DATA_RELEASE: ${OT_RELEASE}
+      META_PRODUCT_NAME: platform
+      META_API_VERSION: ${OT_API_TAG}
+    ports:
+      - ${OT_API_BIND:-127.0.0.1}:${OT_API_PORT:-8081}:8080
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started

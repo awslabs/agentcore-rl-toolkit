@@ -1,0 +1,27 @@
+model_provider = "amazon-bedrock-runtime"
+web_search = "disabled"
+project_doc_max_bytes = 0
+# This entrypoint only runs in a dedicated container / AgentCore session.
+sandbox_mode = "danger-full-access"
+
+[skills]
+include_instructions = false
+
+[skills.bundled]
+enabled = false
+
+[features]
+multi_agent = false
+
+[shell_environment_policy]
+inherit = "core"
+
+[mcp_servers.database]
+required = true
+startup_timeout_sec = 120
+tool_timeout_sec = 90
+
+[mcp_servers.specialists]
+required = true
+startup_timeout_sec = 180
+tool_timeout_sec = 660

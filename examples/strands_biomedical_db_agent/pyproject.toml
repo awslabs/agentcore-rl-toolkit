@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "strands-biomedical-db-agent"
+version = "0.1.0"
+description = "Open Targets and GWAS Catalog agents with AgentCore, MCP, and Codex integration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "strands-agents[openai]==1.61.0",
+    "pydantic==2.13.5",
+    "graphql-core>=3.2,<4",
+    "duckdb==1.5.5",
+]
+
+[project.optional-dependencies]
+aws = ["boto3>=1.43,<2"]
+mcp = ["mcp==2.1.1"]
+runtime = ["agentcore-rl-toolkit>=0.1.5"]
+codex = [
+    "openai-codex==0.160.0",
+    "mcp==2.1.1",
+    "httpx2>=2.5,<3",
+    "boto3>=1.43,<2",
+    "bedrock-agentcore>=1.24.0",
+    "tomli-w>=1.2,<2",
+]
+
+[project.scripts]
+biomedical-agent = "biomedical_db_agent.cli:main"
+biomedical-mcp = "biomedical_db_agent.mcp_server:main"
+biomedical-gwas-data = "biomedical_db_agent.gwas_catalog.prepare:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.9"]
+
+[tool.uv]
+# Resolve this standalone example without inheriting trainer-specific parent settings.
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/biomedical_db_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]

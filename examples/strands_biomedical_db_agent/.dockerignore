@@ -1,0 +1,15 @@
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+!apps/
+!apps/*.py
+!integrations/
+!integrations/codex/
+!integrations/codex/*.py
+!integrations/codex/*.toml
+!integrations/codex/*.md
+**/__pycache__
+**/*.pyc
