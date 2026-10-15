@@ -215,7 +215,8 @@ You should be able to see the rollout and reward saved to `s3://agentcore-rl/tes
 `runtime_app.py` is the same agent on [`AgentCoreRuntimeApp`](../../designs/agentcore_runtime_app.md). It keeps
 `@app.entrypoint`, reads model config from `_config`, and returns `{"reward": float}`. Results are fetched over
 HTTP instead of S3, so no bucket or S3 IAM policy is needed. This is the agent shape the
-[Tinker API](../../src/agentcore_rl_toolkit/backends/tinker_api/README.md) and
+[Tinker API](../../src/agentcore_rl_toolkit/backends/tinker_api/README.md),
+[slime](../../docs/site/src/content/docs/guides/slime-backend-setup.md), and
 [SageMaker](../../src/agentcore_rl_toolkit/backends/experimental/sagemaker/SETUP.md) backends drive.
 
 `AgentCoreRuntimeApp` requires `agentcore-rl-toolkit>=0.1.5`.
