@@ -1,8 +1,10 @@
 - name: agentcore_agent
   _target_: agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop
-  agent_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
-  s3_bucket: ${oc.env:ACR_S3_BUCKET}
-  # Applied per AgentLoopWorker process; account for worker count when tuning.
+  rollout_session_backend:
+    backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
+    agentcore_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
+  # Shared by all AgentLoopWorkers in this training job.
+  rollout_concurrency: 256
   tps_limit: 8
   # Per model call; cumulative context is configured in the training script.
   max_tokens_per_turn: 8192

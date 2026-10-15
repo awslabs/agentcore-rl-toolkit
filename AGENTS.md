@@ -647,6 +647,8 @@ uv pip install -e ../../ --force-reinstall --no-deps
 - In pull request descriptions, insert newlines only for Markdown structure: paragraph boundaries, headings, list items, blockquotes, tables, code blocks, and similar constructs.
 - This pull request formatting rule does not apply to git commit messages or repository documentation; follow their existing wrapping conventions.
 - When implementing or changing behavior covered by a document in `designs/`, update the relevant design content in the same change. Do not change its `Implementation` status unless explicitly requested.
+- The `Implementation` field permits exactly three values with this capitalization: `Proposal`, `In progress`, or `Done`. Do not use synonyms, parenthetical explanations, component lists, or other qualifiers.
+- Preserve the existing `Implementation` state unless the user explicitly requests a state transition. Implementing, testing, refactoring, or adding a consumer does not authorize changing this field.
 - Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
 - Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)

@@ -19,8 +19,10 @@ def test_instantiate_from_yaml_entry():
         {
             "name": "agentcore_agent",
             "_target_": "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop",
-            "agent_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
-            "s3_bucket": "test-bucket",
+            "rollout_session_backend": {
+                "backend": "agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession",
+                "agentcore_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
+            },
             "max_tokens_per_turn": 8,
             "max_rollout_time": 60,
             "gateway_bind_host": "127.0.0.1",
@@ -28,7 +30,10 @@ def test_instantiate_from_yaml_entry():
         }
     )
 
-    with patch("agentcore_rl_toolkit.backends.verl.agent_loop.RolloutClient"):
+    with (
+        patch("agentcore_rl_toolkit.backends.verl.agent_loop.ray.get_runtime_context"),
+        patch("agentcore_rl_toolkit.backends.verl.agent_loop.ray.get_actor"),
+    ):
         loop = hydra.utils.instantiate(
             config=entry,
             trainer_config=make_trainer_config(),

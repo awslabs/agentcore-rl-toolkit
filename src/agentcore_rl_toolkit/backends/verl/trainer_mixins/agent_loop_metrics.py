@@ -73,7 +73,7 @@ class AgentLoopMetricsMixin(TrainerMixinBase):
         # to one representative per session; otherwise sessions are weighted by trajectory count.
         by_session: dict[Any, dict] = {}
         for i, ef in enumerate(efs):
-            sid = ef.get("request_id", None)
+            sid = ef.get("acr_session_id") or ef.get("request_id")
             by_session.setdefault(sid if sid is not None else f"_nosession_{i}", ef)
         session_efs = list(by_session.values())
 

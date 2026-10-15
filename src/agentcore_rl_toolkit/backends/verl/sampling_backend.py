@@ -81,7 +81,7 @@ class VerlSamplingBackend:
         if stop_reason in ("aborted", "abort"):
             # v1's FullyAsyncLLMServerClient resumes aborted generations internally,
             # so an abort surfacing here is a real failure. Raising 500s this turn on
-            # the gateway; the agent sees an HTTP error and reports it via S3.
+            # the gateway; the agent's HTTP invocation records the failure.
             raise RuntimeError(f"verl rollout aborted (stop_reason={stop_reason!r}) for session {session_id}")
 
         output_ids = list(output.token_ids)

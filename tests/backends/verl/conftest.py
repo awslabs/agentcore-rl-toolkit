@@ -117,7 +117,6 @@ class FakeTokenizer(PreTrainedTokenizerFast):
 @pytest.fixture(autouse=True)
 def reset_singletons():
     yield
-    from agentcore_rl_toolkit.backends.verl import agent_loop, gateway_host
+    from agentcore_rl_toolkit.backends.verl import gateway_host
 
-    agent_loop._reset_client_for_tests()
     gateway_host._reset_for_tests()

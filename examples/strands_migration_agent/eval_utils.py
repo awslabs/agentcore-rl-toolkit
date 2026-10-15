@@ -53,7 +53,7 @@ def prepare_payload(
         folder_uri: S3 folder URI like "s3://migration-bench/15093015999__EJServer/"
 
     Returns:
-        Payload dictionary (without _rollout config, RolloutClient adds that)
+        Task payload; the caller adds model settings under _config
     """
     folder_uri = folder_uri.rstrip("/")
     repo_name = folder_uri.split("/")[-1]

@@ -10,7 +10,6 @@
 #      that example's README; it also needs a data bucket of prepared repo tarballs)
 #      and export:
 #        export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/...
-#        export ACR_S3_BUCKET=your-results-bucket
 #   2. ACR containers must be able to reach this host on the gateway port
 #      (auto-assigned; open the trainer CPU nodes' ports to ACR egress).
 #   3. python preprocess_migrationbench.py --s3-bucket-name <data-bucket>   (once)
@@ -128,7 +127,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.8 \
     actor_rollout_ref.rollout.val_kwargs.top_k=20 \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
-    actor_rollout_ref.rollout.agent.num_workers=1 \
+    actor_rollout_ref.rollout.agent.num_workers=8 \
     actor_rollout_ref.rollout.agent.default_agent_loop=agentcore_agent \
     actor_rollout_ref.rollout.agent.agent_loop_config_path="$AGENT_LOOP_CONFIG" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \

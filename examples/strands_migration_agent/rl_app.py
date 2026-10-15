@@ -12,7 +12,7 @@ from strands.models.openai import OpenAIModel
 from strands_tools import editor, shell
 from utils import configure_codeartifact_token, load_metadata_from_s3, load_repo_from_s3, setup_repo_environment
 
-from agentcore_rl_toolkit import AgentCoreRLApp
+from agentcore_rl_toolkit import AgentCoreRuntimeApp
 
 os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
@@ -20,10 +20,9 @@ os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = AgentCoreRLApp()
+app = AgentCoreRuntimeApp()
 
 load_dotenv()
-configure_codeartifact_token()
 
 system_prompt = (
     "You are a coding agent that helps to migrate repos written in Java8 to Java17. "
@@ -46,15 +45,17 @@ system_prompt = (
 reward_fn = MigrationReward()
 
 
-@app.rollout_entrypoint
+@app.entrypoint
 def invoke_agent(payload: dict):
-    base_url = payload["_rollout"]["base_url"]
-    model_id = payload["_rollout"]["model_id"]
-    params = payload["_rollout"].get("sampling_params", {})
-    api_key = payload["_rollout"].get("api_key") or "EMPTY"
+    api_key = payload["_config"]["api_key"]
+    base_url = payload["_config"]["base_url"]
+    model_id = payload["_config"]["model_id"]
+    params = payload["_config"].get("sampling_params", {})
     tools = [shell, editor]
 
     request = InvocationRequest(**payload)
+    # AgentCore Runtime V2 snapshots startup state; fetch an unexpired Maven token for this invocation.
+    configure_codeartifact_token()
     prompt = system_prompt
     if request.require_maximal_migration:
         prompt += (
@@ -126,7 +127,7 @@ def invoke_agent(payload: dict):
         require_maximal_migration=request.require_maximal_migration,
     )
 
-    return {"rewards": reward}
+    return {"reward": reward}
 
 
 if __name__ == "__main__":

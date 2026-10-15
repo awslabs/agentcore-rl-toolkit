@@ -81,6 +81,7 @@ a2a = [
     "agentcore-rl-toolkit[rollout]",
 ]
 verl = [
+    "agentcore-rl-toolkit[rollout]",
     # For backends/verl — see its README for design and install notes.
     "verl==0.9.0",
     # verl 0.9.0 declares its core dependencies, but still omits these dependencies

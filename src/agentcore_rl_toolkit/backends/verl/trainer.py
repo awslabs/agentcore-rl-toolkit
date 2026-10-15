@@ -9,13 +9,18 @@ rather than in one recipe. Name this module in ``VERL_USE_EXTERNAL_MODULES`` to 
 Must stay importable by any verl worker: no driver-only imports at module scope.
 """
 
-from omegaconf import DictConfig, open_dict
+import ray
+from omegaconf import DictConfig, OmegaConf, open_dict
+from verl.experimental.agent_loop.utils import resolve_config_path
 from verl.trainer.ppo.v1 import (
     PPOTrainerColocateAsync,
     PPOTrainerSeparateAsync,
     PPOTrainerSync,
     register_trainer,
 )
+
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
+from agentcore_rl_toolkit.concurrency.ray_adapters import make_priority_semaphore
 
 from .trainer_mixins import (
     AdvantageZeroMetricsMixin,
@@ -49,6 +54,32 @@ class _AgentCoreTrainerBase:
         with open_dict(config):
             config.trainer.v1.trainer_mode = self._verl_trainer_mode
         super().__init__(config)
+
+    def init(self):
+        path = self.config.actor_rollout_ref.rollout.agent.agent_loop_config_path
+        budgets = set()
+        if path:
+            for entry in OmegaConf.load(resolve_config_path(path)):
+                if entry.get("_target_") != "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop":
+                    continue
+                limits = (entry.get("rollout_concurrency", 128), entry.get("tps_limit", 5))
+                if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 for value in limits):
+                    raise ValueError("rollout_concurrency and tps_limit must be positive integers")
+                budgets.add(limits)
+        if len(budgets) > 1:
+            raise ValueError("AgentCore agent loops must agree on the training job's concurrency and TPS limits")
+
+        # Retain the shared actors before verl starts the agent-loop workers.
+        self._agentcore_rollout_resources = []
+        for concurrency, tps in budgets:
+            prefix = f"agentcore-rollout-{ray.get_runtime_context().get_job_id()}"
+            self._agentcore_rollout_resources = [
+                make_priority_semaphore(f"{prefix}-concurrency", concurrency, 10_000),
+                ray.remote(LocalRateLimiter)
+                .options(name=f"{prefix}-session", num_cpus=0, get_if_exists=True)
+                .remote(tps_limit=tps),
+            ]
+        super().init()
 
 
 # One registered name per verl backend. VariableRowBatchingMixin comes last of the mixins so
