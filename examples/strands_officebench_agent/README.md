@@ -154,7 +154,7 @@ agent_arn = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/agent-id"
 [eval]
 s3_input_bucket = "s3://your-bucket/officebench/"
 s3_output_bucket = "your-output-bucket"
-model_id = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+model_id = "us.anthropic.claude-sonnet-5-5"
 # base_url = "http://your-vllm-server:8000/v1"  # uncomment for vLLM
 ```
 
@@ -165,9 +165,9 @@ To re-deploy with different network settings (e.g. attaching a VPC), re-run `age
 The model is configured at evaluation time (no redeployment needed):
 
 ```bash
-# Bedrock Claude Sonnet 4.5
-python benchmark.py --exp_id sonnet45 \
-    --model_id us.anthropic.claude-sonnet-4-5-20250929-v1:0
+# Bedrock Claude Sonnet 5.5
+python benchmark.py --exp_id sonnet55 \
+    --model_id us.anthropic.claude-sonnet-5-5
 
 # Bedrock Claude Haiku 4.5
 python benchmark.py --exp_id haiku45 \
@@ -192,7 +192,7 @@ python benchmark.py --exp_id thinking --thinking_budget 10000
 python benchmark.py --exp_id custom --temperature 0.5 --max_tokens 4096
 ```
 
-Note: thinking mode and temperature=0 are incompatible (Anthropic API requirement).
+Note: thinking mode and temperature=0 are incompatible (Anthropic API requirement). Claude Sonnet 5.5 rejects `--thinking_budget` and non-default `--temperature` or `--top_p` values (it thinks adaptively by default), so run these examples with `--model_id` set to a model that accepts them, such as Claude Haiku 4.5.
 
 ## Local Testing (no ACR)
 

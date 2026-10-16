@@ -11,7 +11,7 @@ import traceback
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5-5"
 TESTBED_DIR = "/tmp/testbed"
 
 SYSTEM_PROMPT = (
@@ -146,7 +146,10 @@ def main():
         )
 
         response = agent(task_config["task"])
-        response_text = response.message["content"][0]["text"]
+        # Join the text blocks instead of indexing content[0]: with thinking on (the default
+        # on Claude Sonnet 5.5), Strands surfaces a leading reasoningContent block.
+        content = response.message.get("content") or []
+        response_text = "".join(block["text"] for block in content if "text" in block)
 
         reward = reward_fn(testbed_dir=TESTBED_DIR, evaluation_config=task_config["evaluation"])
 

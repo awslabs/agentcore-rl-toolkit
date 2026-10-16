@@ -63,7 +63,7 @@ def main():
     parser.add_argument(
         "--model_id",
         type=str,
-        default="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        default="us.anthropic.claude-sonnet-5-5",
         help="Bedrock model ID",
     )
     args = parser.parse_args()
@@ -109,7 +109,10 @@ def main():
     )
 
     response = agent(task_config["task"])
-    response_text = response.message["content"][0]["text"]
+    # Join the text blocks instead of indexing content[0]: with thinking on (the default
+    # on Claude Sonnet 5.5), Strands surfaces a leading reasoningContent block.
+    content = response.message.get("content") or []
+    response_text = "".join(block["text"] for block in content if "text" in block)
     logger.info(f"Agent response: {response_text}")
 
     reward_fn = OfficeBenchReward()

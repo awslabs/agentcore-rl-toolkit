@@ -30,7 +30,7 @@ app = BedrockAgentCoreApp()
 
 @app.entrypoint
 def invoke_agent(payload):
-    model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
+    model = BedrockModel(model_id="us.anthropic.claude-sonnet-5-5")
     agent = Agent(
         model=model,
         tools=[calculator],
@@ -39,7 +39,9 @@ def invoke_agent(payload):
 
     user_input = payload.get("prompt")
     response = agent(user_input)
-    return response.message["content"][0]["text"]
+    # Skip the leading reasoningContent block from adaptive thinking.
+    content = response.message.get("content") or []
+    return "".join(block["text"] for block in content if "text" in block)
 
 
 if __name__ == "__main__":

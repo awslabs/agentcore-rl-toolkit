@@ -51,7 +51,7 @@ def invoke_agent(payload: dict):
     else:
         sampling = rollout_config.get("sampling_params", {})
         bedrock_kwargs = {
-            "model_id": rollout_config.get("model_id", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+            "model_id": rollout_config.get("model_id", "us.anthropic.claude-sonnet-5-5"),
             "temperature": sampling.get("temperature"),
             "top_p": sampling.get("top_p"),
             "max_tokens": sampling.get("max_tokens"),
@@ -95,7 +95,11 @@ def invoke_agent(payload: dict):
     logger.info(f"Task: {user_input}")
 
     response = agent(user_input)
-    logger.info(f"Agent response: {response.message['content'][0]['text']}")
+    # Join the text blocks instead of indexing content[0]: with thinking on (the default
+    # on Claude Sonnet 5.5), Strands surfaces a leading reasoningContent block.
+    content = response.message.get("content") or []
+    response_text = "".join(block["text"] for block in content if "text" in block)
+    logger.info(f"Agent response: {response_text}")
 
     # Collect full conversation history
     messages = [{"role": msg.get("role", "unknown"), "content": msg.get("content", [])} for msg in agent.messages]

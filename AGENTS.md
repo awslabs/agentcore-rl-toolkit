@@ -462,7 +462,7 @@ See `examples/strands_math_agent` for a complete example adapting from `basic_ap
 - This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
 
 ```diff
-- model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
+- model = BedrockModel(model_id="us.anthropic.claude-sonnet-5-5")
 - agent = Agent(model=model, tools=[calculator], system_prompt="...")
 
 - @app.entrypoint

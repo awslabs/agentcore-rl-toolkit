@@ -15,7 +15,7 @@ app = BedrockAgentCoreApp()
 
 load_dotenv()
 
-model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
+model = BedrockModel(model_id="us.anthropic.claude-sonnet-5-5")
 
 agent = Agent(
     model=model,
@@ -43,7 +43,11 @@ def invoke_agent(payload):
 
     response = agent(user_input)
 
-    return response.message["content"][0]["text"]
+    # Join the text blocks instead of indexing content[0]: Claude Sonnet 5.5 has
+    # adaptive thinking on by default, which Strands surfaces as a leading
+    # reasoningContent block, so content[0]["text"] raises KeyError.
+    content = response.message.get("content") or []
+    return "".join(block["text"] for block in content if "text" in block)
 
 
 if __name__ == "__main__":
