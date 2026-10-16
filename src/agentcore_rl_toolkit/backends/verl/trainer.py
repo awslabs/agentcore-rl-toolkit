@@ -72,11 +72,10 @@ class _AgentCoreTrainerBase:
         # Retain the shared actors before verl starts the agent-loop workers.
         self._agentcore_rollout_resources = []
         for concurrency, tps in budgets:
-            prefix = f"agentcore-rollout-{ray.get_runtime_context().get_job_id()}"
             self._agentcore_rollout_resources = [
-                make_priority_semaphore(f"{prefix}-concurrency", concurrency, 10_000),
+                make_priority_semaphore("rollout_concurrency_semaphore", concurrency, 10_000),
                 ray.remote(LocalRateLimiter)
-                .options(name=f"{prefix}-session", num_cpus=0, get_if_exists=True)
+                .options(name="session_create_rate_limiter", num_cpus=0, get_if_exists=True)
                 .remote(tps_limit=tps),
             ]
         super().init()

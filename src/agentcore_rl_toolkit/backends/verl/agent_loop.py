@@ -145,9 +145,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
         )
-        prefix = f"agentcore-rollout-{ray.get_runtime_context().get_job_id()}"
-        self._rollout_semaphore = RayPrioritySemaphore(ray.get_actor(f"{prefix}-concurrency"))
-        self._session_rate_limiter = RayRateLimiter(ray.get_actor(f"{prefix}-session"))
+        self._rollout_semaphore = RayPrioritySemaphore(ray.get_actor("rollout_concurrency_semaphore"))
+        self._session_rate_limiter = RayRateLimiter(ray.get_actor("session_create_rate_limiter"))
 
     def _validate_token_budgets(self, max_tokens_per_turn: int) -> None:
         if self.max_model_len is None or self.max_model_len <= 0:

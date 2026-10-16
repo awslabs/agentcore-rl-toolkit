@@ -30,10 +30,7 @@ def test_instantiate_from_yaml_entry():
         }
     )
 
-    with (
-        patch("agentcore_rl_toolkit.backends.verl.agent_loop.ray.get_runtime_context"),
-        patch("agentcore_rl_toolkit.backends.verl.agent_loop.ray.get_actor"),
-    ):
+    with patch("agentcore_rl_toolkit.backends.verl.agent_loop.ray.get_actor"):
         loop = hydra.utils.instantiate(
             config=entry,
             trainer_config=make_trainer_config(),

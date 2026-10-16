@@ -31,10 +31,7 @@ def mock_http_client(monkeypatch):
 
 def _make_loop(llm_client=None, *, use_v1=True, trainer_config=None, **loop_kwargs):
     loop_kwargs.setdefault("max_tokens_per_turn", 8)
-    with (
-        patch.object(al.ray, "get_runtime_context"),
-        patch.object(al.ray, "get_actor") as get_actor,
-    ):
+    with patch.object(al.ray, "get_actor") as get_actor:
         get_actor.return_value.wait_async.remote = AsyncMock()
         get_actor.return_value.acquire.remote = AsyncMock()
         get_actor.return_value.release.remote = AsyncMock()
