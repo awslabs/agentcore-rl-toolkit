@@ -31,16 +31,6 @@ if pgrep -f 'raylet|gcs_server' >/dev/null 2>&1; then
   exit 1
 fi
 
-# slime/ray/actor_group.py hardcodes the cu12-named torch_memory_saver .so; bridge it.
-TMS_SP="$(python -c 'import os, torch_memory_saver; print(os.path.dirname(os.path.dirname(torch_memory_saver.__file__)))' 2>/dev/null || true)"
-if [ -n "$TMS_SP" ] \
-   && [ ! -e "$TMS_SP/torch_memory_saver_hook_mode_preload_cu12.abi3.so" ] \
-   && [ -e "$TMS_SP/torch_memory_saver_hook_mode_preload_cu13.abi3.so" ]; then
-  ln -s "$TMS_SP/torch_memory_saver_hook_mode_preload_cu13.abi3.so" \
-        "$TMS_SP/torch_memory_saver_hook_mode_preload_cu12.abi3.so"
-  echo "[setup] linked tms cu13 .so -> cu12 name for slime compatibility"
-fi
-
 export CUDA_HOME
 export PATH="${CUDA_HOME}/bin:${PATH}"
 NVIDIA_LIBS=$(python -c "import sysconfig, os, glob; base=os.path.join(sysconfig.get_path('purelib'), 'nvidia'); print(':'.join(sorted(glob.glob(os.path.join(base, '*', 'lib')))))")
@@ -113,11 +103,12 @@ ray job submit --address="http://127.0.0.1:8265" \
   --sglang-log-level-http warning \
   --accumulate-allreduce-grads-in-fp32 \
   --attention-softmax-in-fp32 \
-  --attention-backend flash \
+  --attention-dropout 0.0 \
+  --hidden-dropout 0.0 \
+  --attention-backend fused \
   --actor-num-gpus-per-node ${NUM_GPUS} \
   --colocate \
   --train-env-vars "${TRAIN_ENV_VARS_JSON}" \
-  --megatron-to-hf-mode bridge \
   --custom-generate-function-path \
       agentcore_rl_toolkit.backends.slime.integration.rollout.generate \
   --custom-reward-post-process-path \
