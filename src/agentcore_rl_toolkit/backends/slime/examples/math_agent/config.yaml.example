@@ -2,22 +2,19 @@
 # Copy to config.yaml (gitignored) and fill in your deployment values.
 #
 #   cp config.yaml.example config.yaml
-#   # edit agent_runtime_arn
+#   # edit rollout_session_backend.agentcore_runtime_arn
 #
 # Passed to slime via --custom-config-path config.yaml.
 # All keys become attributes on slime's args namespace.
 
-# ACR deployment of examples/strands_math_agent/runtime_app.py
-agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
+# Rollout session class and its constructor kwargs, passed to
+# agentcore_rl_toolkit.rollout_session.factory.make_session. The runtime is the
+# ACR deployment of examples/strands_math_agent/runtime_app.py.
+rollout_session_backend:
+  backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
+  agentcore_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
 
 # Toolkit tunables
 gateway_port: 9090                  # rollout gateway port
 max_rollout_time: 900               # per-session rollout timeout (s)
-tps_limit: 5                        # new Runtime sessions per second
-request_tps_limit: 100              # all ACR invoke/get/stop requests per second
-
-# Number of network connections the AWS client keeps open (and reuses) to talk
-# to ACR. This is NOT a concurrency cap: it caps reused connections, not how many
-# sessions run at once. Too small value causes "Connection pool is full" warnings,
-# they are NOT errors. Setting a too large value wastes resources (idle open sockets).
-max_pool_connections: 10
+tps_limit: 5                        # new rollout sessions per second

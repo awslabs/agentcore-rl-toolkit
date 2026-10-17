@@ -7,17 +7,17 @@
     --custom-config-path /path/to/agentcore.yaml
 
     Config YAML keys:
-        agent_runtime_arn: "arn:aws:bedrock-agentcore:..."
+        rollout_session_backend:     # passed to rollout_session.factory.make_session
+          backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
+          agentcore_runtime_arn: "arn:aws:bedrock-agentcore:..."
         gateway_port: 0              # 0 = auto-assign
         max_rollout_time: 1800
-        tps_limit: 25                # new Runtime sessions per second
-        request_tps_limit: 100       # all invoke/get/stop requests per second
-        max_pool_connections: 100
+        tps_limit: 25                # new rollout sessions per second
         model_id: null               # defaults to args.hf_checkpoint
 
-The agent is an ``AgentCoreRuntimeApp``. Each rollout invokes it in the background
-with ``{**metadata.payload, "_config": {base_url, model_id, api_key}}`` and reads a
-scalar ``reward`` from the returned dict.
+Each rollout runs ``{**metadata.payload, "_config": {base_url, model_id, api_key}}``
+in its own ``RolloutSession`` and reads a scalar ``reward`` from the returned dict.
+With ``AgentCoreHttpSession``, the agent is an ``AgentCoreRuntimeApp``.
 """
 
 from __future__ import annotations
@@ -35,30 +35,28 @@ from slime.utils.misc import SingletonMeta
 from slime.utils.processing_utils import load_tokenizer
 from slime.utils.types import Sample
 
+from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
 from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 from agentcore_rl_toolkit.rollout_gateway import BaseTrace, HfTemplateRenderer, ThreadedGatewayServer, TraceRecord
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway
 from agentcore_rl_toolkit.rollout_gateway.sampling_backends.sglang_http import SglangHttpBackend
-from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
-from agentcore_rl_toolkit.runtime import AgentCoreHttpClient
+from agentcore_rl_toolkit.rollout_session.factory import make_session, resolve_backend
 
 logger = logging.getLogger(__name__)
 
 _STATUS = {s.value: Sample.Status(s.value) for s in Sample.Status}
 
-_REQUIRED = ("agent_runtime_arn",)
+_REQUIRED = ("rollout_session_backend",)
 
 
 @dataclasses.dataclass(frozen=True)
 class AgentCoreRLConfig:
-    agent_runtime_arn: str | None = None
+    rollout_session_backend: dict[str, Any] | None = None
     gateway_host: str | None = None
     model_id: str | None = None
     max_rollout_time: float = 1800.0
     tps_limit: int = 25
-    request_tps_limit: int = 100
-    max_pool_connections: int = 100
     gateway_port: int = 0
 
     @classmethod
@@ -98,13 +96,8 @@ class AgentCoreRLService(metaclass=SingletonMeta):
         self.server.start()
         self.base_url = self.server.base_url
 
-        # slime runs every generate() call on one persistent event loop, so one client
-        # (whose AWS connection pool is bound to that loop) serves the whole process.
-        self.client = AgentCoreHttpClient(
-            self.config.agent_runtime_arn,
-            max_pool_connections=self.config.max_pool_connections,
-            request_rate_limiter=LocalRateLimiter(self.config.request_tps_limit),
-        )
+        # Fail at startup, not on every rollout, if the backend path does not resolve.
+        resolve_backend(self.config.rollout_session_backend["backend"])
         self.session_rate_limiter = LocalRateLimiter(self.config.tps_limit)
         logger.info("[agentcore] gateway=%s sglang=%s model_id=%s", self.base_url, router_url, self.model_id)
 
@@ -136,15 +129,19 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
 
 
 async def _run_agent(service: AgentCoreRLService, sid: str, task: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
-    """Invoke the agent in its own Runtime session; return (result, error).
+    """Run the agent in its own rollout session; return (result, error).
 
-    Leaving the session context stops the Runtime session, including on timeout.
-    A malformed agent response raises, since it would recur on every rollout.
+    Leaving the session context shuts the session down, including on timeout.
+    A bad backend config or malformed agent response raises, since it would recur
+    on every rollout.
     """
+    state = PersistentDict({"session_id": sid}, persister=NullPersister())
+    session = make_session(sid, service.config.rollout_session_backend, state)
     try:
-        async with AgentCoreHttpSession.with_client(sid, service.client) as session:
+        async with session:
             await service.session_rate_limiter.wait_async()
             async with asyncio.timeout(service.config.max_rollout_time):
+                await session.setup(task)
                 dump = await session.run(task)
     except TimeoutError:
         return {}, f"rollout timed out after {service.config.max_rollout_time}s"

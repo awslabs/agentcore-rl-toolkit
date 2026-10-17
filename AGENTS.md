@@ -344,16 +344,15 @@ via two hook entry points, requiring no changes to slime itself:
 
 - `integration/rollout.py` — `AgentCoreRLConfig` (dataclass read from the YAML),
   `AgentCoreRLService` (singleton: one `RolloutGateway` + `ThreadedGatewayServer` +
-  `AgentCoreHttpClient` per process; slime runs every `generate` call on one persistent
-  event loop, so one client's connection pool serves them all), and
-  `generate(args, sample, sampling_params)` — the per-sample hook. Drives an
-  `AgentCoreRuntimeApp` agent (e.g. `examples/strands_math_agent/runtime_app.py`).
-  Creates a gateway session keyed by a fresh `uuid4` (= ACR `runtimeSessionId` =
-  `api_key` in the payload's `_config`, alongside `base_url` / `model_id`), runs the
-  invocation in the background through `AgentCoreHttpSession`, which stops the Runtime
-  session on exit, drains `gateway.finish_session` into `TraceRecord`s, and maps each
-  record to a slime `Sample`. `tps_limit` caps new sessions per second and
-  `request_tps_limit` caps every invoke/get/stop request. A timeout, invocation error, or
+  session-start rate limiter per process), and
+  `generate(args, sample, sampling_params)` — the per-sample hook. Creates a gateway
+  session keyed by a fresh `uuid4` (= rollout session id = `api_key` in the payload's
+  `_config`, alongside `base_url` / `model_id`), runs the task in a `RolloutSession`
+  built by `rollout_session.factory.make_session` from the `rollout_session_backend`
+  config (e.g. `AgentCoreHttpSession` for an `AgentCoreRuntimeApp` agent such as
+  `examples/strands_math_agent/runtime_app.py`; the session shuts down on exit), drains
+  `gateway.finish_session` into `TraceRecord`s, and maps each record to a slime
+  `Sample`. `tps_limit` caps new sessions per second. A timeout, invocation error, or
   agent exception scores captured turns 0; a rollout with no captured turns returns an
   `ABORTED` sample with `remove_sample=True` rather than raising — slime drops those
   rows from the batch.
@@ -387,7 +386,7 @@ and clones + installs slime + Megatron-LM from source.
 
 ```bash
 cd src/agentcore_rl_toolkit/backends/slime/examples/math_agent
-cp config.yaml.example config.yaml  # fill in agent_runtime_arn
+cp config.yaml.example config.yaml  # fill in rollout_session_backend.agentcore_runtime_arn
 SLIME_DIR=... MODEL_DIR=... TRAIN_DATA_PATH=... MODEL_TYPE=... bash train.sh
 ```
 

@@ -26,7 +26,7 @@ bash src/agentcore_rl_toolkit/backends/slime/scripts/install_slime.sh
 ```bash
 cd src/agentcore_rl_toolkit/backends/slime/examples/math_agent
 cp config.yaml.example config.yaml
-# edit config.yaml: set agent_runtime_arn, etc.
+# edit config.yaml: set rollout_session_backend.agentcore_runtime_arn, etc.
 ```
 
 ## 5. Train

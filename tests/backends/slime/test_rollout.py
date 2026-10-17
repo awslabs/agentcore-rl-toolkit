@@ -16,6 +16,7 @@ import pytest
 from agentcore_rl_toolkit.backends.slime.integration import rollout
 from agentcore_rl_toolkit.rollout_gateway.trace import Status as TraceStatus
 from agentcore_rl_toolkit.rollout_gateway.trace import TraceRecord
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.runtime import InvocationError
 
@@ -24,15 +25,20 @@ from agentcore_rl_toolkit.runtime import InvocationError
 # ---------------------------------------------------------------------------
 
 
+_ARN = "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test"
+_BACKEND = {
+    "backend": "agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession",
+    "agentcore_runtime_arn": _ARN,
+}
+
+
 def _args(**kwargs):
     defaults = dict(
-        agent_runtime_arn="arn:aws:bedrock-agentcore:us-west-2:123:runtime/test",
+        rollout_session_backend=_BACKEND,
         gateway_host=None,
         model_id=None,
         max_rollout_time=1800.0,
         tps_limit=25,
-        request_tps_limit=100,
-        max_pool_connections=100,
         gateway_port=0,
         hf_checkpoint="Qwen/Qwen2.5-0.5B",
         wandb_group=None,
@@ -44,14 +50,13 @@ def _args(**kwargs):
 
 def test_config_from_args_required_fields():
     cfg = rollout.AgentCoreRLConfig.from_args(_args())
-    assert cfg.agent_runtime_arn == "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test"
+    assert cfg.rollout_session_backend == _BACKEND
 
 
 def test_config_from_args_defaults():
     cfg = rollout.AgentCoreRLConfig.from_args(_args())
     assert cfg.max_rollout_time == 1800.0
     assert cfg.tps_limit == 25
-    assert cfg.request_tps_limit == 100
     assert cfg.gateway_port == 0
 
 
@@ -61,10 +66,10 @@ def test_config_from_args_overrides():
     assert cfg.gateway_port == 9090
 
 
-def test_config_from_args_missing_arn_raises():
-    args = _args(agent_runtime_arn=None)
-    del args.agent_runtime_arn
-    with pytest.raises(ValueError, match="agent_runtime_arn"):
+def test_config_from_args_missing_backend_raises():
+    args = _args()
+    del args.rollout_session_backend
+    with pytest.raises(ValueError, match="rollout_session_backend"):
         rollout.AgentCoreRLConfig.from_args(args)
 
 
@@ -153,7 +158,7 @@ class _Handle:
 class _FakeClient:
     """Stands in for AgentCoreHttpClient: records invocations and stopped sessions."""
 
-    runtime_arn = "arn:aws:bedrock-agentcore:us-west-2:123:runtime/test"
+    runtime_arn = _ARN
 
     def __init__(self, outcome):
         self._outcome = outcome
@@ -173,20 +178,55 @@ class _NoWait:
         pass
 
 
+@pytest.fixture(autouse=True)
+def _sessions(monkeypatch):
+    """Route make_session to an AgentCoreHttpSession over the test's fake client."""
+    made = []
+
+    def make_session(sid, cfg, state):
+        made.append((sid, cfg, state["session_id"]))
+        return AgentCoreHttpSession.with_client(sid, cfg["client"], state)
+
+    monkeypatch.setattr(rollout, "make_session", make_session)
+    return made
+
+
 def _service(client, max_rollout_time=5.0):
     return SimpleNamespace(
-        client=client,
         session_rate_limiter=_NoWait(),
-        config=SimpleNamespace(max_rollout_time=max_rollout_time),
+        config=SimpleNamespace(max_rollout_time=max_rollout_time, rollout_session_backend={"client": client}),
     )
 
 
+def test_real_factory_builds_http_session():
+    from agentcore_rl_toolkit.rollout_session.factory import make_session
+
+    state = rollout.PersistentDict({"session_id": "sid-1"}, persister=rollout.NullPersister())
+    session = make_session("sid-1", _BACKEND, state)
+    assert isinstance(session, AgentCoreHttpSession)
+    assert session._client.runtime_arn == _ARN
+
+
 @pytest.mark.asyncio
-async def test_run_agent_returns_result_and_stops_session():
+async def test_run_agent_bad_backend_config_raises(monkeypatch):
+    from agentcore_rl_toolkit.rollout_session import factory
+
+    monkeypatch.setattr(rollout, "make_session", factory.make_session)
+    service = SimpleNamespace(
+        session_rate_limiter=_NoWait(),
+        config=SimpleNamespace(max_rollout_time=5.0, rollout_session_backend={**_BACKEND, "bogus": 1}),
+    )
+    with pytest.raises(TypeError, match="bogus"):
+        await rollout._run_agent(service, "sid-1", {})
+
+
+@pytest.mark.asyncio
+async def test_run_agent_returns_result_and_stops_session(_sessions):
     client = _FakeClient({"reward": 1.0})
     task = {"prompt": "hi", "_config": {"api_key": "sid-1"}}
     result, error = await rollout._run_agent(_service(client), "sid-1", task)
     assert (result, error) == ({"reward": 1.0}, None)
+    assert _sessions == [("sid-1", {"client": client}, "sid-1")]
     assert client.invocations == [(task, "sid-1", True)]
     assert client.stopped == ["sid-1"]
 

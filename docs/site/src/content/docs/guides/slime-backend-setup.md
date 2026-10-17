@@ -68,16 +68,20 @@ cp config.yaml.example config.yaml
 ```
 
 ```yaml
-agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
+rollout_session_backend:
+  backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
+  agentcore_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
 
 gateway_port: 9090              # 0 = auto-assign
 max_rollout_time: 900           # per-session rollout timeout (s)
-tps_limit: 5                    # new Runtime sessions per second
-request_tps_limit: 100          # all ACR invoke/get/stop requests per second
-max_pool_connections: 10        # reused AWS client connections, not a concurrency cap
+tps_limit: 5                    # new rollout sessions per second
 ```
 
-`agent_runtime_arn` is required. Optional keys:
+`rollout_session_backend` is required: `backend` is the import path of a
+`RolloutSession` class, and the remaining keys are its constructor
+arguments. `AgentCoreHttpSession` invokes through the process-wide
+`bedrock-agentcore` client, which pools connections and retries throttled
+requests. Optional keys:
 `gateway_host` (defaults to the node's routable IP), `model_id` (defaults
 to `--hf-checkpoint`).
 
