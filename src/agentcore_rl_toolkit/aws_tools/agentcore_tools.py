@@ -10,7 +10,7 @@ import backoff
 from botocore.config import Config
 from pydantic import BaseModel
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def region_of(arn: str) -> str:
 @asynccontextmanager
 async def agentcore_client(region_name: str, config: Config = SESSION_CLIENT_CONFIG):
     """One ``bedrock-agentcore`` data-plane client, open for the whole block."""
-    async with (await get_aioboto3_session()).client(
+    async with (await get_async_session()).create_client(
         "bedrock-agentcore", region_name=region_name, config=config
     ) as acr:  # type: ignore
         yield acr
@@ -98,7 +98,7 @@ async def shared_agentcore_client(region_name: str) -> Any:
         if client is None:
             # Entered by hand, because this client outlives the call that first needed it.
             # The context is kept so the close below can unwind it the ordinary way.
-            context = (await get_aioboto3_session()).client(
+            context = (await get_async_session()).create_client(
                 "bedrock-agentcore", region_name=region_name, config=SESSION_CLIENT_CONFIG
             )
             client = await context.__aenter__()

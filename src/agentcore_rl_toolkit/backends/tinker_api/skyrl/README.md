@@ -82,7 +82,7 @@ Keep it for repeat deployments, or use `--state-dir` to choose a persistent loca
 
 Use **`tinker==0.24.1`** in your client environment for this SkyRL version.
 For the toolkit's training loop, follow the [training guide](../README.md)
-using the `gateway,tinker_skyrl` extras.
+using the `tinker_skyrl` extra, which includes rollout clients and the gateway.
 
 ```python
 import tinker

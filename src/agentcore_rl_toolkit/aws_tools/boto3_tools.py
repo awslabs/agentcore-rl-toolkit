@@ -1,4 +1,4 @@
-"""boto3/aioboto3 plumbing: cached sessions, self-assumed role credentials with a known
+"""boto3/aiobotocore plumbing: cached sessions, self-assumed role credentials with a known
 lifetime, and small shared helpers.
 """
 
@@ -11,17 +11,17 @@ from functools import lru_cache
 from threading import local
 from typing import Any
 
-import aioboto3
 import boto3
 import httpx
+from aiobotocore.session import AioSession
 from botocore.session import Session
 
 logger = logging.getLogger(__name__)
 
 thread_local = local()
 
-_aioboto3_lock = Lock()
-_aioboto3_credentials_ready = False
+_async_session_lock = Lock()
+_async_credentials_ready = False
 
 
 def get_boto3_session() -> boto3.Session:
@@ -31,24 +31,24 @@ def get_boto3_session() -> boto3.Session:
 
 
 @lru_cache
-def _aioboto3_session() -> aioboto3.Session:
-    return aioboto3.Session()
+def _async_session() -> AioSession:
+    return AioSession()
 
 
-async def get_aioboto3_session() -> aioboto3.Session:
-    """Return the process-wide aioboto3 session with credentials resolved.
+async def get_async_session() -> AioSession:
+    """Return the process-wide aiobotocore session with credentials resolved.
 
     ``AioSession.get_credentials()`` resolves lazily and without a lock, so a concurrent
     burst would all walk the provider chain in parallel and IMDS starts failing after a
     hundred or so calls. Resolve once behind our own lock instead.
     """
-    global _aioboto3_credentials_ready
-    session = _aioboto3_session()
-    if not _aioboto3_credentials_ready:
-        async with _aioboto3_lock:
-            if not _aioboto3_credentials_ready:
+    global _async_credentials_ready
+    session = _async_session()
+    if not _async_credentials_ready:
+        async with _async_session_lock:
+            if not _async_credentials_ready:
                 await session.get_credentials()
-                _aioboto3_credentials_ready = True
+                _async_credentials_ready = True
     return session
 
 
@@ -254,7 +254,7 @@ async def shared_sigv4_httpx_client(region: str, service: str) -> httpx.AsyncCli
     async with _httpx_lock(loop):
         client = _shared_httpx.get(key)
         if client is None:
-            session = await get_aioboto3_session()
+            session = await get_async_session()
             credentials = await session.get_credentials()
             client = httpx.AsyncClient(
                 auth=SigV4HttpxAuth(credentials, region, service),

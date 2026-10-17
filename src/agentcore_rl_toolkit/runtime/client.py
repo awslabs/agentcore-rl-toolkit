@@ -1,6 +1,6 @@
 """Async HTTP invocations and recoverable execution handles.
 
-Install ``agentcore-rl-toolkit[rollout]`` to use this client. One client shares
+Included in the base ``agentcore-rl-toolkit`` installation. One client shares
 its AWS connection pool across sessions on the same asyncio event loop.
 """
 
@@ -123,9 +123,9 @@ class AgentCoreHttpClient:
             return await self._aws_client_provider()
         async with self._open_lock:
             if self._aws_client is None:
-                from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+                from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 
-                context = (await get_aioboto3_session()).client(
+                context = (await get_async_session()).create_client(
                     "bedrock-agentcore", region_name=self.runtime_arn.split(":")[3], config=self._config
                 )
                 self._aws_client = await context.__aenter__()

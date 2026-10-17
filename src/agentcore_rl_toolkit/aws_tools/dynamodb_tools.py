@@ -7,11 +7,10 @@ import datetime as dt
 from decimal import Decimal, Inexact, Rounded, localcontext
 from typing import Any, AsyncIterator, Mapping
 
-from boto3.dynamodb.conditions import Key
-from boto3.dynamodb.types import DYNAMODB_CONTEXT
+from boto3.dynamodb.types import DYNAMODB_CONTEXT, TypeDeserializer, TypeSerializer
 from pydantic import BaseModel
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 from agentcore_rl_toolkit.aws_tools.dynamodb_control import (
     EXPERIMENT_INDEX,
     EXPERIMENT_PARTITION_KEY,
@@ -62,7 +61,8 @@ def from_dynamodb(value: Any) -> Any:
 
 
 async def update_dict(
-    table,
+    client,
+    table_name: str,
     key: dict[str, Any],
     updates: Mapping[str, Any],
     **kwargs,
@@ -88,13 +88,27 @@ async def update_dict(
         values[value_name] = value
         assignments.append(f"{name} = {value_name}")
 
-    return await table.update_item(
-        Key=key,
+    response = await client.update_item(
+        TableName=table_name,
+        Key=_serialize_item(key),
         UpdateExpression="SET " + ", ".join(assignments),
         ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
+        ExpressionAttributeValues=_serialize_item(values),
         **kwargs,
     )
+    if "Attributes" in response:
+        response["Attributes"] = _deserialize_item(response["Attributes"])
+    return response
+
+
+def _serialize_item(item: Mapping[str, Any]) -> dict:
+    serializer = TypeSerializer()
+    return {key: serializer.serialize(to_dynamodb(value)) for key, value in item.items()}
+
+
+def _deserialize_item(item: dict) -> dict:
+    deserializer = TypeDeserializer()
+    return {key: deserializer.deserialize(value) for key, value in item.items()}
 
 
 async def paginate_table(
@@ -106,7 +120,7 @@ async def paginate_table(
         yield response
 
         last_key = response.get("LastEvaluatedKey")
-        if last_key is None:
+        if not last_key:
             break
 
         kwargs["ExclusiveStartKey"] = last_key
@@ -126,19 +140,25 @@ async def get_sessions_for_experiment_run(
     """
     sessions = []
 
-    key_condition = Key(EXPERIMENT_PARTITION_KEY).eq(experiment_name)
-    if experiment_start_at is not None and len(experiment_start_at) > 0:
-        key_condition &= Key(EXPERIMENT_SORT_KEY).begins_with(experiment_start_at)
+    key_condition = "#experiment = :experiment"
+    names = {"#experiment": EXPERIMENT_PARTITION_KEY}
+    values = {":experiment": experiment_name}
+    if experiment_start_at:
+        key_condition += " AND begins_with(#started, :started)"
+        names["#started"] = EXPERIMENT_SORT_KEY
+        values[":started"] = experiment_start_at
 
-    async with (await get_aioboto3_session()).resource("dynamodb", region_name=region_name) as ddb:
-        table = await ddb.Table(table_name)
+    async with (await get_async_session()).create_client("dynamodb", region_name=region_name) as ddb:
         pages = paginate_table(
-            table.query,
+            ddb.query,
+            TableName=table_name,
             IndexName=EXPERIMENT_INDEX,
             KeyConditionExpression=key_condition,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=_serialize_item(values),
         )
         async for page in pages:
-            sessions.extend(page["Items"])
+            sessions.extend(_deserialize_item(item) for item in page["Items"])
     return sessions
 
 
@@ -148,7 +168,11 @@ async def get_session(
     table_name: str,
     region_name: str | None = None,
 ) -> dict:
-    async with (await get_aioboto3_session()).resource("dynamodb", region_name=region_name) as ddb:
-        table = await ddb.Table(table_name)
-        query = await table.query(KeyConditionExpression=Key(SESSION_KEY).eq(session_id))
-        return query["Items"][0]
+    async with (await get_async_session()).create_client("dynamodb", region_name=region_name) as ddb:
+        query = await ddb.query(
+            TableName=table_name,
+            KeyConditionExpression="#session = :session",
+            ExpressionAttributeNames={"#session": SESSION_KEY},
+            ExpressionAttributeValues=_serialize_item({":session": session_id}),
+        )
+        return _deserialize_item(query["Items"][0])

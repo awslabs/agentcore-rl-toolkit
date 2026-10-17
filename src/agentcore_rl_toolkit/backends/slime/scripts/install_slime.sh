@@ -11,7 +11,7 @@ TORCH_BACKEND=cu130               # uv --torch-backend for the PyTorch ecosystem
 export CUDA_HOME
 
 # Install agentcore-rl-toolkit
-uv pip install -e ".[gateway]"
+uv pip install -e ".[rollout,gateway]"
 
 # Install the CUDA 13 PyTorch ecosystem
 uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --torch-backend="$TORCH_BACKEND"

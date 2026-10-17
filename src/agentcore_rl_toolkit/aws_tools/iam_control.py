@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 import botocore.exceptions
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ ROLE_PROPAGATION_DELAY_SECONDS = 12
 
 async def _iam_client(region_name: str | None = None):
     """An IAM client. ``region_name`` only picks the endpoint; IAM itself is global."""
-    return (await get_aioboto3_session()).client("iam", region_name=region_name)  # type: ignore
+    return (await get_async_session()).create_client("iam", region_name=region_name)  # type: ignore
 
 
 async def current_account_id(region_name: str | None = None) -> str:
     """The account the ambient credentials are in, per STS."""
-    async with (await get_aioboto3_session()).client("sts", region_name=region_name) as sts:  # type: ignore
+    async with (await get_async_session()).create_client("sts", region_name=region_name) as sts:  # type: ignore
         return (await sts.get_caller_identity())["Account"]
 
 

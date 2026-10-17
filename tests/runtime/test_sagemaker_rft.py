@@ -1,6 +1,6 @@
 """Real SDK composition tests and an opt-in SageMaker Job Runtime integration test.
 
-Run: uv run --group sagemaker-integration pytest tests/runtime/test_sagemaker_rft.py
+Run: uv run --extra server --group sagemaker-integration pytest tests/runtime/test_sagemaker_rft.py
 """
 
 import asyncio

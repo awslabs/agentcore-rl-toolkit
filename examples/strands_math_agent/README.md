@@ -13,6 +13,12 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
+Install the deployment CLI on the machine used to deploy the agent:
+
+```bash
+uv tool install bedrock-agentcore-starter-toolkit
+```
+
 ## Setup AWS Credentials
 
 Since the basic app uses Amazon Bedrock to access Claude models, you'll need to configure AWS credentials and ensure model access. Make sure `aws sts get-caller-identity` returns the right identity. If not, follow the [developer guide](https://docs.aws.amazon.com/en_us/serverless-application-model/latest/developerguide/serverless-getting-started-set-up-credentials.html) to set up AWS Credentials. After setup, run `aws sts get-caller-identity` again to verify.
@@ -236,7 +242,7 @@ curl -X POST http://localhost:8080/invocations -H "Content-Type: application/jso
 ```
 
 Deploy with `agentcore configure --entrypoint runtime_app.py --name strands_math_agent_runtime ...` (same options as
-the RL app above), then drive it with `AgentCoreHttpClient` (requires `agentcore-rl-toolkit[rollout]`):
+the RL app above), then drive it with `AgentCoreHttpClient`:
 
 ```python
 from agentcore_rl_toolkit import AgentCoreHttpClient

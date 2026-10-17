@@ -132,6 +132,9 @@ with **BMW** on CAR-bench.
 
 ## ⚡ Getting Started
 
+The core SDK supports Python 3.11+. Training environments such as Megatron and
+the SkyRL service require Python 3.12; follow their setup guides.
+
 Install the core SDK:
 
 ```bash

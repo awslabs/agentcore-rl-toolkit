@@ -31,10 +31,8 @@ RUN git config --system core.pager cat
 # invalidate the layers above on any unrelated change in the repo. Only the
 # three paths below are copied -- the minimum hatchling builds a wheel from:
 # pyproject.toml, the README its `readme =` metadata points at, and the src/
-# layout package itself. copy.sh installs it with its declared dependencies:
-# the toolkit's top-level __init__ imports .app eagerly, so importing
-# agentcore_rl_toolkit.rollout_session.wire runs `import bedrock_agentcore` too,
-# and a --no-deps install is a package that cannot be imported at all.
+# layout package itself. copy.sh installs the a2a-server extra for the executor
+# and AgentCore app.
 COPY --from=rlpkg pyproject.toml README.md /rl_toolkit/
 COPY --from=rlpkg src/agentcore_rl_toolkit /rl_toolkit/src/agentcore_rl_toolkit/
 

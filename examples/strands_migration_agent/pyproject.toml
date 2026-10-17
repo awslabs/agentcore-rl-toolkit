@@ -22,8 +22,7 @@ py-modules = ["rl_app", "reward", "models", "utils"]
 [tool.uv]
 override-dependencies = [
     "migrationbench @ git+https://github.com/amazon-science/MigrationBench.git@19acd9eb3a402d825f200eb14cf01584eaa1f6e9",
-    # Match the root project's HTTP-client stack: aioboto3's older pin conflicts
-    # with the botocore service model required by bedrock-agentcore.
+    # aioboto3's transitive botocore pin conflicts with bedrock-agentcore's minimum version.
     "aiobotocore>=3.9.0",
     "botocore>=1.43.79",
 ]

@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [tool.uv]
-# As in the root project, aioboto3's older pin must not hold back the service model.
+# aioboto3's transitive botocore pin conflicts with bedrock-agentcore's minimum version.
 override-dependencies = ["aiobotocore>=3.9.0", "botocore>=1.43.102"]
 
 [dependency-groups]

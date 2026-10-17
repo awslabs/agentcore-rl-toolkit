@@ -22,7 +22,7 @@ COPY . .
 
 # Install local toolkit from build context, then install example deps
 RUN --mount=type=bind,from=toolkit,source=.,target=/toolkit \
-    uv pip install /toolkit && uv pip install .
+    uv pip install '/toolkit[core]' && uv pip install .
 
 RUN uv pip install aws-opentelemetry-distro==0.12.2
 

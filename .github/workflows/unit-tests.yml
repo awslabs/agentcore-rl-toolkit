@@ -10,6 +10,35 @@ on:
     branches: [main]
 
 jobs:
+  core:
+    name: Core installation (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Check bare and rollout installations
+        run: |
+          python -m pip install .
+          python -c "import agentcore_rl_toolkit; from importlib.metadata import requires; assert all('extra ==' in r for r in requires('agentcore-rl-toolkit'))"
+          python -m pip install '.[rollout]'
+          python -c "from agentcore_rl_toolkit import AgentCoreHttpClient, RolloutClient; from agentcore_rl_toolkit.sandbox import SandboxClient; from importlib.util import find_spec; assert find_spec('bedrock_agentcore') is None"
+
+      - name: Install core SDK with pip
+        run: |
+          python -m pip install '.[core]' pytest
+          python -m pip check
+
+      - name: Run import smoke tests
+        run: python -m pytest tests/test_imports.py -q
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -49,7 +78,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --group sagemaker-integration
+        run: uv sync --locked --extra server --group sagemaker-integration
 
       - name: Run SageMaker RFT tests
         run: uv run --no-sync pytest tests/runtime/test_sagemaker_rft.py -v

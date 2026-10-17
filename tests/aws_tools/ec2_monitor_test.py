@@ -7,6 +7,8 @@ import asyncio
 import unittest
 from unittest import IsolatedAsyncioTestCase, mock
 
+from botocore.exceptions import ClientError
+
 from agentcore_rl_toolkit.aws_tools.ec2_monitor import EC2Monitor, start_ec2_monitor
 
 CAPACITY_PROVIDER_ARN = "arn:aws:bedrock-agentcore:us-west-2:1234:capacity-provider/cp-test"
@@ -52,6 +54,30 @@ class RecordingMonitor(EC2Monitor):
 
 def make_monitor(**kwargs) -> RecordingMonitor:
     return RecordingMonitor(CAPACITY_PROVIDER_ARN, "sessions_table", **kwargs)
+
+
+class EC2MonitorWriteTest(IsolatedAsyncioTestCase):
+    async def test_writes_session_items_and_reports_only_successful_updates(self):
+        client = mock.AsyncMock()
+        client.update_item.side_effect = [
+            {},
+            ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "UpdateItem"),
+        ]
+        session = mock.MagicMock()
+        session.create_client.return_value.__aenter__.return_value = client
+        monitor = EC2Monitor(CAPACITY_PROVIDER_ARN, "sessions_table", write_concurrency=1)
+
+        with mock.patch(
+            "agentcore_rl_toolkit.aws_tools.ec2_monitor.get_async_session",
+            mock.AsyncMock(return_value=session),
+        ), self.assertLogs(LOGGER, level="WARNING"):
+            written = await monitor._write({"s1": "i-1", "s2": "i-2"})
+
+        self.assertEqual(written, {"s1": "i-1"})
+        self.assertEqual(monitor.stats()["write_errors"], 1)
+        for call, sid in zip(client.update_item.await_args_list, ("s1", "s2"), strict=True):
+            self.assertEqual(call.kwargs["TableName"], "sessions_table")
+            self.assertEqual(call.kwargs["Key"], {"session_id": {"S": sid}})
 
 
 class EC2MonitorPollTest(IsolatedAsyncioTestCase):

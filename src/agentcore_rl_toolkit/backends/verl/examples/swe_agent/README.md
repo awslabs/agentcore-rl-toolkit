@@ -26,13 +26,11 @@ run is a defaults list rather than a command line.
 Megatron-Bridge requires Python 3.12. From the repository root:
 
 ```bash
-uv sync --python 3.12 --extra verl --extra rollout --group verl-megatron
+uv sync --python 3.12 --extra verl --extra a2a --group verl-megatron
 ```
 
-`--extra rollout` is what the other verl recipes do not need: this loop drives
-`agentcore_rl_toolkit.rollout_session` and `.aws_tools` (aioboto3, backoff), which the
-`[verl]` extra does not pull in. The gateway's own deps (aiohttp, transformers) are
-already in `[verl]`.
+The `[verl]` extra includes rollout clients and the gateway; `[a2a]` adds the
+protocol client used by this recipe.
 
 ## Prerequisites
 

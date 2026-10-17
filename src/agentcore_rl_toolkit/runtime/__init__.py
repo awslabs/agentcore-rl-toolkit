@@ -1,6 +1,22 @@
 """HTTP invocation lifecycle for AgentCore Runtime applications."""
 
-from .app import AgentCoreRuntimeApp
-from .client import AgentCoreHttpClient, InvocationError, InvocationHandle
+from importlib import import_module
 
-__all__ = ["AgentCoreRuntimeApp", "AgentCoreHttpClient", "InvocationHandle", "InvocationError"]
+_EXPORTS = {
+    "AgentCoreRuntimeApp": ".app",
+    "AgentCoreHttpClient": ".client",
+    "InvocationHandle": ".client",
+    "InvocationError": ".client",
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    try:
+        module = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    value = getattr(import_module(module, __name__), name)
+    globals()[name] = value
+    return value

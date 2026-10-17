@@ -96,7 +96,7 @@ uv venv --python=3.12
 source .venv/bin/activate
 
 uv pip install sagemaker-train          # SageMaker Training Sessions SDK
-uv pip install -e ".[gateway]"          # rollout gateway (aiohttp + transformers)
+uv pip install -e ".[rollout,gateway]"  # rollout client and token capture
 uv pip install transformers==5.12       # version the SDK's tokenizer expects
 uv pip install wandb                    # optional, for training curves
 ```

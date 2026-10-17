@@ -21,28 +21,31 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-dependencies = [
-    "bedrock-agentcore>=1.23.1",
-    "bedrock-agentcore-starter-toolkit>=0.2.0",
-    "boto3>=1.40.55",
-    "python-dotenv>=1.0.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
+core = [
+    "agentcore-rl-toolkit[server,rollout]",
+]
+server = [
+    "bedrock-agentcore>=1.23.1",
+]
+rollout = [
+    "boto3>=1.43.79",
+    "botocore>=1.43.79",
+    "aiobotocore>=3.9.2",
+    "aiohttp>=3.9",
+    "httpx>=0.27.0",
+    "pydantic>=2",
+    "backoff",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23",
     "mypy>=1.0",
     "pre-commit>=3.0",
-    # rollout_gateway test deps (so the full suite runs without a separate install):
-    # aiohttp for adapter/server tests, transformers for renderer round-trip / E2E
-    # (>=5.0 matches the [gateway] extra: tokenizer.parse_response).
-    "aiohttp>=3.9",
-    "transformers>=5.0",
-    "tokenizers>=0.22.2",  # native async_encode used by the gateway renderer
     "openai>=1.0",
-    "agentcore-rl-toolkit[rollout]",
-    "agentcore-rl-toolkit[a2a]",
+    "agentcore-rl-toolkit[core,gateway,a2a-server]",
 ]
 gateway = [
     # The rollout capture gateway (agentcore_rl_toolkit.rollout_gateway). Trainer-side
@@ -51,37 +54,33 @@ gateway = [
     # transformers: HF tokenizer for HfTemplateRenderer — apply_chat_template plus
     # tokenizer.parse_response for the schema derender (>=5.0; the legacy schema
     # engine incl. jmespath transforms shipped in 5.0.0).
-    # jmespath: transform expressions in response schemas;
-    # transitively present via boto3 already, declared because the gateway relies on it.
+    # jmespath: transform expressions in response schemas.
     "aiohttp>=3.9",
     "transformers>=5.0",
     "tokenizers>=0.22.2",  # native async_encode
     "jmespath>=1.0",
+    "jinja2>=3.1.0",  # HF apply_chat_template; optional in transformers itself
 ]
 tinker_api = [
-    # Client only. Install [gateway] for HF rendering and trajectory capture.
+    # Includes the local gateway for HF rendering and trajectory capture.
     # SkyRL / Megatron / vLLM live in the endpoint's separate GPU environment.
+    "agentcore-rl-toolkit[rollout,gateway]",
     "tinker==0.30.1",
 ]
 tinker_skyrl = [
+    "agentcore-rl-toolkit[rollout,gateway]",
     "tinker==0.24.1",
 ]
-rollout = [
-    "aioboto3>=15.5.0",
-    "backoff",
-    "aiohttp>=3.9",
-    "pydantic",
-    "httpx>=0.27.0",
-]
 a2a-server = [
+    "agentcore-rl-toolkit[server]",
     "a2a-sdk[http-server]>=1.0.1,<2.0",
 ]
 a2a = [
-    "agentcore-rl-toolkit[a2a-server]",
     "agentcore-rl-toolkit[rollout]",
+    "a2a-sdk>=1.0.1,<2.0",
 ]
 verl = [
-    "agentcore-rl-toolkit[rollout]",
+    "agentcore-rl-toolkit[rollout,gateway]",
     # For backends/verl — see its README for design and install notes.
     "verl==0.9.0",
     # verl 0.9.0 declares its core dependencies, but still omits these dependencies
@@ -107,6 +106,7 @@ verl = [
 ]
 [dependency-groups]
 sagemaker-integration = [
+    "agentcore-rl-toolkit[rollout,gateway]",
     "sagemaker-train>=1.13.0",
     "httpx>=0.27.0",
     "openai>=1.0",
@@ -173,13 +173,6 @@ conflicts = [
 ]
 override-dependencies = [
     { package = { name = "verl", version = "0.9.0" }, dependencies = ["transformers==5.12.1"] },
-    # aiobotocore caps botocore (3.9.0 pins <1.43.57), which strands the
-    # bedrock-agentcore-control model on a revision predating the capacity-provider
-    # API that aws_tools.agentcore_control calls. Override the cap so the newer
-    # service model wins; without this, create_capacity_provider raises
-    # OperationNotFoundError and agentcore_control_test.py cannot even collect.
-    "aiobotocore>=3.9.0",
-    "botocore>=1.43.79",
 ]
 
 [tool.uv.dependency-groups]
