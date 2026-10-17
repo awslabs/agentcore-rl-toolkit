@@ -8,7 +8,7 @@ import datetime as dt
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Iterator, Mapping, Protocol, Self, runtime_checkable
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 from agentcore_rl_toolkit.aws_tools.dynamodb_tools import update_dict
 
 
@@ -130,7 +130,7 @@ class DynamoDBPersister:
         self._table_name = table_name
         self._key = key
         self._region_name = region_name
-        self._table: Any = None
+        self._client: Any = None
 
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator[Self, None]:
@@ -140,28 +140,26 @@ class DynamoDBPersister:
         event-loop CPU at high concurrency. Exiting closes the client, so every
         persist must be awaited inside. Blocks may nest.
         """
-        session = await get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self._region_name) as dynamodb:
-            table = await dynamodb.Table(self._table_name)
-            outer, self._table = self._table, table
+        session = await get_async_session()
+        async with session.create_client("dynamodb", region_name=self._region_name) as dynamodb:
+            outer, self._client = self._client, dynamodb
             try:
                 yield self
             finally:
-                self._table = outer
+                self._client = outer
 
     async def persist(self, data: Mapping[str, Any]) -> None:
         updates = {k: v for k, v in data.items() if k not in self._key}
         if not updates:
             return
 
-        if self._table is not None:
-            await update_dict(self._table, self._key, updates)
+        if self._client is not None:
+            await update_dict(self._client, self._table_name, self._key, updates)
             return
 
-        session = await get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self._region_name) as dynamodb:
-            table = await dynamodb.Table(self._table_name)
-            await update_dict(table, self._key, updates)
+        session = await get_async_session()
+        async with session.create_client("dynamodb", region_name=self._region_name) as dynamodb:
+            await update_dict(dynamodb, self._table_name, self._key, updates)
 
 
 class NullPersister:

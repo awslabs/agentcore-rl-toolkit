@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 import botocore.exceptions
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ EXPERIMENT_INDEX_SCHEMA = {
 
 @asynccontextmanager
 async def _dynamodb_client(region_name: str):
-    async with (await get_aioboto3_session()).client("dynamodb", region_name=region_name) as ddb:  # type: ignore
+    async with (await get_async_session()).create_client("dynamodb", region_name=region_name) as ddb:  # type: ignore
         yield ddb
 
 

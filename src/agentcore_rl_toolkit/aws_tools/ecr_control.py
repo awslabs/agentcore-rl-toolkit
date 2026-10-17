@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 
 import botocore.exceptions
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +29,13 @@ SECRET_DESCRIPTION = "Docker Hub credentials for an ECR pull through cache rule"
 
 @asynccontextmanager
 async def _ecr_client(region_name: str):
-    async with (await get_aioboto3_session()).client("ecr", region_name=region_name) as ecr:  # type: ignore
+    async with (await get_async_session()).create_client("ecr", region_name=region_name) as ecr:  # type: ignore
         yield ecr
 
 
 @asynccontextmanager
 async def _secrets_client(region_name: str):
-    async with (await get_aioboto3_session()).client("secretsmanager", region_name=region_name) as sm:  # type: ignore
+    async with (await get_async_session()).create_client("secretsmanager", region_name=region_name) as sm:  # type: ignore
         yield sm
 
 

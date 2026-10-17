@@ -3,7 +3,7 @@
 import logging
 import urllib.request
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session, tags_to_map
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session, tags_to_map
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,8 @@ def instance_to_session(i):
 
 async def find_running_instances(capacity_provider_arn: str, session_prefix: str | None = None):
     region_name = capacity_provider_arn.split(":")[3]
-    session = await get_aioboto3_session()
-    async with session.client("ec2", region_name=region_name) as ec2:  # type: ignore
+    session = await get_async_session()
+    async with session.create_client("ec2", region_name=region_name) as ec2:  # type: ignore
         paginator = ec2.get_paginator("describe_instances")
         pages = paginator.paginate(
             Filters=[

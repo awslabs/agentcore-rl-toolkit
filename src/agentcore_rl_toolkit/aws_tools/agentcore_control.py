@@ -9,7 +9,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 from agentcore_rl_toolkit.aws_tools.iam_control import (
     current_account_id,
     ensure_instance_profile,
@@ -36,7 +36,7 @@ INSTANCE_LIFECYCLE = {
 
 @asynccontextmanager
 async def _control_client(region_name: str):
-    async with (await get_aioboto3_session()).client("bedrock-agentcore-control", region_name=region_name) as acrc:  # type: ignore
+    async with (await get_async_session()).create_client("bedrock-agentcore-control", region_name=region_name) as acrc:  # type: ignore
         yield acrc
 
 

@@ -18,7 +18,7 @@ RUN pip install "bedrock-agentcore>=1.0.3" "boto3>=1.43.68"
 # The toolkit source (staged by build_push.sh) provides SandboxClient + the
 # @rollout_entrypoint SDK (AgentCoreRLApp).
 COPY _toolkit /toolkit
-RUN pip install /toolkit
+RUN pip install '/toolkit[core]'
 
 # The local harbor_sandbox package (staged by build_push.sh) provides
 # HarborSandboxClient; /app is on sys.path when `python harness.py` runs.

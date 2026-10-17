@@ -2,7 +2,7 @@
 """Unit tests for the ACR data plane helpers: the process-wide ``bedrock-agentcore`` client
 (one per region per event loop however many callers ask for it, opened once under a burst,
 and reopened after a close), the session warm-up and its retry through the container
-readiness race, and the best-effort session stop. Fake aioboto3 session, no AWS.
+readiness race, and the best-effort session stop. Fake aiobotocore session, no AWS.
 """
 
 import asyncio
@@ -37,7 +37,7 @@ class FakeClient:
 
 
 class FakeClientContext:
-    """What ``session.client(...)`` returns: one client, opened and closed by hand here."""
+    """What ``session.create_client(...)`` returns: one client, opened and closed by hand here."""
 
     def __init__(self, client: FakeClient, opens: list[FakeClient]):
         self.client = client
@@ -57,7 +57,7 @@ class FakeSession:
     def __init__(self):
         self.opened: list[FakeClient] = []
 
-    def client(self, service: str, region_name: str, config: Any = None) -> FakeClientContext:
+    def create_client(self, service: str, region_name: str, config: Any = None) -> FakeClientContext:
         assert service == "bedrock-agentcore"
         return FakeClientContext(FakeClient(region_name, config), self.opened)
 
@@ -65,7 +65,7 @@ class FakeSession:
 class SharedClientTest(IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.session = FakeSession()
-        patch = mock.patch(f"{MODULE}.get_aioboto3_session", mock.AsyncMock(return_value=self.session))
+        patch = mock.patch(f"{MODULE}.get_async_session", mock.AsyncMock(return_value=self.session))
         patch.start()
         self.addCleanup(patch.stop)
         self.addAsyncCleanup(close_shared_agentcore_clients)

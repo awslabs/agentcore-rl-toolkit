@@ -8,7 +8,7 @@ This document provides context, patterns, and guidelines for AI coding assistant
 
 ```bash
 # Install dependencies (root package)
-uv sync
+uv sync --extra core
 
 # Run tests
 uv run pytest tests/
@@ -188,9 +188,13 @@ drains the tree into `list[TraceRecord]`.
   `TraceRecord`s — that stamping lives in the (not-yet-landed) dispatch layer, so this
   cross-session case is not wired in this package yet.
 
-**Dependencies.** The gateway is trainer-side and lives behind extras — the base install
-(agent-side `AgentCoreRLApp` / `RolloutClient`) stays lean:
-- `pip install agentcore-rl-toolkit[gateway]` → `aiohttp` + `transformers` + `jmespath`.
+**Dependencies.** The bare package has no external dependencies. Recommend
+`pip install 'agentcore-rl-toolkit[core]'` for general use: `[core]` combines
+`[server]` (agent apps) and `[rollout]` (clients, sessions, sandbox, and AWS helpers).
+Trainer environments use `[rollout]` without the server SDK. Root and runtime
+package exports are loaded on first access. The gateway lives behind extras:
+- `pip install agentcore-rl-toolkit[gateway]` → `aiohttp` + `transformers` + `tokenizers`
+  + `jmespath` + `jinja2`.
 - Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
   lookup in `rollout_gateway/response_schemas.py`), `HfTemplateRenderer` derenders the
   whole output in one pass via `tokenizer.parse_response(text, schema=...)` — reasoning,
@@ -207,8 +211,9 @@ drains the tree into `list[TraceRecord]`.
   backend (`backends/slime/`) uses the default schema-based parsing (`HfTemplateRenderer` with no custom parsers); injecting the same
   SGLang-native parsers via the `reasoning_parser` / `tool_parser` kwargs is a natural
   extension if tool-bearing or reasoning-bearing models are served.
-- For Tinker API training (`backends/tinker_api/`), install `[gateway,tinker_api]`
-  for the official service or `[gateway,tinker_skyrl]` for the tested SkyRL version.
+- For Tinker API training (`backends/tinker_api/`), install `[tinker_api]`
+  for the official service or `[tinker_skyrl]` for the tested SkyRL version.
+  Both extras include rollout and gateway dependencies, as does `[verl]`.
   `TinkerSdkBackend` uses the Tinker SDK for token sampling and the gateway uses
   `HfTemplateRenderer`. SkyRL and its GPU dependencies live in a separate service
   environment. The synchronous recipe and instructions for connecting to an existing endpoint are in
@@ -514,6 +519,7 @@ Each example in `/examples` contains `basic_app.py` and `rl_app.py` to demonstra
 This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aws/bedrock-agentcore-starter-toolkit) for deployment:
 - CLI tool to generate Dockerfiles, build images, push to ECR, and launch on ACR
 - We prioritize container (ECR image) deployment for operational simplicity
+- Install separately with `uv tool install bedrock-agentcore-starter-toolkit`.
 
 **Current workflow:**
 1. Dockerfiles are generated in `examples/{agent_name}/.bedrock_agentcore/{app_name}/Dockerfile`
@@ -642,7 +648,7 @@ source .venv/bin/activate
 
 To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unreleased changes):
 ```bash
-uv pip install -e ../../ --force-reinstall --no-deps
+uv pip install -e '../../[core]'
 ```
 
 ### Code Conventions

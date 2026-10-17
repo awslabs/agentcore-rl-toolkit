@@ -11,7 +11,7 @@ import time
 from contextlib import suppress
 from typing import Any
 
-from agentcore_rl_toolkit.aws_tools.boto3_tools import get_aioboto3_session
+from agentcore_rl_toolkit.aws_tools.boto3_tools import get_async_session
 from agentcore_rl_toolkit.aws_tools.dynamodb_tools import update_dict
 from agentcore_rl_toolkit.aws_tools.ec2_tools import find_running_instances, instance_to_session
 
@@ -116,16 +116,16 @@ class EC2Monitor:
             return {}
 
         semaphore = asyncio.Semaphore(self.write_concurrency)
-        session = await get_aioboto3_session()
-        async with session.resource("dynamodb", region_name=self.region_name) as dynamodb:  # type: ignore
-            table = await dynamodb.Table(self.dynamodb_table)
+        session = await get_async_session()
+        async with session.create_client("dynamodb", region_name=self.region_name) as dynamodb:
 
             async def write_one(session_id: str, instance_id: str):
                 async with semaphore:
                     # An upsert: a session with no item yet is created here and
                     # filled in by its agent loop later.
                     return await update_dict(
-                        table,
+                        dynamodb,
+                        self.dynamodb_table,
                         {"session_id": session_id},
                         {"ec2_instance_id": instance_id},
                     )

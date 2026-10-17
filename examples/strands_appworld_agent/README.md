@@ -20,7 +20,7 @@ git lfs install
 uv venv --python 3.12
 source .venv/bin/activate
 UV_GIT_LFS=1 uv pip install -e .
-uv pip install -e ../../ --force-reinstall --no-deps  # install the parent toolkit
+uv pip install -e '../../[core]'  # install the parent toolkit
 ```
 
 After installing, set up AppWorld data:

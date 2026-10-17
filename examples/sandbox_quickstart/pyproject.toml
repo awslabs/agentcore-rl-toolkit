@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Run shell commands in an arbitrary Docker image on AgentCore Runtime"
 requires-python = ">=3.11"
 dependencies = [
-    "agentcore-rl-toolkit>=0.1.3",
+    "agentcore-rl-toolkit[rollout]>=0.1.3",
     "bedrock-agentcore-starter-toolkit>=0.2.0",
 ]
 
