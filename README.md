@@ -138,20 +138,11 @@ the SkyRL service require Python 3.12; follow their setup guides.
 Install the core SDK:
 
 ```bash
-pip install 'agentcore-rl-toolkit[core]'
+pip install agentcore-rl-toolkit
 ```
 
-Or use `uv add 'agentcore-rl-toolkit[core]'`. The `[core]` extra includes server,
-rollout, session, and sandbox client dependencies. Use `[server]` for agent images
-or `[rollout]` for clients without the server SDK. The bare package has no external
-dependencies.
-
-Use `[gateway]` for standalone token capture, `[a2a]` for A2A sessions, or a training
-extra such as `[tinker_api]`, `[tinker_skyrl]`, or `[verl]`; each training extra
-includes rollout and gateway dependencies. Follow the backend setup guides for configuration.
-
-Install the deployment CLI separately with
-`uv tool install bedrock-agentcore-starter-toolkit`.
+Or use `uv add agentcore-rl-toolkit`. Training backends require additional
+dependencies and configuration described in their setup guides.
 
 1. **Start with an agent.** Try the [math agent](examples/strands_math_agent/README.md)
    for a small end-to-end example, or choose a task from [Example Agents](#example-agents).

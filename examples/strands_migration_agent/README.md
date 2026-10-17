@@ -90,8 +90,7 @@ cd $MIGRATION_DIR
 
 uv venv --python 3.13
 source .venv/bin/activate
-uv pip install -e .
-uv pip install -e '../../[core]' # install the parent repo
+uv pip install -e . -e '../../[core]'  # example and local SDK
 ```
 
 ## Run locally

@@ -76,8 +76,7 @@ source .venv/bin/activate
 #    a) the example's own deps (pyproject.toml)
 #    b) agentcore-rl-toolkit from local source (so unreleased SDK changes are picked up)
 #    c) the agentcore CLI (separate AWS tool, used in the deploy steps below)
-uv pip install -e .
-uv pip install -e '../../[core]'
+uv pip install -e . -e '../../[core]'
 uv pip install bedrock-agentcore-starter-toolkit
 ```
 

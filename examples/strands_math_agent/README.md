@@ -224,7 +224,7 @@ HTTP instead of S3, so no bucket or S3 IAM policy is needed. This is the agent s
 [Tinker API](../../src/agentcore_rl_toolkit/backends/tinker_api/README.md) and
 [SageMaker](../../src/agentcore_rl_toolkit/backends/experimental/sagemaker/SETUP.md) backends drive.
 
-`AgentCoreRuntimeApp` requires `agentcore-rl-toolkit[server]>=0.1.5`.
+`AgentCoreRuntimeApp` requires `agentcore-rl-toolkit>=0.1.5`.
 
 ```bash
 python runtime_app.py

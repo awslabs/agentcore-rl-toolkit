@@ -31,8 +31,7 @@ cd examples/strands_officebench_agent
 
 uv venv --python 3.12
 source .venv/bin/activate
-uv pip install -e .
-uv pip install -e '../../[core]'  # install agentcore-rl-toolkit
+uv pip install -e . -e '../../[core]'  # example and local SDK
 ```
 
 ## Quick Start
@@ -203,8 +202,7 @@ Install dependencies and set up the environment:
 cd examples/strands_officebench_agent
 uv venv --python 3.12
 source .venv/bin/activate
-uv pip install -e .
-uv pip install -e '../../[core]'
+uv pip install -e . -e '../../[core]'
 
 # The OfficeBench app scripts hardcode /testbed/ as the working directory.
 # Create a symlink so local runs write to /tmp/testbed/ instead:

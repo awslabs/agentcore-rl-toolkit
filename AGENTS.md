@@ -188,12 +188,15 @@ drains the tree into `list[TraceRecord]`.
   `TraceRecord`s — that stamping lives in the (not-yet-landed) dispatch layer, so this
   cross-session case is not wired in this package yet.
 
-**Dependencies.** The bare package has no external dependencies. Recommend
-`pip install 'agentcore-rl-toolkit[core]'` for general use: `[core]` combines
+**Dependencies.** This checkout's bare package has no external dependencies. Use
+`pip install -e '.[core]'` from the repository root: `[core]` combines
 `[server]` (agent apps) and `[rollout]` (clients, sessions, sandbox, and AWS helpers).
+`[core]` and `[server]` are not published yet. Keep PyPI-based examples pinned to 0.1.6
+without the new `[core]` / `[server]` extras until a release provides them; source
+and wheel installations must use extras from the artifact they actually install.
 Trainer environments use `[rollout]` without the server SDK. Root and runtime
 package exports are loaded on first access. The gateway lives behind extras:
-- `pip install agentcore-rl-toolkit[gateway]` → `aiohttp` + `transformers` + `tokenizers`
+- `uv sync --extra gateway` → `aiohttp` + `transformers` + `tokenizers`
   + `jmespath` + `jinja2`.
 - Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
   lookup in `rollout_gateway/response_schemas.py`), `HfTemplateRenderer` derenders the
@@ -648,7 +651,7 @@ source .venv/bin/activate
 
 To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unreleased changes):
 ```bash
-uv pip install -e '../../[core]'
+uv pip install -e . -e '../../[core]'
 ```
 
 ### Code Conventions
