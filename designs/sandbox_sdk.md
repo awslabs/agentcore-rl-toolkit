@@ -109,6 +109,11 @@ different IDs permit intentionally identical commands.
 `ExecResult` contains `exit_code`, `stdout`, `stderr`, `timed_out`, and per-stream
 truncation flags. Nonzero exit codes are returned as normal result data.
 
+The SDK ignores unknown result fields and validates the types of known fields.
+`exit_code`, `stdout`, `stderr`, and `timed_out` are required; omitted truncation
+flags default to false. Missing required fields or invalid types raise
+`SandboxProtocolError`.
+
 An execution deadline raises `ExecTimeoutError`, a subclass of `ExecError`.
 Its `.result` contains the persisted `ExecResult`, including partial output and
 the process's exit code; `.handle` identifies the completed invocation. Foreground

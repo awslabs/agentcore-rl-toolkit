@@ -19,6 +19,12 @@ from agentcore_rl_toolkit.sandbox import (
 
 FAKE_ARN = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/sandbox-test"
 FAKE_SESSION_ID = "a" * 40
+EXEC_RESULT = {
+    "exit_code": 0,
+    "stdout": "hello",
+    "stderr": "warn",
+    "timed_out": False,
+}
 
 
 def mock_streaming_body(data: dict) -> io.BytesIO:
@@ -40,12 +46,7 @@ def set_execution_response(mock_acr, status="completed", result=None, error=None
             if error is not None:
                 response["error"] = error
             else:
-                response["result"] = result or {
-                    "exit_code": 0,
-                    "stdout": "hello",
-                    "stderr": "warn",
-                    "timed_out": False,
-                }
+                response["result"] = result if result is not None else EXEC_RESULT
         return {"response": mock_streaming_body(response)}
 
     mock_acr.invoke_agent_runtime.side_effect = respond
@@ -162,6 +163,54 @@ class TestExec:
         assert payload["_agentcore_runtime"]["background"] is False
         assert payload["_agentcore_runtime"]["invocation_id"]
 
+    @pytest.mark.parametrize("background", [False, True])
+    def test_extra_result_fields_ignored(self, background):
+        client, mock_acr = make_client_and_mock()
+        set_execution_response(
+            mock_acr,
+            result={**EXEC_RESULT, "output_complete": False, "future": {"detail": "value"}},
+        )
+        result = client.attach(FAKE_SESSION_ID).exec(["cmd"], background=background)
+        if background:
+            result = result.result()
+        assert result == ExecResult(**EXEC_RESULT, stdout_truncated=False, stderr_truncated=False)
+
+    @pytest.mark.parametrize("field", ["exit_code", "stdout", "stderr", "timed_out"])
+    def test_missing_required_result_field(self, field):
+        client, mock_acr = make_client_and_mock()
+        set_execution_response(mock_acr, result={key: value for key, value in EXEC_RESULT.items() if key != field})
+        with pytest.raises(SandboxProtocolError, match=f"missing {field}"):
+            client.attach(FAKE_SESSION_ID).exec(["cmd"])
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("exit_code", "0"),
+            ("exit_code", False),
+            ("exit_code", 0.0),
+            ("stdout", None),
+            ("stderr", []),
+            ("timed_out", "false"),
+            ("timed_out", 0),
+            ("stdout_truncated", "false"),
+            ("stderr_truncated", 0),
+        ],
+    )
+    def test_invalid_result_field_type(self, field, value):
+        client, mock_acr = make_client_and_mock()
+        set_execution_response(mock_acr, result={**EXEC_RESULT, field: value})
+        with pytest.raises(SandboxProtocolError, match=f"{field} must be"):
+            client.attach(FAKE_SESSION_ID).exec(["cmd"])
+
+    @pytest.mark.parametrize("body", [{}, {"result": None}, {"result": []}, {"result": "invalid"}])
+    def test_missing_or_non_object_result(self, body):
+        client, mock_acr = make_client_and_mock()
+        mock_acr.invoke_agent_runtime.return_value = {
+            "response": mock_streaming_body({"version": 1, "invocation_id": "malformed", "status": "completed", **body})
+        }
+        with pytest.raises(SandboxProtocolError, match="expected a JSON object"):
+            client.attach(FAKE_SESSION_ID).exec(["cmd"], invocation_id="malformed")
+
     @pytest.mark.parametrize("exit_code", [3, -1])
     def test_nonzero_exits_are_data(self, exit_code):
         client, mock_acr = make_client_and_mock()
@@ -194,7 +243,7 @@ class TestExec:
             "stdout_truncated": True,
             "stderr_truncated": False,
         }
-        set_execution_response(mock_acr, result=result)
+        set_execution_response(mock_acr, result={**result, "output_complete": False})
         with pytest.raises(ExecTimeoutError, match="execution timed out") as caught:
             client.attach(FAKE_SESSION_ID).exec(["cmd"], invocation_id="deadline")
         assert caught.value.result == ExecResult(**result)
@@ -231,12 +280,15 @@ class TestExec:
     def test_network_failure_retains_handle_and_original_error(self):
         client, mock_acr = make_client_and_mock()
         error = ClientError(
-            {"Error": {"Code": "InternalServerException", "Message": "lost response"}}, "InvokeAgentRuntime"
+            {"Error": {"Code": "RuntimeClientError", "Message": "Received error (502) from runtime"}},
+            "InvokeAgentRuntime",
         )
         mock_acr.invoke_agent_runtime.side_effect = error
         with pytest.raises(ExecError) as caught:
             client.attach(FAKE_SESSION_ID).exec(["cmd"])
         assert caught.value.__cause__ is error
+        assert "ClientError" in str(caught.value)
+        assert str(error) in str(caught.value)
         handle = caught.value.handle
         payload = json.loads(mock_acr.invoke_agent_runtime.call_args.kwargs["payload"])
         assert handle.invocation_id == payload["_agentcore_runtime"]["invocation_id"]
@@ -293,7 +345,7 @@ class TestExecHandle:
         complete = {
             **pending,
             "status": "completed",
-            "result": {"exit_code": 0, "stdout": "done", "stderr": "", "timed_out": False},
+            "result": {**EXEC_RESULT, "stdout": "done", "stderr": ""},
         }
         mock_acr.invoke_agent_runtime.side_effect = [
             {"response": mock_streaming_body(pending)},
