@@ -40,6 +40,7 @@ export default defineConfig({
 				{
 					label: 'Setup Guide',
 					items: [
+						{ label: 'Installation', slug: 'guides/installation' },
 						{ label: 'Prepare agent for RL', slug: 'guides/agent-adaptation' },
 						{
 							label: 'Training Backends',

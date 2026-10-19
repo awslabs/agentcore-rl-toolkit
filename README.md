@@ -138,11 +138,13 @@ the SkyRL service require Python 3.12; follow their setup guides.
 Install the core SDK:
 
 ```bash
-pip install agentcore-rl-toolkit
+pip install 'agentcore-rl-toolkit[core]'
 ```
 
-Or use `uv add agentcore-rl-toolkit`. Training backends require additional
-dependencies and configuration described in their setup guides.
+Or use `uv add 'agentcore-rl-toolkit[core]'`. The core SDK includes agent apps and
+rollout clients. See the
+[installation guide](https://awslabs.github.io/agentcore-rl-toolkit/guides/installation/)
+for component-specific dependencies and the deployment CLI.
 
 1. **Start with an agent.** Try the [math agent](examples/strands_math_agent/README.md)
    for a small end-to-end example, or choose a task from [Example Agents](#example-agents).
