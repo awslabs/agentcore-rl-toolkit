@@ -21,6 +21,7 @@ import logging
 import re
 import time
 import uuid
+from dataclasses import MISSING, fields
 
 import boto3
 from botocore.config import Config
@@ -213,7 +214,10 @@ class Sandbox:
         try:
             response = self._invoke_execution("start", handle.invocation_id, background=background, **body)
         except Exception as exc:
-            raise ExecError("start/wait failed; use this handle to recover the execution", handle) from exc
+            raise ExecError(
+                f"Execution request failed; use this handle to recover the execution: {type(exc).__name__}: {exc}",
+                handle,
+            ) from exc
         if background:
             return handle
         if response["status"] == "in_progress":
@@ -360,7 +364,7 @@ class ExecHandle:
         if "error" in response:
             error = response["error"]
             raise ExecError(f"{error['code']}: {error['message']}", self)
-        result = ExecResult(**response["result"])
+        result = _parse_exec_result(response.get("result"))
         if result.timed_out:
             raise ExecTimeoutError(self, result)
         return result
@@ -390,3 +394,17 @@ class ExecTimeoutError(ExecError):
     def __init__(self, handle: ExecHandle, result: ExecResult):
         super().__init__("execution timed out", handle)
         self.result = result
+
+
+def _parse_exec_result(value: object) -> ExecResult:
+    if not isinstance(value, dict):
+        raise SandboxProtocolError("Invalid execution result: expected a JSON object")
+    parsed = {}
+    for field in fields(ExecResult):
+        item = value.get(field.name, field.default)
+        if item is MISSING:
+            raise SandboxProtocolError(f"Invalid execution result: missing {field.name}")
+        if type(item) is not field.type:
+            raise SandboxProtocolError(f"Invalid execution result: {field.name} must be {field.type.__name__}")
+        parsed[field.name] = item
+    return ExecResult(**parsed)

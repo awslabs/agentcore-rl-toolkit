@@ -29,14 +29,14 @@ Qwen2.5-32B-Instruct) see
 - A GPU cluster with **CUDA 13** installed (the scripts default to
   `/usr/local/cuda-13.0`).
 - Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
-- AWS credentials with permission to invoke an AgentCore Runtime and
-  read/write an S3 bucket.
-- An AgentCore Runtime deployment of your agent — follow the
-  [Prepare agent for RL](/agentcore-rl-toolkit/guides/agent-adaptation/)
-  guide. The agent's model client must forward
-  `payload["_rollout"]["api_key"]`, which carries the gateway session key.
-  Save the resulting **runtime ARN**.
-- An S3 bucket for rollout result delivery.
+- AWS credentials with permission to invoke and stop AgentCore Runtime
+  sessions.
+- An AgentCore Runtime deployment of an `AgentCoreRuntimeApp` agent, such as
+  [`examples/strands_math_agent/runtime_app.py`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/runtime_app.py).
+  The agent's model client must forward the `api_key` from the payload's
+  `_config` field (`config.get("api_key") or "EMPTY"`), which carries the
+  gateway session key, and return `{"reward": <float>}`. Save the resulting
+  **runtime ARN**.
 - Network routing from the AgentCore containers to the trainer node's
   gateway port.
 
@@ -50,9 +50,9 @@ export CUDA_HOME=/usr/local/cuda-13.0
 bash src/agentcore_rl_toolkit/backends/slime/scripts/install_slime.sh
 ```
 
-The script installs the toolkit with the `gateway` extra, the cu13
+The script installs the toolkit with the `gateway` and `rollout` extras, the cu13
 PyTorch stack (flash-attn, Transformer Engine, Apex, torch_memory_saver,
-Megatron-Bridge, sglang), clones Megatron-LM and slime into the current
+sglang), clones Megatron-LM and slime into the current
 directory at pinned commits, and applies slime's official Megatron and
 sglang patches.
 
@@ -68,17 +68,20 @@ cp config.yaml.example config.yaml
 ```
 
 ```yaml
-agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
-s3_bucket: "your-s3-bucket-name"
+rollout_session_backend:
+  backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
+  agentcore_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"
 
-exp_id: "gsm8k-grpo-train"      # defaults to the wandb group/project
 gateway_port: 9090              # 0 = auto-assign
 max_rollout_time: 900           # per-session rollout timeout (s)
-tps_limit: 5                    # ACR invocation TPS quota
-max_pool_connections: 10        # reused AWS client connections, not a concurrency cap
+tps_limit: 5                    # new rollout sessions per second
 ```
 
-`agent_runtime_arn` and `s3_bucket` are required. Optional keys:
+`rollout_session_backend` is required: `backend` is the import path of a
+`RolloutSession` class, and the remaining keys are its constructor
+arguments. `AgentCoreHttpSession` invokes through the process-wide
+`bedrock-agentcore` client, which pools connections and retries throttled
+requests. Optional keys:
 `gateway_host` (defaults to the node's routable IP), `model_id` (defaults
 to `--hf-checkpoint`).
 
@@ -93,10 +96,11 @@ request:
 
 - **`prompt`** — read by slime through `--input-key prompt` (length
   filtering, positional bookkeeping). The agent does not see it.
-- **`metadata.payload`** — sent **verbatim** as the `payload` dict your
-  `@rollout_entrypoint` function receives. Put every per-rollout field the
-  agent needs here (user prompt, ground-truth answer, task IDs, etc.). A
-  row without a `payload` dict fails the rollout.
+- **`metadata.payload`** — sent **verbatim** (plus the `_config` field) as
+  the `payload` dict your `@app.entrypoint` function receives. Put every
+  per-rollout field the agent needs here (user prompt, ground-truth answer,
+  task IDs, etc.). A row without a `payload` dict, or whose payload already
+  has a `_config` field, fails the rollout.
 
 Example (GSM8K):
 
@@ -110,7 +114,10 @@ Example (GSM8K):
 stale SGLang/Ray processes, applies the CUDA 13 environment fixes, starts a
 Ray head, and submits slime's `train.py` with the two hooks and your
 config. Defaults target **8 × H100** (`NUM_GPUS=8`, tensor parallel 2, two
-GPUs per rollout engine).
+GPUs per rollout engine). It uses `--attention-backend fused` (cuDNN), which
+supports slime's packed-sequence layout only on Hopper (sm90) and newer GPUs;
+on Ampere, TE finds no usable attention backend and training fails at the
+first log-prob computation.
 
 ```bash
 SLIME_DIR=/path/to/slime \
@@ -137,14 +144,13 @@ project), and keep the three `--custom-*` flags.
 
 ## Behavior notes
 
-- **Rewards are agent-owned.** The hook reads `rewards` from the agent's
-  returned dict (the last element if it is a list). If the agent omits
-  rewards, slime falls back to its own reward model hub; a non-numeric
-  reward raises.
-- **Failed rollouts don't fail the step.** A timeout or non-200 agent
-  result keeps any captured turns with reward 0; a rollout with no
+- **Rewards are agent-owned.** The hook reads the scalar `reward` from the
+  agent's returned dict. If the agent omits it, slime falls back to its own
+  reward model hub; a non-numeric reward or a non-dict result raises.
+- **Failed rollouts don't fail the step.** A timeout, invocation error, or
+  agent exception keeps any captured turns with reward 0; a rollout with no
   captured turns becomes an aborted sample that slime removes from the
-  batch.
+  batch. Each rollout's Runtime session is stopped when it ends.
 - **Group normalization** runs only when `--advantage-estimator` is one of
   `grpo`, `gspo`, `cispo`, `reinforce_plus_plus_baseline` and reward
   normalization is enabled; otherwise rewards pass through unchanged.

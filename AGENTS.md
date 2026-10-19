@@ -352,13 +352,18 @@ via two hook entry points, requiring no changes to slime itself:
 
 - `integration/rollout.py` — `AgentCoreRLConfig` (dataclass read from the YAML),
   `AgentCoreRLService` (singleton: one `RolloutGateway` + `ThreadedGatewayServer` +
-  `RolloutClient` per process), and `generate(args, sample, sampling_params)` — the
-  per-sample hook. Creates a gateway session keyed by a fresh `uuid4` (= ACR
-  `runtimeSessionId` = api-key for trajectory capture), calls `RolloutClient.invoke_async`
-  with the session id, awaits the S3 result, drains `gateway.finish_session` into
-  `TraceRecord`s, and maps each record to a slime `Sample`. Rollout failures
-  (timeout, non-200, empty trajectory) return an `ABORTED` sample with `remove_sample=True`
-  rather than raising — slime drops those rows from the batch.
+  session-start rate limiter per process), and
+  `generate(args, sample, sampling_params)` — the per-sample hook. Creates a gateway
+  session keyed by a fresh `uuid4` (= rollout session id = `api_key` in the payload's
+  `_config`, alongside `base_url` / `model_id`), runs the task in a `RolloutSession`
+  built by `rollout_session.factory.make_session` from the `rollout_session_backend`
+  config (e.g. `AgentCoreHttpSession` for an `AgentCoreRuntimeApp` agent such as
+  `examples/strands_math_agent/runtime_app.py`; the session shuts down on exit), drains
+  `gateway.finish_session` into `TraceRecord`s, and maps each record to a slime
+  `Sample`. `tps_limit` caps new sessions per second. A timeout, invocation error, or
+  agent exception scores captured turns 0; a rollout with no captured turns returns an
+  `ABORTED` sample with `remove_sample=True` rather than raising — slime drops those
+  rows from the batch.
 - `integration/rewards.py` — `normalize_episode_rewards(args, samples)`: GRPO group
   normalization that stays correct when one rollout forks into multiple trajectory
   leaves. Slime's built-in normalizer groups positionally (reshape to `(-1, n_samples_per_prompt)`),
@@ -366,13 +371,13 @@ via two hook entry points, requiring no changes to slime itself:
   and normalizes within each group's unique rollouts. Active only when
   `advantage_estimator` is in `(grpo, gspo, cispo, reinforce_plus_plus_baseline)` and
   `rewards_normalization=True`; returns identity otherwise.
-- `integration/rollout.py:_agent_reward` — rewards are agent-owned (inline `{"rewards": ...}`
-  in the S3 result). `None` is returned when the agent omits rewards, signalling slime to
-  fall back to its own `rm_hub`; a non-numeric reward raises (broken agent-side code
-  would silently zero every group).
+- `integration/rollout.py:_agent_reward` — rewards are agent-owned (scalar `{"reward": ...}`
+  in the returned dict). `None` is returned when the agent omits it, signalling slime to
+  fall back to its own `rm_hub`; a non-numeric reward or non-dict result raises (broken
+  agent-side code would silently zero every group).
 
 **Dataset contract.** Each slime dataset row must carry the ACR invocation payload in its
-`metadata.payload` field (a dict). Slime's `--input-key prompt` supplies the conversation
+`metadata.payload` field (a dict without a `_config` key). Slime's `--input-key prompt` supplies the conversation
 for the positional advantage estimator; the actual agent input lives in `metadata.payload`.
 
 **Installation.**
@@ -382,22 +387,20 @@ bash src/agentcore_rl_toolkit/backends/slime/scripts/install_slime.sh
 ```
 
 Requires CUDA 13 (`CUDA_HOME=/usr/local/cuda-13.0`). The script installs: cu13 PyTorch +
-flash-attn, mbridge, transformer-engine-cu13, apex, torch_memory_saver, Megatron-Bridge,
-nvidia-modelopt, sglang, and clones + installs slime + Megatron-LM from source.
+flash-attn, transformer-engine-cu13, apex, torch_memory_saver, nvidia-modelopt, sglang,
+and clones + installs slime + Megatron-LM from source.
 
 **Running (GSM8K example).**
 
 ```bash
 cd src/agentcore_rl_toolkit/backends/slime/examples/math_agent
-cp config.yaml.example config.yaml  # fill in agent_runtime_arn + s3_bucket
+cp config.yaml.example config.yaml  # fill in rollout_session_backend.agentcore_runtime_arn
 SLIME_DIR=... MODEL_DIR=... TRAIN_DATA_PATH=... MODEL_TYPE=... bash train.sh
 ```
 
 See `examples/math_agent/SETUP.md` for the full walkthrough.
 
 **CUDA 13 quirks** (handled inside `train.sh`):
-- `torch_memory_saver` compiles with a `_cu13` suffix but slime's actor group hardcodes
-  `_cu12` — `train.sh` symlinks the cu13 `.so` to the cu12 name at runtime.
 - `/usr/local/cuda` → `cuda-12.*` confuses TE's cuDNN-frontend into loading two
   `libcudart` versions ("Multiple libcudart found"). `train.sh` redirects `CUDA_HOME` to
   `cuda-13.0`, strips cu12 paths from `LD_LIBRARY_PATH`, and drops an empty

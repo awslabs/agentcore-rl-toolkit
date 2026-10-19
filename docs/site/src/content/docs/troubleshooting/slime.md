@@ -13,11 +13,11 @@ was validated against:
 
 | Component | Version / SHA |
 |---|---|
-| Instance type | 8 × NVIDIA H100 80GB HBM3 |
+| Instance type | 8 × NVIDIA B200 |
 | CUDA | `13.0` |
 | PyTorch | `2.11.0+cu130` |
-| slime | commit `fa3c990af6f18efd3fd9922698bf4bf4048d1263` |
-| SGLang | `0.5.13` |
+| slime | commit `a74ae3a0ad16bd8b769d5386738e8ae3d1269d7e` |
+| SGLang | `0.5.15.post1` |
 | Megatron-LM | commit `1dcf0dafa884ad52ffb243625717a3471643e087` |
 
 ## `--norm-epsilon` mismatch on Qwen2.5-32B-Instruct
