@@ -6,6 +6,9 @@ import base64
 import os
 from urllib.parse import urlsplit
 
+import boto3
+from botocore.config import Config
+
 from .catalog import DATASETS
 
 EXTENSIONS_ENV = "GWAS_CATALOG_DUCKDB_EXTENSION_DIR"
@@ -27,10 +30,7 @@ def object_args(uri: str) -> dict:
 
 
 def s3_client():
-    import boto3
-    from botocore.config import Config
-
-    return boto3.client("s3", config=Config(connect_timeout=5, read_timeout=20, retries={"max_attempts": 2}))
+    return boto3.Session().client("s3", config=Config(connect_timeout=5, read_timeout=20, retries={"max_attempts": 2}))
 
 
 def verify_objects(sources: dict[str, str], *, client=None) -> None:
@@ -57,6 +57,6 @@ def configure_connection(connection, sources: dict[str, str]) -> None:
     # Installed ahead of time, never downloaded by model queries.
     connection.execute("LOAD httpfs")
     connection.execute("LOAD aws")
-    connection.execute("CREATE SECRET gwas_s3 (TYPE s3, PROVIDER credential_chain)")
+    connection.execute("CREATE SECRET gwas_s3 (TYPE s3, PROVIDER credential_chain, REFRESH auto)")
     connection.execute("SET enable_http_metadata_cache = true")
     connection.execute("SET s3_version_id_pinning = true")

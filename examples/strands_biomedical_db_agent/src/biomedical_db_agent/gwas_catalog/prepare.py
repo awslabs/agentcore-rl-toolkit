@@ -7,6 +7,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+from botocore.exceptions import ClientError
+
 from .catalog import DATASETS, DEFAULT_DATA_ROOT
 from .hashing import sha256_file
 from .s3_snapshot import object_args, s3_client, verify_objects
@@ -37,8 +39,6 @@ def download(directory: Path) -> None:
 
 
 def publish(directory: Path, prefix: str) -> None:
-    from botocore.exceptions import ClientError
-
     client = s3_client()
     sources = {dataset.name: f"{prefix.rstrip('/')}/{dataset.filename}" for dataset in DATASETS}
     for dataset in DATASETS:

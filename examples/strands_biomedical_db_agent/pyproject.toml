@@ -14,23 +14,20 @@ dependencies = [
     "pydantic==2.13.5",
     "graphql-core>=3.2,<4",
     "duckdb==1.5.5",
+    "boto3>=1.43.107,<2",
 ]
 
 [project.optional-dependencies]
-aws = ["boto3>=1.43,<2"]
 mcp = ["mcp==2.1.1"]
-runtime = ["agentcore-rl-toolkit>=0.1.5"]
+runtime = ["agentcore-rl-toolkit[server]==0.2.0"]
 codex = [
     "openai-codex==0.160.0",
     "mcp==2.1.1",
-    "httpx2>=2.5,<3",
-    "boto3>=1.43,<2",
     "bedrock-agentcore>=1.24.0",
     "tomli-w>=1.2,<2",
 ]
 
 [project.scripts]
-biomedical-agent = "biomedical_db_agent.cli:main"
 biomedical-mcp = "biomedical_db_agent.mcp_server:main"
 biomedical-gwas-data = "biomedical_db_agent.gwas_catalog.prepare:main"
 
@@ -51,3 +48,6 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "biomedical_db_agent"]

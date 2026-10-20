@@ -50,7 +50,7 @@ class DatabaseResponse(BaseModel):
         min_length=1,
         description=(
             "Concise, evidence-grounded explanation of why the request was completed, "
-            "remains unresolved, or is unsupported. Do not include hidden reasoning."
+            "remains unresolved, or is unsupported."
         ),
     )
 

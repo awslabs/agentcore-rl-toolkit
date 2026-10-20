@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated, Any
 
 from strands import tool
@@ -28,7 +27,7 @@ INPUT_SCHEMA = {
 
 def make_sql_tool(backend: SnapshotSQLBackend) -> Any:
     @tool(inputSchema=INPUT_SCHEMA)
-    async def query_gwas_catalog_sql(
+    def query_gwas_catalog_sql(
         query: Annotated[str, "One read-only DuckDB query over the configured GWAS Catalog snapshot."],
         parameters: Annotated[
             dict[str, Any] | None, "Optional named JSON values bound to $name SQL parameters."
@@ -42,6 +41,6 @@ def make_sql_tool(backend: SnapshotSQLBackend) -> Any:
         and errors, without silent truncation. Dates/times and decimals are
         strings; MAP values are arrays of key/value pairs.
         """
-        return await asyncio.to_thread(backend.execute, query, parameters)
+        return backend.execute(query, parameters)
 
     return query_gwas_catalog_sql

@@ -6,6 +6,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 import tomli_w
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig
@@ -59,12 +60,36 @@ def configure(settings: Settings) -> CodexConfig:
         args=[str(ROOT / "database_mcp.py")],
         env_vars=forwarded,
     )
-    remote = bool(os.getenv("BIOMEDICAL_RUNTIME_ARN"))
-    config["mcp_servers"]["specialists"].update(
+    subagents = config["mcp_servers"]["subagents"]
+    subagents.update(
         command=sys.executable,
-        args=[str(ROOT / "specialist_mcp.py")] if remote else ["-m", "biomedical_db_agent.mcp_server"],
-        env_vars=forwarded + (["BIOMEDICAL_RUNTIME_ARN"] if remote else []),
+        args=["-m", "biomedical_db_agent.mcp_server"],
+        env_vars=forwarded,
     )
+    if arn := os.getenv("BIOMEDICAL_RUNTIME_ARN"):
+        region = arn.split(":")[3]
+        endpoint = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com"
+            f"/runtimes/{quote(arn, safe='')}/invocations?qualifier=DEFAULT"
+        )
+        subagents.update(
+            command="mcp-proxy-for-aws-cli",
+            args=[
+                endpoint,
+                "--service",
+                "bedrock-agentcore",
+                "--region",
+                region,
+                "--connect-timeout",
+                "10",
+                "--timeout",
+                "660",
+                "--read-timeout",
+                "660",
+                "--tool-timeout",
+                "660",
+            ],
+        )
     directory = Path(os.environ["CODEX_HOME"])
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "config.toml").write_text(tomli_w.dumps(config))

@@ -19,8 +19,7 @@ async def open_agents(names: Sequence[AgentName]) -> AsyncIterator[dict[AgentNam
             if name == "opentargets":
                 agents[name] = await asyncio.to_thread(create_opentargets_agent)
             elif name == "gwas_catalog":
-                backend = await asyncio.to_thread(SnapshotSQLBackend)
-                stack.enter_context(backend)
+                backend = stack.enter_context(SnapshotSQLBackend())
                 agents[name] = create_gwas_agent(backend)
             else:
                 raise ValueError(f"Unknown database agent: {name}")

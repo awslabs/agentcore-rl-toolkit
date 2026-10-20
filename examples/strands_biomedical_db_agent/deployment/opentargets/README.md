@@ -6,8 +6,8 @@ archive SHA-1 checksums are recorded in `release-26.06.env`.
 
 Use a dedicated Linux database host with Docker Engine, Docker Compose v2, `curl`,
 `pigz`, and at least 300 GiB of storage for extracted data and download scratch
-space. Set `TMPDIR` to a sufficiently large filesystem. Provision and mount the
-data volume before running these commands.
+space. Ensure the temporary directory has room for the archives, and provision
+and mount the data volume before running these commands.
 
 From this directory:
 
@@ -20,11 +20,10 @@ docker compose --env-file release-26.06.env up -d --build
 docker compose --env-file release-26.06.env ps
 ```
 
-`prepare.sh` downloads to `$TMPDIR`, verifies each archive, and extracts into the
-new data directory. A completed directory is reused. An existing directory without
-a matching completion marker is rejected; inspect any interrupted extraction and
-choose a clean destination before retrying. The script does not format disks or
-modify host services.
+`prepare.sh` downloads to a temporary directory, verifies each archive, and extracts
+into the new data directory. A completed directory is reused. An existing directory
+without a matching completion marker is rejected; inspect any interrupted extraction
+and choose a clean destination before retrying.
 
 The API binds to loopback on port 8081 by default. For access from AgentCore in a
 VPC, set `OT_API_BIND` to the host's private interface address before starting
@@ -53,7 +52,7 @@ From the installed example environment, verify schema loading:
 python -c 'from biomedical_db_agent.opentargets.schema import load_schema; print(len(load_schema()))'
 ```
 
-Then run an illustrative task from the example README to verify query execution.
+Then query the Open Targets subagent through MCP to verify query execution.
 The agent rejects a release mismatch. Treat changes to the database release,
 API image, and agent prompt/schema as a coordinated update.
 

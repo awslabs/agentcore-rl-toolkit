@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from dataclasses import dataclass
 from typing import Any
 
 from strands import Agent
@@ -12,10 +11,10 @@ from .config import ModelConfig
 from .contracts import DatabaseRequest, DatabaseResponse
 
 
-@dataclass
 class DatabaseAgent:
-    system_prompt: str
-    tools: list[Any]
+    def __init__(self, system_prompt: str, tools: list[Any]) -> None:
+        self.system_prompt = system_prompt
+        self.tools = tools
 
     async def answer(self, query: str, config: ModelConfig) -> DatabaseResponse:
         request = DatabaseRequest(query=query)

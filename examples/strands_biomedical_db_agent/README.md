@@ -1,10 +1,10 @@
 # Strands biomedical database agents
 
 Two Strands agents retrieve evidence from Open Targets and GWAS Catalog. Each
-accepts a self-contained task and returns a structured answer. Run them directly,
-serve them as MCP tools on AgentCore Runtime, or connect them to a Codex main agent.
+accepts a self-contained task and returns a structured answer. Serve them as MCP
+tools on AgentCore Runtime or connect them to a Codex main agent.
 
-| Agent | Scope | Private database tool |
+| Agent | Scope | Database tool |
 | --- | --- | --- |
 | `opentargets` | Open Targets causal-gene and variant evidence | Read-only GraphQL |
 | `gwas_catalog` | GWAS Catalog candidate-gene selection | Read-only DuckDB SQL |
@@ -18,21 +18,15 @@ datasets and model checkpoints are supplied separately.
 Use Python 3.11 or newer. From this directory:
 
 ```bash
-export UV_PROJECT_ENVIRONMENT="$TMPDIR/biomedical-agent-venv"
-uv sync --extra mcp --extra aws --extra runtime
+uv sync --extra mcp --extra runtime
 cp .env.example .env
 # Fill in model endpoints and database locations.
 ```
 
 Load this file with `uv run --env-file .env` as shown below, or Docker's `--env-file`.
-The JSON values are dotenv values, not shell assignments to source.
 
-Extras are independent: `mcp` serves the specialist tools, `aws` adds S3 access,
-`runtime` adds the two training entrypoints, and `codex` installs the optional main-agent SDK.
-The core package can also be installed with `pip install .`.
-
-This example pins Strands 1.61.0 and MCP 2.1.1, within Strands' `mcp<2.2`
-dependency range. The MCP servers use the SDK's `MCPServer` API.
+Use `mcp` for MCP serving, `runtime` for training entrypoints, and `codex` for the
+main-agent integration.
 
 ## Prepare the databases
 
@@ -54,20 +48,7 @@ The command verifies source sizes and SHA-256 hashes. The backend exposes
 `gwas.associations`, `gwas.studies`, and `gwas.samples` as views with documented
 column aliases. For S3 and AgentCore setup, see [deployment](deployment/README.md).
 
-## Run an agent
-
-Set each agent's OpenAI-compatible model endpoint and model ID in `.env`.
-For example:
-
-```bash
-uv run --env-file .env biomedical-agent opentargets \
-  'Use Open Targets to retrieve disease associations for ENSG00000139618. Cite the records supporting your answer.'
-
-uv run --env-file .env biomedical-agent gwas_catalog \
-  'Using GWAS Catalog evidence for Alzheimer disease, choose one of APOE, BRCA1, or CFTR. Explain the supporting study and variant evidence.'
-```
-
-These are illustrative requests, without gold labels or expected scientific answers.
+## Agent responses
 
 Both agents return:
 
@@ -81,13 +62,11 @@ Both agents return:
 
 `status` is `completed`, `unresolved`, or `unsupported`. Completed responses require
 an answer; the other statuses require `answer: null`. `decision_summary` explains
-the supporting evidence, limitation, or missing context. Runtime/model failures
-raise errors instead of becoming scientific decisions.
+the supporting evidence, limitation, or missing context.
 
-Each call creates a fresh Strands agent with `context_manager=False`,
-up to 20 turns, a 600-second deadline, and 8,192 output tokens per model call by
-default. Supply all relevant context in every task. Query tools bound responses
-and report errors separately from empty results.
+Each call starts a new conversation, with defaults of 20 turns, a 600-second
+deadline, and 8,192 output tokens per model call. Supply all relevant context in
+every task.
 
 Model-specific sampling settings belong in `*_MODEL_SAMPLING_PARAMS`. The example
 environment shows Qwen settings; adjust them for your model. When using a trained
@@ -95,6 +74,8 @@ checkpoint, use its matching chat template and validate it against this example'
 prompts, tool schemas, and three-field response contract.
 
 ## MCP and Codex
+
+Set each agent's OpenAI-compatible model endpoint and model ID in `.env`.
 
 ```bash
 # Local stdio MCP server; stdout is reserved for MCP messages.
@@ -108,9 +89,9 @@ The server exposes `ask_opentargets_agent(query)` and
 `ask_gwas_catalog_agent(query)`. Both database configurations and both model
 configurations are required at startup.
 
-The [Codex integration](integrations/codex/README.md) registers these two specialist
+The [Codex integration](integrations/codex/README.md) registers these two subagent
 tools alongside `query_open_targets_graphql` and `query_gwas_catalog_sql`. It keeps
-conversation history in one Codex thread while each specialist call is stateless.
+conversation history in one Codex thread while each subagent call is stateless.
 
 ## Training entrypoints
 
@@ -140,23 +121,18 @@ exact-answer reward:
 }
 ```
 
-Only `query` goes to the model. Reward is exact membership, not an independent
-scientific correctness assessment. Successful results contain `response` and
-`reward`. Ordinary HTTP requests return the result directly.
-`AgentCoreHttpClient` can start background invocations and retrieve results through
-the Runtime `start/get` protocol; result delivery uses HTTP and filesystem records.
-Model calls routed through the rollout gateway are captured for training.
-See the [Runtime app contract](../../designs/agentcore_runtime_app.md).
-Training scripts and datasets are outside this example.
+Returns `response` and a scalar `reward`: `1.0` for a completed answer in
+`expected_answers`, otherwise `0.0`. See the
+[Runtime app contract](../../designs/agentcore_runtime_app.md) for invocation options.
 
 ## Tests
 
 ```bash
-uv sync --extra aws
+uv sync
 uv run --no-sync pytest
 uv run --no-sync ruff check .
 ```
 
 Tests cover SQL/GraphQL access limits, query errors, snapshot checksums, and
-immutable S3 publication. They use synthetic database rows and stubbed HTTP/S3
-responses, with no AWS credentials, database downloads, or model calls.
+lazy initialization and retry, using synthetic Parquet files and stubbed
+GraphQL responses.

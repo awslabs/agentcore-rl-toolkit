@@ -21,7 +21,7 @@ required = true
 startup_timeout_sec = 120
 tool_timeout_sec = 90
 
-[mcp_servers.specialists]
+[mcp_servers.subagents]
 required = true
 startup_timeout_sec = 180
 tool_timeout_sec = 660

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Download and extract the pinned public release into an unused data directory.
 set -euo pipefail
-: "${TMPDIR:?Set TMPDIR to a scratch filesystem with sufficient free space}"
 : "${OT_DATA_ROOT:?Set OT_DATA_ROOT to an unused absolute data directory}"
 case "$OT_DATA_ROOT" in
     /*) ;;
@@ -20,7 +19,7 @@ fi
 for command in curl tar pigz sha1sum; do
     command -v "$command" >/dev/null
 done
-scratch=$(mktemp -d "$TMPDIR/opentargets.XXXXXXXX")
+scratch=$(mktemp -d -t opentargets.XXXXXXXX)
 trap 'rm -rf -- "$scratch"' EXIT
 mkdir -p -- "$(dirname -- "$OT_DATA_ROOT")"
 mkdir -- "$OT_DATA_ROOT"

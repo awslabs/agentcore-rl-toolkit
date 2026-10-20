@@ -17,11 +17,15 @@ The command verifies the pinned files and uploads missing objects. Existing
 objects must match. Set `GWAS_CATALOG_SQL_DATA_ROOT` to this S3 prefix and grant
 the Runtime role read access to its three objects.
 
+GWAS verifies the snapshot and opens its SQL connection on the first query,
+after Runtime snapshot restore. Later queries reuse the connection; DuckDB's
+credential chain uses automatic refresh.
+
 ## Build an image
 
 | Target | Entry point | AgentCore protocol |
 | --- | --- | --- |
-| `mcp` | Both specialist tools at `/mcp`, port 8000 | MCP |
+| `mcp` | Both subagent tools at `/mcp`, port 8000 | MCP |
 | `opentargets` | Open Targets training entrypoint, port 8080 | HTTP |
 | `gwas-catalog` | GWAS Catalog training entrypoint, port 8080 | HTTP |
 | `codex` | Codex main agent with four tools, port 8080 | HTTP |
@@ -33,14 +37,14 @@ docker buildx build --platform linux/arm64 --target mcp \
   -f deployment/Dockerfile -t "$IMAGE_URI" --push .
 ```
 
-The `mcp` target serves both specialists using model environment variables.
+The `mcp` target serves both subagents using model environment variables.
 The `opentargets` and `gwas-catalog` targets are separate training Runtimes:
 each gets model configuration from its invocation's `_config` and needs only
 its own database configuration.
 
 ## Configure and deploy
 
-Create an external JSON file, such as `$TMPDIR/biomedical-runtime.json`:
+Create an external JSON file, such as `/path/to/biomedical-runtime.json`:
 
 ```json
 {
@@ -62,7 +66,7 @@ All values in the deployment JSON must be strings.
 uv run python deployment/deploy.py \
   --name biomedical_agents --image "$IMAGE_URI" \
   --role arn:aws:iam::ACCOUNT:role/YOUR_RUNTIME_ROLE \
-  --env "$TMPDIR/biomedical-runtime.json" \
+  --env /path/to/biomedical-runtime.json \
   --subnet subnet-YOUR_SUBNET --security-group sg-YOUR_SECURITY_GROUP \
   --protocol MCP --region "$AWS_REGION"
 ```
@@ -71,5 +75,5 @@ The script selects platform V2, waits for `READY`, and prints the ARN.
 Use `--protocol HTTP` for the HTTP targets. To update a Runtime, replace `--name`
 with `--runtime-id` and supply the complete configuration again.
 Repeat the VPC flags for multiple subnets/security groups, or omit both for public
-networking. For the `codex` target and remote specialist connection, see the
+networking. For the `codex` target and remote subagent connection, see the
 [Codex integration](../integrations/codex/README.md).

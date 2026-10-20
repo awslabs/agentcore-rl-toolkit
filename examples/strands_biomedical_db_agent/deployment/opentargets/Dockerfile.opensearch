@@ -2,14 +2,14 @@ ARG TAG=3.5.0
 
 FROM opensearchproject/opensearch:${TAG}
 
-ARG UID
-ARG GID
+ARG OPENSEARCH_UID
+ARG OPENSEARCH_GID
 
 USER root
 
-RUN chown -R ${UID}:${GID} \
+RUN chown -R ${OPENSEARCH_UID}:${OPENSEARCH_GID} \
     /usr/share/opensearch \
     /usr/share/opensearch/logs \
     /usr/share/opensearch/config
 
-USER ${UID}:${GID}
+USER ${OPENSEARCH_UID}:${OPENSEARCH_GID}

@@ -1,6 +1,5 @@
-"""Raw database tools available alongside the two specialist agents."""
+"""Raw database tools available alongside the two subagents."""
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from mcp.server import MCPServer
@@ -13,8 +12,7 @@ from biomedical_db_agent.opentargets.graphql_transport import query_open_targets
 
 @asynccontextmanager
 async def lifespan(_server):
-    backend = await asyncio.to_thread(SnapshotSQLBackend)
-    with backend:
+    with SnapshotSQLBackend() as backend:
         yield backend
 
 

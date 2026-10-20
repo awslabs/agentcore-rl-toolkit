@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile.opensearch
       args:
         TAG: ${OT_OPENSEARCH_TAG}
-        UID: ${OT_OPENSEARCH_UID}
-        GID: ${OT_OPENSEARCH_GID}
+        OPENSEARCH_UID: ${OT_OPENSEARCH_UID}
+        OPENSEARCH_GID: ${OT_OPENSEARCH_GID}
     environment:
       network.host: 0.0.0.0
       discovery.type: single-node

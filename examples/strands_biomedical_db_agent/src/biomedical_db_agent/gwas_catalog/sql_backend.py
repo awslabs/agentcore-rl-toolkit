@@ -66,14 +66,14 @@ def encode_value(value: Any, sql_type: Any) -> Any:
         if not value.is_finite():
             raise ValueError("non-finite DECIMAL; cast explicitly in SQL")
         return str(value)
-    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+    if isinstance(value, datetime.datetime | datetime.date | datetime.time):
         # The Python driver maps infinity/out-of-range dates onto extreme sentinels.
         if isinstance(value, datetime.date) and value.year in {1, 9999}:
             raise ValueError("extreme/infinite temporal value; cast explicitly to VARCHAR in SQL")
         return value.isoformat()
     if isinstance(value, uuid.UUID):
         return str(value)
-    if isinstance(value, (str, bool, int)):
+    if isinstance(value, str | bool | int):
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value
@@ -126,14 +126,11 @@ class SnapshotSQLBackend:
     def __init__(self, *, limits: QueryLimits | None = None) -> None:
         self.limits = limits or QueryLimits()
         self.sources = configured_sources()
-        self.remote_snapshot = None
-        if any(path.startswith("s3://") for path in self.sources.values()):
-            self.remote_snapshot = {"sources": self.sources}
+        self._remote = any(path.startswith("s3://") for path in self.sources.values())
         manifest_path = GENERATED / "snapshot.json"
         manifest = json.loads(manifest_path.read_text())
         if manifest["release"] != RELEASE or manifest["duckdb_version"] != duckdb.__version__:
             raise ValueError("snapshot release or DuckDB version differs from the pinned manifest")
-        self.verify_files()
         self.schema = (GENERATED / "gwas_catalog_schema.sql").read_text()
         if hashlib.sha256(self.schema.encode()).hexdigest() != manifest["schema_sha256"]:
             raise ValueError("SQL schema checksum differs from the snapshot manifest")
@@ -142,25 +139,27 @@ class SnapshotSQLBackend:
             "manifest_sha256": sha256_file(manifest_path),
             "duckdb_version": duckdb.__version__,
         }
-        self.file_signatures = None if self.remote_snapshot is not None else self._signatures()
-        self._scratch = tempfile.TemporaryDirectory(prefix="gwas-sql-")
-        self.database = str(Path(self._scratch.name) / "catalog.duckdb")
+        self.file_signatures = None
+        self._scratch = None
         self._lock = Lock()
         self._connection = None
+        self._closed = False
+
+    def _initialize(self) -> None:
+        """Called under the query lock, after Runtime snapshot restore."""
+        file_signatures = None if self._remote else self._signatures()
+        self.verify_files()
+        scratch = tempfile.TemporaryDirectory(prefix="gwas-sql-")
+        database = str(Path(scratch.name) / "catalog.duckdb")
+        connection = None
         try:
-            with duckdb.connect(self.database, config={"threads": 1, "memory_limit": "512MB"}) as connection:
-                s3_snapshot.configure_connection(connection, self.sources)
-                register_catalog(connection, self.sources)
-                if catalog_schema(connection) != self.schema:
+            with duckdb.connect(database, config={"threads": 1, "memory_limit": "512MB"}) as catalog:
+                s3_snapshot.configure_connection(catalog, self.sources)
+                register_catalog(catalog, self.sources)
+                if catalog_schema(catalog) != self.schema:
                     raise ValueError("registered SQL schema differs from the pinned prompt schema")
-                self.extensions = dict(
-                    connection.execute(
-                        "SELECT extension_name, extension_version FROM duckdb_extensions() "
-                        "WHERE loaded ORDER BY extension_name"
-                    ).fetchall()
-                )
-            self._connection = duckdb.connect(
-                self.database,
+            connection = duckdb.connect(
+                database,
                 read_only=True,
                 config={
                     "threads": self.limits.threads,
@@ -171,19 +170,24 @@ class SnapshotSQLBackend:
                     "allow_community_extensions": False,
                 },
             )
-            s3_snapshot.configure_connection(self._connection, self.sources)
-            self._connection.execute("SET allowed_paths = ?", [list(self.sources.values())])
-            self._connection.execute("SET enable_progress_bar = false")
-            self._connection.execute("SET enable_logging = false")
-            self._connection.execute("SET enable_external_access = false")
-            self._connection.execute("SET TimeZone = 'UTC'")
-            self._connection.execute("SET lock_configuration = true")
+            s3_snapshot.configure_connection(connection, self.sources)
+            connection.execute("SET allowed_paths = ?", [list(self.sources.values())])
+            connection.execute("SET enable_progress_bar = false")
+            connection.execute("SET enable_logging = false")
+            connection.execute("SET enable_external_access = false")
+            connection.execute("SET TimeZone = 'UTC'")
+            connection.execute("SET lock_configuration = true")
         except Exception:
-            self.close()
+            if connection is not None:
+                connection.close()
+            scratch.cleanup()
             raise
+        self.file_signatures = file_signatures
+        self._scratch = scratch
+        self._connection = connection
 
     def verify_files(self) -> None:
-        if self.remote_snapshot is not None:
+        if self._remote:
             s3_snapshot.verify_objects(self.sources)
             return
         for dataset in DATASETS:
@@ -213,18 +217,21 @@ class SnapshotSQLBackend:
             encoded = json.dumps(parameters, allow_nan=False)
             if len(encoded.encode()) > self.limits.parameter_bytes:
                 raise ValueError("parameter size limit exceeded")
-            if self.file_signatures is not None and self._signatures() != self.file_signatures:
-                return failure(
-                    "SNAPSHOT_CHANGED", "Snapshot files changed; stop and verify the release.", self.snapshot
-                )
-        except (TypeError, ValueError, OSError) as error:
-            return failure(
-                "INVALID_PARAMETERS" if not isinstance(error, OSError) else "SNAPSHOT_ERROR", str(error), self.snapshot
-            )
+        except (TypeError, ValueError) as error:
+            return failure("INVALID_PARAMETERS", str(error), self.snapshot)
         # A connection executes one query at a time; interruption belongs to that query.
         with self._lock:
-            if self._connection is None:
+            if self._closed:
                 raise RuntimeError("SQL backend is closed")
+            if self._connection is None:
+                self._initialize()
+            try:
+                if self.file_signatures is not None and self._signatures() != self.file_signatures:
+                    return failure(
+                        "SNAPSHOT_CHANGED", "Snapshot files changed; stop and verify the release.", self.snapshot
+                    )
+            except OSError as error:
+                return failure("SNAPSHOT_ERROR", str(error), self.snapshot)
             timed_out = Event()
 
             def interrupt() -> None:
@@ -252,10 +259,13 @@ class SnapshotSQLBackend:
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             if self._connection is not None:
                 self._connection.close()
                 self._connection = None
-            self._scratch.cleanup()
+            if self._scratch is not None:
+                self._scratch.cleanup()
+                self._scratch = None
 
     def __enter__(self) -> SnapshotSQLBackend:
         return self
