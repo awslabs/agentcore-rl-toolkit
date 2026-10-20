@@ -59,11 +59,7 @@ RUN apt-get update && \
 # ----------
 
 COPY . .
-RUN uv pip install .
-
-
-
-RUN uv pip install aws-opentelemetry-distro==0.12.2
+RUN uv pip install . aws-opentelemetry-distro==0.12.2
 
 
 # Create non-root user

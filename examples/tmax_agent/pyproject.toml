@@ -3,15 +3,11 @@ name = "tmax-agentcore-eval"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "agentcore-rl-toolkit[rollout]==0.1.6",
+    "agentcore-rl-toolkit[rollout]==0.2.0",
     "mini-swe-agent==2.4.6",
     "boto3>=1.43.102",
     "botocore>=1.43.102",
 ]
-
-[tool.uv]
-# aioboto3's transitive botocore pin conflicts with bedrock-agentcore's minimum version.
-override-dependencies = ["aiobotocore>=3.9.0", "botocore>=1.43.102"]
 
 [dependency-groups]
 dev = ["ruff"]

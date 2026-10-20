@@ -39,9 +39,7 @@ COPY . .
 
 # agentcore-rl-toolkit comes from PyPI via pyproject.toml: `agentcore deploy` builds in
 # CodeBuild with a plain `docker build .`, so no extra build context is available.
-RUN uv pip install .
-
-RUN uv pip install aws-opentelemetry-distro==0.12.2
+RUN uv pip install . aws-opentelemetry-distro==0.12.2
 
 # Create non-root user
 RUN useradd -m -u 1000 bedrock_agentcore && \

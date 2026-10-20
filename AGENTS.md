@@ -191,9 +191,6 @@ drains the tree into `list[TraceRecord]`.
 **Dependencies.** This checkout's bare package has no external dependencies. Use
 `pip install -e '.[core]'` from the repository root: `[core]` combines
 `[server]` (agent apps) and `[rollout]` (clients, sessions, sandbox, and AWS helpers).
-`[core]` and `[server]` are not published yet. Keep PyPI-based examples pinned to 0.1.6
-without the new `[core]` / `[server]` extras until a release provides them; source
-and wheel installations must use extras from the artifact they actually install.
 Trainer environments use `[rollout]` without the server SDK. Root and runtime
 package exports are loaded on first access. The gateway lives behind extras:
 - `uv sync --extra gateway` → `aiohttp` + `transformers` + `tokenizers`
