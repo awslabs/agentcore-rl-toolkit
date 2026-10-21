@@ -8,6 +8,8 @@ import threading
 import httpx
 import pytest
 import pytest_asyncio
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
 from agentcore_rl_toolkit import AgentCoreRuntimeApp
 
@@ -47,6 +49,20 @@ async def terminal(client, invocation_id="inv-1"):
 
 
 @pytest.mark.asyncio
+async def test_ping_sdk_header_preserves_user_middleware(tmp_path):
+    app = AgentCoreRuntimeApp(
+        state_dir=tmp_path,
+        middleware=[Middleware(CORSMiddleware, allow_origins=["https://example.com"])],
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://agent") as client:
+        response = await client.get("/ping", headers={"Origin": "https://example.com"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "Healthy"
+    assert response.headers["X-AgentCore-Server-SDK"] == "agentcore-rl-toolkit"
+    assert response.headers["Access-Control-Allow-Origin"] == "https://example.com"
+
+
+@pytest.mark.asyncio
 async def test_ordinary_http_and_protocol_share_async_handler(app, client):
     @app.entrypoint
     async def handler(payload, context):
@@ -57,6 +73,7 @@ async def test_ordinary_http_and_protocol_share_async_handler(app, client):
     ordinary = await client.post("/invocations", json={"plain": True})
     assert ordinary.status_code == 200
     assert ordinary.json() == {"payload": {"plain": True}, "session": None}
+    assert "X-AgentCore-Server-SDK" not in ordinary.headers
     stream = await client.post("/invocations", json={"stream": True})
     assert stream.headers["content-type"].startswith("text/event-stream")
     assert "ordinary" in stream.text
@@ -98,13 +115,17 @@ async def test_plain_background_requests_preserve_payload_and_start_separate_inv
                 assert response.json()["status"] == "in_progress"
             ids = [response.json()["invocation_id"] for response in responses]
             assert ids[0] != ids[1]
-            assert (await client.get("/ping")).json()["status"] == "HealthyBusy"
+            ping = await client.get("/ping")
+            assert ping.json()["status"] == "HealthyBusy"
+            assert ping.headers["X-AgentCore-Server-SDK"] == "agentcore-rl-toolkit"
         finally:
             release.set()
         for invocation_id in ids:
             assert (await terminal(client, invocation_id))["result"] == {"answer": 42}
         assert calls == [(payload, "session-a"), (payload, "session-a")]
-        assert (await client.get("/ping")).json()["status"] == "Healthy"
+        ping = await client.get("/ping")
+        assert ping.json()["status"] == "Healthy"
+        assert ping.headers["X-AgentCore-Server-SDK"] == "agentcore-rl-toolkit"
 
 
 @pytest.mark.asyncio
