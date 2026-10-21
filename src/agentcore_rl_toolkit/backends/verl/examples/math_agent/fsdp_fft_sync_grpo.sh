@@ -15,7 +15,7 @@
 #     using the gateway-captured rollout logprobs)
 #
 # Prerequisites:
-#   1. Deploy examples/strands_math_agent/runtime_app.py to AgentCore Runtime
+#   1. Deploy examples/strands_math_agent/rl_app.py to AgentCore Runtime
 #      (see that example's README) and export:
 #        export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/...
 #   2. ACR containers must be able to reach this host on the gateway port

@@ -1,11 +1,10 @@
-"""A rollout session that drives an ``AgentCoreRLApp`` agent through :class:`RolloutClient`.
+"""Deprecated session for ``AgentCoreRLApp`` agents through :class:`RolloutClient`.
 
-This session wraps the agent
-contract that already exists in production: an ``AgentCoreRLApp`` with
-``@app.rollout_entrypoint``, invoked once fire-and-forget, whose result dict lands in S3
-for a :class:`RolloutFuture` to poll. An agent already deployed for batch evaluation
-therefore trains with no container-side change at all -- same image, same payload, same
-result contract.
+Use ``AgentCoreHttpSession`` with an ``AgentCoreRuntimeApp`` agent.
+Migration: https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md
+
+This adapter retains the legacy ``payload / llm / group_id`` task contract.
+It does not accept the flat ``_config`` payloads produced by current trainers.
 
 What that contract costs, all accepted deliberately:
 
@@ -28,6 +27,7 @@ What that contract costs, all accepted deliberately:
 """
 
 import logging
+import warnings
 from typing import Any
 
 from agentcore_rl_toolkit.aws_tools.agentcore_tools import (
@@ -128,7 +128,7 @@ def reset_client_cache() -> None:
 
 
 class AgentCoreS3Session(RolloutSession):
-    """A rollout session backed by one ACR invocation of an ``AgentCoreRLApp`` agent."""
+    """Deprecated S3 rollout session. Use ``AgentCoreHttpSession``."""
 
     def __init__(
         self,
@@ -140,6 +140,12 @@ class AgentCoreS3Session(RolloutSession):
         experiment_name: str,
         max_pool_connections: int = 100,
     ):
+        warnings.warn(
+            "AgentCoreS3Session is deprecated; use AgentCoreHttpSession with AgentCoreRuntimeApp. "
+            "See https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         client = get_or_create_rollout_client(
             agentcore_runtime_arn=agentcore_runtime_arn,
             rollout_output_s3=rollout_output_s3,

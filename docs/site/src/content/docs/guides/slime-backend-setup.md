@@ -28,7 +28,7 @@ turn; rewards come from the dict the agent returns.
 - AWS credentials with permission to invoke and stop AgentCore Runtime
   sessions.
 - An AgentCore Runtime deployment of an `AgentCoreRuntimeApp` agent, such as
-  [`examples/strands_math_agent/runtime_app.py`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/runtime_app.py).
+  [`examples/strands_math_agent/rl_app.py`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/rl_app.py).
   The agent's model client must forward the `api_key` from the payload's
   `_config` field (`config.get("api_key") or "EMPTY"`), which carries the
   gateway session key, and return `{"reward": <float>}`. Save the resulting

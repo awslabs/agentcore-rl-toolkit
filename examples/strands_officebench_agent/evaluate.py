@@ -1,19 +1,26 @@
-"""Batch evaluation script for OfficeBench agent using RolloutClient.run_batch().
+"""Batch evaluation script for OfficeBench agent through background HTTP invocations.
 
 Each OfficeBench task directory can have multiple subtasks (0.json, 1.json, ...),
 all sharing the same testbed. Each subtask is an independent test case.
 """
 
 import argparse
+import asyncio
 import json
 import logging
+import math
+import tempfile
 import time
 import tomllib
+import uuid
 from pathlib import Path
 
 import boto3
 
-from agentcore_rl_toolkit import RolloutClient
+from agentcore_rl_toolkit.aws_tools.agentcore_tools import close_shared_agentcore_clients
+from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -90,10 +97,100 @@ def get_task_category(task_id: str) -> str:
     return task_id.split("-")[0]
 
 
-def append_result_to_file(result_path: Path, item_data: dict):
-    """Append a single result to the JSONL file."""
-    with open(result_path, "a") as f:
-        f.write(json.dumps(item_data) + "\n")
+async def evaluate(args, entries, result_path):
+    benchmark_start = time.monotonic()
+    semaphore = asyncio.Semaphore(args.max_concurrent)
+    starts = LocalRateLimiter(args.tps_limit)
+    sampling = args.sampling_params
+    if isinstance(sampling, str):
+        sampling = json.loads(sampling)
+
+    async def run_one(index, entry):
+        async with semaphore:
+            sid = str(uuid.uuid4())
+            started = time.monotonic()
+            task = prepare_payload(entry)
+            task["_config"] = {
+                "api_key": sid,
+                "sampling_params": sampling or {},
+            }
+            if args.base_url:
+                task["_config"]["base_url"] = args.base_url
+            if args.model_id:
+                task["_config"]["model_id"] = args.model_id
+            record = {
+                "index": index,
+                "session_id": sid,
+                "success": False,
+                "task_id": entry["task_id"],
+                "subtask_id": entry["subtask_id"],
+                "category": get_task_category(entry["task_id"]),
+                "task_uri": entry["task_uri"],
+            }
+            try:
+                async with AgentCoreHttpSession(
+                    sid, PersistentDict(persister=NullPersister()), agentcore_runtime_arn=args.agent_arn
+                ) as session:
+                    await starts.wait_async()
+                    async with asyncio.timeout(args.timeout):
+                        dump = await session.run(task)
+                if dump.exception:
+                    raise RuntimeError(dump.exception)
+                result = dump.task_output or {}
+                reward = result.get("reward")
+                if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(reward):
+                    raise ValueError(f"Expected a finite scalar reward, got {reward!r}")
+                record.update(success=True, result=result, reward=reward)
+            except Exception as exc:
+                record["error"] = f"{type(exc).__name__}: {exc}"
+            record["elapsed"] = time.monotonic() - started
+            return record
+
+    completed = succeeded = task_successes = 0
+    category_stats = {}
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(run_one(i, entry)) for i, entry in enumerate(entries)]
+            for future in asyncio.as_completed(tasks):
+                record = await future
+                completed += 1
+                succeeded += int(record["success"])
+                passed = record.get("reward") == 1.0
+                task_successes += int(passed)
+                if "category" in record:
+                    record["is_pass"] = passed
+                    stats = category_stats.setdefault(record["category"], {"total": 0, "passed": 0})
+                    stats["total"] += 1
+                    stats["passed"] += int(passed)
+                with open(result_path, "a") as stream:
+                    stream.write(json.dumps(record) + "\n")
+                logger.info(
+                    "[%d/%d] index=%d elapsed=%.1fs reward=%s error=%s",
+                    completed,
+                    len(entries),
+                    record["index"],
+                    record["elapsed"],
+                    record.get("reward"),
+                    record.get("error"),
+                )
+    finally:
+        await close_shared_agentcore_clients()
+    logger.info("Completed=%d successful_invocations=%d task_successes=%d", completed, succeeded, task_successes)
+    for category, stats in sorted(category_stats.items()):
+        logger.info(
+            "%s-app tasks: %d/%d (%.1f%%)",
+            category,
+            stats["passed"],
+            stats["total"],
+            100 * stats["passed"] / stats["total"],
+        )
+    logger.info(
+        "Overall: %d/%d (%.1f%%)",
+        task_successes,
+        len(entries),
+        100 * task_successes / len(entries) if entries else 0.0,
+    )
+    logger.info("Total time=%.1fs results=%s", time.monotonic() - benchmark_start, result_path)
 
 
 def main():
@@ -113,12 +210,6 @@ def main():
         type=str,
         default=eval_config.get("s3_input_bucket"),
         help="S3 URI for task data (e.g. s3://bucket/officebench/)",
-    )
-    parser.add_argument(
-        "--s3_output_bucket",
-        type=str,
-        default=eval_config.get("s3_output_bucket"),
-        help="S3 bucket for storing rollout results",
     )
     parser.add_argument(
         "--base_url",
@@ -164,14 +255,27 @@ def main():
         help="Only evaluate tasks of a specific category (1-app, 2-app, 3-app)",
     )
 
+    parser.add_argument("--tps_limit", type=int, default=5)
+    parser.add_argument(
+        "--sampling_params", default=eval_config.get("sampling_params"), help="Sampling parameters as JSON"
+    )
+    parser.add_argument(
+        "--output_dir", type=Path, default=Path(tempfile.gettempdir()) / "strands_officebench_agent-evaluations"
+    )
     args = parser.parse_args()
+
+    for field in ("max_concurrent", "tps_limit", "timeout"):
+        if getattr(args, field) <= 0:
+            parser.error(f"--{field} must be positive")
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
 
     if not args.agent_arn:
         parser.error("--agent_arn is required (or set agentcore.agent_arn in config.toml)")
     if not args.s3_input_bucket:
         parser.error("--s3_input_bucket is required")
-    if not args.s3_output_bucket:
-        parser.error("--s3_output_bucket is required")
+    if args.base_url and not args.model_id:
+        parser.error("--model_id is required with --base_url")
 
     # List all subtasks
     logger.info(f"Listing subtasks from {args.s3_input_bucket}...")
@@ -190,11 +294,8 @@ def main():
 
     logger.info(f"Found {len(entries)} subtasks to evaluate")
 
-    # Prepare payloads
-    payloads = [prepare_payload(e) for e in entries]
-
     # Setup results directory
-    results_dir = Path(__file__).parent / "results"
+    results_dir = args.output_dir
     result_path = results_dir / f"{args.exp_id}.jsonl"
     result_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -205,81 +306,7 @@ def main():
 
     logger.info(f"Results will be written to: {result_path}")
 
-    # Create client
-    client = RolloutClient(
-        agent_runtime_arn=args.agent_arn,
-        s3_bucket=args.s3_output_bucket,
-        exp_id=args.exp_id,
-        base_url=args.base_url,
-        model_id=args.model_id,
-    )
-
-    # Run batch and stream results
-    logger.info(f"Starting evaluation with max_concurrent={args.max_concurrent}, timeout={args.timeout}s...")
-
-    benchmark_start = time.time()
-    completed = 0
-    succeeded = 0
-    failed = 0
-    # Track pass/fail by category
-    category_stats: dict[str, dict[str, int]] = {}
-
-    for item in client.run_batch(payloads, max_concurrent_sessions=args.max_concurrent, timeout=args.timeout):
-        completed += 1
-        entry = entries[item.index]
-        task_id = entry["task_id"]
-        subtask_id = entry["subtask_id"]
-        category = get_task_category(task_id)
-        display_id = f"{task_id}/{subtask_id}"
-
-        if category not in category_stats:
-            category_stats[category] = {"total": 0, "passed": 0}
-        category_stats[category]["total"] += 1
-
-        record = {
-            "index": item.index,
-            "task_id": task_id,
-            "subtask_id": subtask_id,
-            "category": category,
-            "success": item.success,
-            "task_uri": entry["task_uri"],
-        }
-
-        if item.success:
-            succeeded += 1
-            record["result"] = item.result
-            record["elapsed"] = item.elapsed
-            rewards = item.result.get("rewards", 0.0)
-            is_pass = rewards == 1.0
-            record["is_pass"] = is_pass
-            if is_pass:
-                category_stats[category]["passed"] += 1
-            logger.info(
-                f"[{completed}/{len(payloads)}] {display_id} completed in {item.elapsed:.1f}s - "
-                f"reward: {rewards} ({'PASS' if is_pass else 'FAIL'})"
-            )
-        else:
-            failed += 1
-            record["error"] = item.error
-            record["elapsed"] = item.elapsed
-            logger.warning(f"[{completed}/{len(payloads)}] {display_id} failed in {item.elapsed:.1f}s: {item.error}")
-
-        append_result_to_file(result_path, record)
-
-    # Summary
-    total_time = time.time() - benchmark_start
-    logger.info("=" * 60)
-    logger.info(f"Evaluation complete: {succeeded} succeeded, {failed} failed")
-    for cat in sorted(category_stats):
-        stats = category_stats[cat]
-        rate = stats["passed"] / stats["total"] if stats["total"] > 0 else 0
-        logger.info(f"  {cat}-app tasks: {stats['passed']}/{stats['total']} ({rate:.1%})")
-    total_tasks = len(payloads)
-    total_passed = sum(s["passed"] for s in category_stats.values())
-    overall_rate = total_passed / total_tasks if total_tasks > 0 else 0
-    logger.info(f"  Overall: {total_passed}/{total_tasks} ({overall_rate:.1%})")
-    logger.info(f"Total time: {total_time:.1f}s ({total_time / 60:.1f}m)")
-    logger.info(f"Results saved to: {result_path}")
+    asyncio.run(evaluate(args, entries, result_path))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ framework and its tools alongside the SDK; the
 [examples](/agentcore-rl-toolkit/examples/) declare these dependencies in their
 own `pyproject.toml` files.
 
+For existing v0.1.x deployments, follow the [migration guide](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md).
+
 ## Choose dependencies for your environment
 
 For environments that need only part of the SDK, select the corresponding extra:

@@ -33,7 +33,7 @@ uvicorn rl_app:app --port 8080 --reload --reload-dir ../..
 
 Deploy via the
 [Prepare agent for RL → Deploy](/agentcore-rl-toolkit/guides/agent-adaptation/)
-flow, then evaluate with `evaluate.py` / `evaluate_async.py`.
+flow, then evaluate with `evaluate.py`.
 
 ## What's in the example
 
@@ -44,8 +44,7 @@ flow, then evaluate with `evaluate.py` / `evaluate_async.py`.
   preservation vs. the original commit.
 - **`preprocess.py`** — convert the MigrationBench dataset into
   per-repo tarballs + metadata + JSONL rollout requests.
-- **`evaluate.py`** / **`evaluate_async.py`** — batch / async
-  evaluation via `RolloutClient`.
+- **`evaluate.py`** — concurrent HTTP evaluation via `AgentCoreHttpSession`.
 - **`Dockerfile`** + **`deploy.py`** + **`config.toml`** —
   container build + programmatic ACR deploy.
 - **`models.py`**, **`utils.py`**, **`eval_utils.py`** — shared

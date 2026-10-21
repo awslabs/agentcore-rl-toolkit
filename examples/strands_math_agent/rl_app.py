@@ -7,12 +7,12 @@ from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
 from strands_tools import calculator
 
-from agentcore_rl_toolkit import AgentCoreRLApp
+from agentcore_rl_toolkit import AgentCoreRuntimeApp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = AgentCoreRLApp()
+app = AgentCoreRuntimeApp()
 
 system_prompt = (
     "Your task is to solve the math problem. "
@@ -23,34 +23,30 @@ system_prompt = (
 reward_fn = GSM8KReward()
 
 
-@app.rollout_entrypoint
+@app.entrypoint
 def invoke_agent(payload: dict, context):
     """
-    Invoke the math agent with a payload using the rollout_entrypoint decorator.
+    Invoke the math agent with a payload.
 
-    For RL training, the following fields are expected:
+    Expected fields:
     - prompt: question from gsm8k
     - answer: ground truth (str)
-    - _rollout: rollout config with base_url and model_id
+    - _config: model config with base_url, model_id, and optional api_key / sampling_params
 
-    The @rollout_entrypoint decorator automatically:
-    - Executes the function in the background for non-blocking processing
-    - Saves results to S3 with a predictable key
-    - Handles errors and saves error results for client awareness
-    - Works with both sync and async functions
+    Requests carrying the `_agentcore_runtime` envelope (sent by `AgentCoreHttpClient`)
+    run in the foreground or background, and the returned dict is persisted for `get`.
+    Requests without the envelope are served as ordinary HTTP invocations.
     """
-    base_url = payload["_rollout"]["base_url"]
-    model_id = payload["_rollout"]["model_id"]
-    params = payload["_rollout"].get("sampling_params", {})
+    config = payload["_config"]
     # During training the rollout gateway keys trajectory capture off the api-key
     # slot, and the trainer supplies the session key in the payload. "EMPTY" (the
     # vLLM convention) for local runs and plain evaluation endpoints, which ignore it.
-    api_key = payload["_rollout"].get("api_key") or "EMPTY"
+    api_key = config.get("api_key") or "EMPTY"
 
     model = OpenAIModel(
-        client_args={"api_key": api_key, "base_url": base_url},
-        model_id=model_id,
-        params=params,
+        client_args={"api_key": api_key, "base_url": config["base_url"]},
+        model_id=config["model_id"],
+        params=config.get("sampling_params", {}),
     )
 
     agent = Agent(
@@ -61,25 +57,19 @@ def invoke_agent(payload: dict, context):
     )
 
     # Validate the payload: `prompt: str` rejects non-string input (e.g. toolUse
-    # content blocks) before it reaches the agent. Malformed payloads raise a
-    # pydantic ValidationError, which the entrypoint surfaces as an error result.
+    # content blocks) before it reaches the agent.
     request = InvocationRequest(**payload)
-    user_input = request.prompt
-    answer = request.answer  # used for computing reward
 
-    logger.info("User input: %s", user_input)
+    logger.info("User input: %s", request.prompt)
 
-    response = agent(user_input)
+    response = agent(request.prompt)
 
-    # Compute rewards. Join the text blocks instead of indexing content[0]: a
-    # reasoning-parsing server (vllm/sglang --reasoning-parser, or the rollout
-    # gateway) returns reasoning_content, which Strands surfaces as a leading
-    # reasoningContent block before the text block.
+    # Join the text blocks instead of indexing content[0]: a reasoning-parsing server
+    # returns a leading reasoningContent block before the text block.
     content = response.message.get("content") or []
     response_text = "".join(block["text"] for block in content if "text" in block)
-    rewards = reward_fn(response_text=response_text, ground_truth=answer)
 
-    return {"rewards": rewards}
+    return {"reward": float(reward_fn(response_text=response_text, ground_truth=request.answer))}
 
 
 if __name__ == "__main__":

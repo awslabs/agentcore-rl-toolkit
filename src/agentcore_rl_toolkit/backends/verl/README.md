@@ -81,17 +81,17 @@ for the derivation.
 ```
 verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
                                              │  1. create gateway session (sid = uuid4)
-                                             │  2. RolloutClient.invoke_async(session_id=sid,
-                                             │       base_url=<gateway>/v1)  ────────────> ACR agent
+                                             │  2. AgentCoreHttpSession.run(task)
+                                             │       _config.base_url=<gateway>/v1  ────────────> ACR agent
    RolloutGateway (thread, this process) <───┼─────  agent's OpenAI/Anthropic calls
      └─ VerlSamplingBackend ──> verl LLMServerClient (token-in/token-out, sticky by sid)
-                                             │  3. await S3 result (completion signal + optional reward)
+                                             │  3. await HTTP result (completion + scalar reward)
                                              │  4. finish_session -> TraceRecords -> AgentLoopOutputs
 ```
 
 - The **capture session key travels in the payload**: the loop generates one sid per
-  rollout, passes it as both the ACR `runtimeSessionId` and `_rollout.api_key`; the
-  agent container puts `payload["_rollout"]["api_key"]` in its LLM client's api-key
+  rollout, passes it as both the ACR `runtimeSessionId` and `_config.api_key`; the
+  agent container puts `payload["_config"]["api_key"]` in its LLM client's api-key
   slot; the gateway reads it back from the Bearer/`X-Api-Key` slot.
 - The advertised `base_url` follows the OpenAI-SDK convention and **includes `/v1`**
   (the SDK appends `/chat/completions`) — pass it to an OpenAI-compatible client
@@ -108,7 +108,7 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
 The agent must forward the trainer-supplied key when it constructs its model client:
 
 ```python
-rollout_config = payload["_rollout"]
+rollout_config = payload["_config"]
 api_key = rollout_config.get("api_key") or "EMPTY"
 model = OpenAIModel(
     client_args={"api_key": api_key, "base_url": rollout_config["base_url"]},
@@ -204,13 +204,11 @@ concerns inside `payload`.
 ## Rewards
 
 The reward is **built into the agent** (`reward_mode="built_in"`, the only supported
-mode): the agent returns `{"rewards": ...}` in its session result (scalar or list;
-last element wins). The score becomes `rm_scores` directly and verl skips reward
+mode): the agent returns `{"reward": ...}` in its session result (a finite scalar). The score becomes `rm_scores` directly and verl skips reward
 computation.
 
-- Failed rollouts (timeout, ACR error, non-200 `status_code`) score 0.0.
-- A healthy rollout that returns no reward is a contract violation: warned, scored 0.0.
-- A non-numeric `rewards` value raises because it indicates a recurring
+- Failed rollouts with captured tokens (timeout, ACR error, handler exception) score 0.0.
+- Missing, non-numeric, or non-finite `reward` values raise because it indicates a recurring
   agent-side contract error. verl contains the exception to the affected prompt
   group, so training continues without rows from that group.
 

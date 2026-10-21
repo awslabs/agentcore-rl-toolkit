@@ -33,7 +33,6 @@ uv run python preprocess_migrationbench.py --s3-bucket-name <data-bucket>
 
 ```bash
 export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/...
-export ACR_S3_BUCKET=your-results-bucket
 wandb login
 ./megatron_lora_sync_grpo_qwen3-coder-30b-a3b.sh
 ```

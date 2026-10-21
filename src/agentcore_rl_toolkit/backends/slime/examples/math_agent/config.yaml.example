@@ -9,7 +9,7 @@
 
 # Rollout session class and its constructor kwargs, passed to
 # agentcore_rl_toolkit.rollout_session.factory.make_session. The runtime is the
-# ACR deployment of examples/strands_math_agent/runtime_app.py.
+# ACR deployment of examples/strands_math_agent/rl_app.py.
 rollout_session_backend:
   backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
   agentcore_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-name>-<id>"

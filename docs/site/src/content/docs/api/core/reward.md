@@ -2,7 +2,7 @@
 title: reward
 description: RewardFunction base class.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 
@@ -26,7 +26,7 @@ in the future.
 
 ### Methods
 
-#### `__call__(kwargs = {})`
+#### `__call__(**kwargs)`
 
 Compute reward(s) for the rollout.
 

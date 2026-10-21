@@ -640,8 +640,6 @@ meanings.
 - A single sticky Runtime session can support follow-up invocations without
   treating result retrieval as session completion.
 - Retries can address one execution without guessing from payload or S3 key.
-- `RolloutClient` can focus on rollout configuration, batching, grouping, and
-  training-facing policy instead of implementing a private task manager.
 
 ### Migration
 

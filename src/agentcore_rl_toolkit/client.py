@@ -6,6 +6,7 @@ import logging
 import time
 import traceback
 import uuid
+import warnings
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
 
@@ -43,7 +44,10 @@ class BatchItem:
 
 
 class RolloutFuture:
-    """Future representing an async rollout result, polled via S3 HEAD."""
+    """Deprecated S3 rollout future. Use ``AgentCoreHttpClient`` / ``InvocationHandle``.
+
+    Migration: https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md
+    """
 
     def __init__(
         self,
@@ -59,6 +63,12 @@ class RolloutFuture:
         agent_runtime_arn: str = None,
         rate_limiter: LocalRateLimiter = None,
     ):
+        warnings.warn(
+            "RolloutFuture is deprecated; use AgentCoreHttpClient and InvocationHandle. "
+            "See https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.s3_client = s3_client
         self.s3_bucket = s3_bucket
         self.result_key = result_key
@@ -277,7 +287,9 @@ class RolloutFuture:
 
 
 class RolloutClient:
-    """Client for invoking agents and collecting rollouts with full lifecycle management.
+    """Deprecated S3 rollout client. Use ``AgentCoreHttpClient`` / ``AgentCoreHttpSession``.
+
+    Migration: https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md
 
     Provides both sync and async APIs. Sync methods (``invoke``, ``run_batch``)
     block the caller. Async methods (``invoke_async``, ``run_batch_async``) are
@@ -339,6 +351,12 @@ class RolloutClient:
             model_id: Optional model ID for inference
             **extra_config: Additional config passed to _rollout (e.g., temperature, top_p)
         """
+        warnings.warn(
+            "RolloutClient is deprecated; use AgentCoreHttpClient and AgentCoreHttpSession. "
+            "See https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.agent_runtime_arn = agent_runtime_arn
         self.s3_bucket = s3_bucket
         self.exp_id = exp_id

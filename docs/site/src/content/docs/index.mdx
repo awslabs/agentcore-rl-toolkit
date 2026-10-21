@@ -24,22 +24,26 @@ hero:
           <button class="hero-step-btn" data-step="3">3. Kick off RL with any backend</button>
         </div>
         <div class="hero-step-panel active" data-panel="1">
-          <pre class="hero-code"><code><span class="ln"><span style="color:#c586c0">from</span> agentcore_rl_toolkit <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">AgentCoreRLApp</span></span>
+          <pre class="hero-code"><code><span class="ln"><span style="color:#c586c0">from</span> agentcore_rl_toolkit <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">AgentCoreRuntimeApp</span></span>
       <span class="ln"><span style="color:#c586c0">from</span> strands <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">Agent</span></span>
       <span class="ln"><span style="color:#c586c0">from</span> strands.models.openai <span style="color:#c586c0">import</span> <span style="color:#4ec9b0">OpenAIModel</span></span>
       <span class="ln"></span>
-      <span class="ln">app = <span style="color:#4ec9b0">AgentCoreRLApp</span>()</span>
+      <span class="ln">app = <span style="color:#4ec9b0">AgentCoreRuntimeApp</span>()</span>
       <span class="ln"></span>
-      <span class="ln"><span style="color:#c586c0;font-style:italic">@app.rollout_entrypoint</span></span>
+      <span class="ln"><span style="color:#c586c0;font-style:italic">@app.entrypoint</span></span>
       <span class="ln"><span style="color:#c586c0">def</span> <span style="color:#dcdcaa">invoke_agent</span>(payload: <span style="color:#4ec9b0">dict</span>):</span>
-      <span class="ln">    cfg = payload[<span style="color:#ce9178">"_rollout"</span>]</span>
+      <span class="ln">    cfg = payload[<span style="color:#ce9178">"_config"</span>]</span>
       <span class="ln">    model = <span style="color:#4ec9b0">OpenAIModel</span>(</span>
-      <span class="ln">        base_url=cfg[<span style="color:#ce9178">"base_url"</span>],</span>
+      <span class="ln">        client_args={</span>
+      <span class="ln">            <span style="color:#ce9178">"base_url"</span>: cfg[<span style="color:#ce9178">"base_url"</span>],</span>
+      <span class="ln">            <span style="color:#ce9178">"api_key"</span>: cfg[<span style="color:#ce9178">"api_key"</span>],</span>
+      <span class="ln">        },</span>
       <span class="ln">        model_id=cfg[<span style="color:#ce9178">"model_id"</span>],</span>
+      <span class="ln">        params=cfg.get(<span style="color:#ce9178">"sampling_params"</span>, {}),</span>
       <span class="ln">    )</span>
       <span class="ln">    agent = <span style="color:#4ec9b0">Agent</span>(model=model, tools=[...])</span>
       <span class="ln">    response = agent(payload[<span style="color:#ce9178">"prompt"</span>])</span>
-      <span class="ln">    <span style="color:#c586c0">return</span> {<span style="color:#ce9178">"rewards"</span>: reward_fn(response)}</span></code></pre>
+      <span class="ln">    <span style="color:#c586c0">return</span> {<span style="color:#ce9178">"reward"</span>: <span style="color:#4ec9b0">float</span>(reward_fn(response))}</span></code></pre>
         </div>
         <div class="hero-step-panel" data-panel="2">
           <pre class="hero-code"><code><span class="ln"><span style="color:#6a9955"># Install the AgentCore CLI</span></span>
@@ -58,8 +62,10 @@ hero:
         </div>
         <div class="hero-step-panel" data-panel="3">
           <pre class="hero-code"><code><span class="ln"><span style="color:#6a9955"># config.yaml</span></span>
-      <span class="ln">agent_runtime_arn: <span style="color:#ce9178">"arn:aws:bedrock-agentcore:..."</span></span>
-      <span class="ln">s3_bucket: <span style="color:#ce9178">"my-bucket"</span></span>
+      <span class="ln">rollout_session_backend:</span>
+      <span class="ln">  backend: &gt;-</span>
+      <span class="ln">    agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession</span>
+      <span class="ln">  agentcore_runtime_arn: <span style="color:#ce9178">"arn:aws:bedrock-agentcore:..."</span></span>
       <span class="ln"></span>
       <span class="ln"><span style="color:#6a9955"># Launch slime with the AgentCore rollout hooks</span></span>
       <span class="ln">SLIME_DIR=/path/to/slime \</span>

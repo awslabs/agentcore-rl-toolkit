@@ -38,12 +38,6 @@ appworld download data
 CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-4B-Instruct-2507 --max-model-len 8192 --port 4000 --enable-auto-tool-choice --tool-call-parser hermes
 ```
 
-### Setup S3
-
-```bash
-aws s3 mb s3://agentcore-rl
-```
-
 ### Prepare the environment file
 
 Prepare the environment file so Strands runs in non-interactive server mode:
@@ -67,11 +61,7 @@ curl -X POST http://localhost:8080/invocations \
      -H "Content-Type: application/json" \
      -d '{
        "task_id": "3d9a636_1",
-       "_rollout": {
-         "exp_id": "appworld_test",
-         "s3_bucket": "agentcore-rl",
-         "session_id": "session_001",
-         "input_id": "test_0",
+       "_config": {
          "base_url": "http://localhost:4000/v1",
          "model_id": "Qwen/Qwen3-4B-Instruct-2507",
          "sampling_params": {"max_completion_tokens": 8192}
@@ -79,9 +69,8 @@ curl -X POST http://localhost:8080/invocations \
      }'
 ```
 
-You should see the rollout and reward saved as a json file in s3 folder `s3://agentcore-rl/appworld_test/prompt_123`.
-
-> **Note:** The `_rollout` config must include `base_url` and `model_id`, which tell the agent which inference server to use. The remaining fields (`exp_id`, `s3_bucket`, `session_id`, `input_id`) control S3 result storage and are optional — if omitted, S3 save will be skipped.
+The request returns `{"reward": ...}`. Training and evaluation clients use
+background HTTP start/get with the same `_config` fields.
 
 ## Docker
 
@@ -95,18 +84,6 @@ docker buildx build \
   -t appworld:dev --load \
   -f $APPWORLD_DIR/Dockerfile \
   $APPWORLD_DIR
-```
-
-The agent inside the container needs AWS credentials to access S3 (for saving rollout results and downloading datasets). Since Docker containers can't access your host's AWS credential, you need to pass them explicitly via an `.env` file:
-
-```bash
-cp $APPWORLD_DIR/.env.example $APPWORLD_DIR/.env
-# Edit .env and add your AWS credentials.
-# If you have configured your AWS credential, you should be able to find
-# them at ~/.aws/credentials.
-# AWS_ACCESS_KEY_ID=your_access_key_id
-# AWS_SECRET_ACCESS_KEY=your_secret_access_key
-# AWS_REGION=us-west-2
 ```
 
 Then start the server as follows, and send the request.
@@ -172,27 +149,24 @@ The deploy script will print the Amazon Resource Name (ARN) of your deployed age
 
 ## Evaluate
 
-After deploying the agent to ACR, you can run batch evaluation against the AppWorld benchmark. The evaluation script uses `RolloutClient` to submit requests to ACR and poll S3 for results.
+After deploying the agent to ACR, you can run batch evaluation against the AppWorld benchmark. The evaluation script uses `AgentCoreHttpSession` for background HTTP invocations and session cleanup, and writes completed results to JSONL.
 
 First, fill in the `agent_arn` and the `[eval]` section in your `config.toml`:
 
 - **`agent_arn`**: The ARN printed in the deploy step output log.
-- **`s3_output_bucket`**: The S3 bucket where evaluation rollout results will be saved.
 
 ```toml
 [agentcore]
 agent_arn = "arn:aws:bedrock-agentcore:REGION:ACCOUNT_ID:runtime/AGENT_ID"
 
 [eval]
-s3_output_bucket = "agentcore-rl"
 base_url = "http://INFERENCE_SERVER_IP:4000/v1"
 model_id = "Qwen/Qwen3-4B-Instruct-2507"
 sampling_params = {temperature = 0.0}
 ```
 
-The evaluation script (`evaluate.py`) is async and supports two modes:
-- **batch** (default): Uses `run_batch_async()` with managed concurrency
-- **individual**: Uses `invoke_async()` + `gather` for fine-grained control
+The evaluator bounds concurrency with `--max_concurrent` and session starts with
+`--tps_limit`, and stops every session on completion or timeout.
 
 Ensure you have run `appworld download data` to download appworld dataset folder into the same path where you will run evaluation, evaluation script will load AppWorlds's built-in dataset splits (`train`, `dev`, `test_normal`, `test_challenge`) via `--dataset` from the dataset folder.
 
@@ -208,29 +182,20 @@ python evaluate.py --dataset test_normal --exp_id my_eval_test --limit 5
 # Only difficulty-1 tasks from the train split
 python evaluate.py --dataset train --difficulty 1 --exp_id my_eval_easy
 
-# Individual mode (invoke_async + gather)
-python evaluate.py --dataset test_normal --mode individual --exp_id my_eval_individual --timeout 1800
 ```
 
 Note that all arguments can also be passed via CLI to override `config.toml` values.
 
-### Connection pool sizing
-
-The evaluation script accepts `--max_pool_connections` (default: 10) to control the urllib3 connection pool size for boto3 clients. If this value is smaller than `--max_concurrent`, you may see urllib3 warnings like `"Connection pool is full, discarding connection"`. This is **not an error** — requests still succeed, but excess connections are created and discarded instead of being reused from the pool, adding minor TCP/TLS handshake overhead. To eliminate these warnings, set `--max_pool_connections` to match `--max_concurrent`:
-
-```bash
-python evaluate.py --dataset test_normal --exp_id my_eval --max_concurrent 50 --max_pool_connections 50
-```
-
-Results are saved as JSONL files under `results/` (e.g., `results/my_eval.jsonl`).
+Results are saved as `<output_dir>/<exp_id>.jsonl`; pass `--output_dir ./results`
+to choose a directory. The default is under the operating system's temporary directory.
 
 ## File Structure
 
 ```
 strands_appworld_agent/
-├── rl_app.py            # AgentCoreRLApp with @rollout_entrypoint (ReAct code agent)
+├── rl_app.py            # AgentCoreRuntimeApp with @app.entrypoint (ReAct code agent)
 ├── reward.py            # AppWorldReward (pass_count / num_tests)
-├── evaluate.py          # Async batch evaluation via RolloutClient (ACR)
+├── evaluate.py          # Async batch evaluation via AgentCoreHttpSession (ACR)
 ├── deploy.py            # Deploy container to AgentCore
 ├── Dockerfile           # ACR container (AppWorld data baked in)
 ├── config.example.toml  # Configuration template

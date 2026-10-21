@@ -20,15 +20,13 @@ The example training scripts have been run end to end with:
 ## Prerequisites
 
 - A GPU cluster supported by the pinned CUDA 13 stack.
-- AWS credentials that can invoke the AgentCore Runtime and read/write the result
-  S3 bucket.
-- A deployed `AgentCoreRLApp` whose OpenAI-compatible model client forwards
-  `payload["_rollout"]["api_key"]`.
+- AWS credentials that can invoke the AgentCore Runtime and stop its sessions.
+- A deployed `AgentCoreRuntimeApp` whose OpenAI-compatible model client forwards
+  `payload["_config"]["api_key"]`.
 - Network routing from the AgentCore containers to the trainer nodes' rollout
   gateway ports.
 
-The backend is pinned to a tested verl commit through `tool.uv.sources`, so install
-it from a checkout of this repository:
+The backend is pinned to verl 0.9.0. Install it from a checkout of this repository:
 
 ```bash
 uv sync --extra verl
@@ -47,12 +45,12 @@ uv sync --extra verl --group verl-megatron
 ## Adapt the agent
 
 The trainer generates one capture-session key per rollout and supplies it as
-`_rollout.api_key`. Pass that value to the model client:
+`_config.api_key`. Pass that value to the model client:
 
 ```python
-@app.rollout_entrypoint
+@app.entrypoint
 def invoke_agent(payload: dict, context):
-    rollout_config = payload["_rollout"]
+    rollout_config = payload["_config"]
     api_key = rollout_config.get("api_key") or "EMPTY"
     model = OpenAIModel(
         client_args={
@@ -62,7 +60,7 @@ def invoke_agent(payload: dict, context):
         model_id=rollout_config["model_id"],
         params=rollout_config.get("sampling_params", {}),
     )
-    # Run the agent and return {"rewards": score}.
+    # Run the agent and return {"reward": score}.
 ```
 
 The fallback `"EMPTY"` keeps local evaluation and unauthenticated inference
@@ -96,7 +94,6 @@ precedence when present.
 ```bash
 cd src/agentcore_rl_toolkit/backends/verl/examples/math_agent
 export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/...
-export ACR_S3_BUCKET=your-results-bucket
 python preprocess_gsm8k.py --output-dir gsm8k
 ./fsdp_fft_sync_grpo.sh
 ```
@@ -108,8 +105,8 @@ trailing arguments:
 ./fsdp_fft_sync_grpo.sh trainer.logger='["console","wandb"]'
 ```
 
-The accompanying `agentcore_agent.yaml` contains the AgentCore runtime ARN, result
-bucket, per-turn token limit, timeout, and gateway settings. Values that vary by run
+The accompanying `agentcore_agent.yaml` contains the AgentCore runtime ARN, HTTP
+session backend, per-turn token limit, timeout, and gateway settings. Values that vary by run
 use OmegaConf environment interpolation.
 
 ## Advanced example: MigrationBench with Megatron
@@ -134,7 +131,7 @@ for the complete setup and training commands.
   budget, while `max_tokens_per_turn` in `agentcore_agent.yaml` limits each model
   call.
 - The only supported reward mode is agent-side scoring: the app returns
-  `{"rewards": score}`. Trainer-side reward functions are not yet supported.
+  `{"reward": score}`. Trainer-side reward functions are not yet supported.
 
 For the full token-budget model, failure behavior, gateway networking options, and
 troubleshooting notes, see the

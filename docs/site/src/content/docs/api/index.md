@@ -5,16 +5,9 @@ sidebar:
   hidden: true
 ---
 
-:::note[Skeleton page]
-The API reference pages are generated from source docstrings via
-`pydoc-markdown` (wired in M2 of the
-[docs roadmap](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/docs/plan/roadmap/astro-starlight-docs-setup.md)).
-Run `pnpm gen:api` to regenerate `app.md`, `client.md`, and
-`reward.md` from the Python source.
-:::
+Generated from source docstrings by `pnpm gen:api`.
 
-## Modules
-
-- **[app](./app/)** — `AgentCoreRLApp`, the `@rollout_entrypoint` decorator.
-- **[client](./client/)** — `RolloutClient`, `RolloutFuture`, `BatchResult` family.
-- **[reward](./reward/)** — `RewardFunction` base class.
+- **[HTTP server](./core/runtime-app/)** — `AgentCoreRuntimeApp` and `@app.entrypoint`.
+- **[HTTP client](./core/http-client/)** — `AgentCoreHttpClient`, `InvocationHandle`, and `InvocationError`.
+- **[HTTP rollout session](./core/http-session/)** — `AgentCoreHttpSession` with session cleanup.
+- **[Reward](./core/reward/)** — `RewardFunction` base class.

@@ -7,21 +7,21 @@ Usage:
     uv run python benchmark.py --exp_id my_run --resume
 
 Results are saved to:
-    - results/{exp_id}/rollouts.jsonl  (per-task results, streamed)
-    - results/{exp_id}/summary.json    (final scores)
-    - S3: s3://{s3_output_bucket}/{exp_id}/...
+    - <output_dir>/{exp_id}/rollouts.jsonl  (per-task results, streamed)
+    - <output_dir>/{exp_id}/summary.json    (final scores)
 """
 
 import argparse
+import asyncio
 import json
 import logging
+import tempfile
 import time
 import tomllib
 from pathlib import Path
 
 import boto3
-
-from agentcore_rl_toolkit import RolloutClient
+from evaluate import evaluate
 
 logging.basicConfig(
     level=logging.INFO,
@@ -194,10 +194,9 @@ def main():
     parser = argparse.ArgumentParser(description="Run OfficeBench benchmark on AgentCore")
     parser.add_argument("--agent_arn", type=str, default=agentcore_config.get("agent_arn"))
     parser.add_argument("--s3_input_bucket", type=str, default=eval_config.get("s3_input_bucket"))
-    parser.add_argument("--s3_output_bucket", type=str, default=eval_config.get("s3_output_bucket"))
     parser.add_argument("--base_url", type=str, default=eval_config.get("base_url"))
     parser.add_argument("--model_id", type=str, default=eval_config.get("model_id"))
-    parser.add_argument("--exp_id", type=str, default="benchmark", help="Experiment ID (also S3 folder)")
+    parser.add_argument("--exp_id", type=str, default="benchmark", help="Experiment ID")
     parser.add_argument("--max_concurrent", type=int, default=100, help="Max concurrent ACR sessions")
     parser.add_argument("--timeout", type=float, default=1800.0, help="Timeout per task (seconds)")
     parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature")
@@ -215,14 +214,21 @@ def main():
     )
     parser.add_argument("--resume", action="store_true", help="Resume from existing results")
 
+    parser.add_argument("--tps_limit", type=int, default=5)
+    parser.add_argument("--output_dir", type=Path, default=Path(tempfile.gettempdir()) / "officebench-benchmarks")
     args = parser.parse_args()
+    for field in ("max_concurrent", "tps_limit", "timeout"):
+        if getattr(args, field) <= 0:
+            parser.error(f"--{field} must be positive")
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
 
     if not args.agent_arn:
         parser.error("--agent_arn required (or set agentcore.agent_arn in config.toml)")
     if not args.s3_input_bucket:
         parser.error("--s3_input_bucket required")
-    if not args.s3_output_bucket:
-        parser.error("--s3_output_bucket required")
+    if args.base_url and not args.model_id:
+        parser.error("--model_id is required with --base_url")
 
     # Discover subtasks
     logger.info(f"Listing subtasks from {args.s3_input_bucket}...")
@@ -239,7 +245,7 @@ def main():
     logger.info(f"Total subtasks to evaluate: {len(entries)}")
 
     # Setup results
-    results_dir = Path(__file__).parent / "results" / args.exp_id
+    results_dir = args.output_dir / args.exp_id
     results_dir.mkdir(parents=True, exist_ok=True)
     result_path = results_dir / "rollouts.jsonl"
     summary_path = results_dir / "summary.json"
@@ -259,9 +265,6 @@ def main():
     if not remaining:
         logger.info("All tasks already completed!")
     else:
-        # Prepare payloads
-        payloads = [{"task_uri": e["task_uri"], "testbed_uri": e["testbed_uri"]} for e in remaining]
-
         # Build sampling params from CLI args
         sampling_params = {}
         if args.temperature is not None:
@@ -273,56 +276,9 @@ def main():
         if args.thinking_budget is not None:
             sampling_params["thinking_budget"] = args.thinking_budget
 
-        # Create client (sampling_params passed via extra_config into _rollout)
-        client_kwargs = {
-            "agent_runtime_arn": args.agent_arn,
-            "s3_bucket": args.s3_output_bucket,
-            "exp_id": args.exp_id,
-            "base_url": args.base_url,
-            "model_id": args.model_id,
-        }
-        if sampling_params:
-            client_kwargs["sampling_params"] = sampling_params
-        client = RolloutClient(**client_kwargs)
-
-        logger.info(f"Starting benchmark: max_concurrent={args.max_concurrent}, timeout={args.timeout}s")
+        args.sampling_params = sampling_params
         benchmark_start = time.time()
-        done_count = len(completed)
-
-        for item in client.run_batch(payloads, max_concurrent_sessions=args.max_concurrent, timeout=args.timeout):
-            done_count += 1
-            entry = remaining[item.index]
-            task_id = entry["task_id"]
-            subtask_id = entry["subtask_id"]
-            category = task_id.split("-")[0]
-            display_id = f"{task_id}/{subtask_id}"
-
-            record = {
-                "task_id": task_id,
-                "subtask_id": subtask_id,
-                "category": category,
-                "success": item.success,
-                "task_uri": entry["task_uri"],
-            }
-
-            if item.success:
-                record["result"] = item.result
-                record["elapsed"] = item.elapsed
-                rewards = item.result.get("rewards", 0.0)
-                is_pass = rewards == 1.0
-                record["is_pass"] = is_pass
-                logger.info(
-                    f"[{done_count}/{len(entries)}] {display_id} "
-                    f"{'PASS' if is_pass else 'FAIL'} (reward={rewards}, {item.elapsed:.1f}s)"
-                )
-            else:
-                record["error"] = item.error
-                record["elapsed"] = item.elapsed
-                record["is_pass"] = False
-                logger.warning(f"[{done_count}/{len(entries)}] {display_id} ERROR ({item.elapsed:.1f}s): {item.error}")
-
-            with open(result_path, "a") as f:
-                f.write(json.dumps(record) + "\n")
+        asyncio.run(evaluate(args, remaining, result_path))
 
     # Compute and save summary
     wall_clock_time = time.time() - benchmark_start if "benchmark_start" in dir() else 0

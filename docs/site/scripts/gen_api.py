@@ -15,10 +15,12 @@ Run with:  pnpm gen:api
 Output structure:
     api/
       core/
-        app.md
-        client.md
+        runtime-app.md
+        http-client.md
+        http-session.md
         reward.md
 """
+
 from __future__ import annotations
 
 import re
@@ -54,31 +56,35 @@ class ModuleSpec:
     # public (leading-underscore names are always dropped). This is
     # how we keep internal helpers out of the rendered API reference.
     include: tuple[str, ...] | None = None
+    # Keep class summaries; omit module-level implementation notes.
+    brief: bool = False
 
 
 MODULES: list[ModuleSpec] = [
     # --- Core --- #
-    # app: only AgentCoreRLApp. RolloutConfig is an internal dataclass.
     ModuleSpec(
-        dotted_paths=("agentcore_rl_toolkit.app",),
-        out_path="core/app.md",
-        title="app",
-        description="AgentCoreRLApp and the @rollout_entrypoint decorator.",
-        include=("AgentCoreRLApp",),
+        dotted_paths=("agentcore_rl_toolkit.runtime.app",),
+        out_path="core/runtime-app.md",
+        title="HTTP server",
+        description="AgentCoreRuntimeApp and the HTTP invocation lifecycle.",
+        include=("AgentCoreRuntimeApp",),
+        brief=True,
     ),
-    # client: the trainer/evaluator-side surface.
     ModuleSpec(
-        dotted_paths=("agentcore_rl_toolkit.client",),
-        out_path="core/client.md",
-        title="client",
-        description="RolloutClient, RolloutFuture, and the BatchResult family.",
-        include=(
-            "RolloutClient",
-            "RolloutFuture",
-            "BatchResult",
-            "AsyncBatchResult",
-            "BatchItem",
-        ),
+        dotted_paths=("agentcore_rl_toolkit.runtime.client",),
+        out_path="core/http-client.md",
+        title="HTTP client",
+        description="AgentCoreHttpClient, InvocationHandle, and InvocationError.",
+        include=("AgentCoreHttpClient", "InvocationHandle", "InvocationError"),
+        brief=True,
+    ),
+    ModuleSpec(
+        dotted_paths=("agentcore_rl_toolkit.rollout_session.agentcore_http_session",),
+        out_path="core/http-session.md",
+        title="HTTP rollout session",
+        description="AgentCoreHttpSession for invocation and per-rollout cleanup.",
+        include=("AgentCoreHttpSession",),
+        brief=True,
     ),
     # reward: just the ABC users subclass.
     ModuleSpec(
@@ -91,19 +97,37 @@ MODULES: list[ModuleSpec] = [
 ]
 
 
-def _render_signature(obj: griffe.Function | griffe.Class) -> str:
-    """Render a parameter list for a function/class; skip 'self'/'cls'."""
-    params: list[str] = []
-    for p in obj.parameters:
-        if p.name in ("self", "cls"):
-            continue
-        piece = p.name
+def _signature_parts(obj: griffe.Function | griffe.Class) -> list[tuple[str, str]]:
+    """Render parameters and preserve positional/keyword calling conventions."""
+    params = [p for p in obj.parameters if p.name not in ("self", "cls")]
+    parts: list[tuple[str, str]] = []
+    keyword_only = False
+    for index, p in enumerate(params):
+        if p.kind == griffe.ParameterKind.keyword_only and not keyword_only:
+            parts.append(("*", "*"))
+            keyword_only = True
+        prefix = ""
+        if p.kind == griffe.ParameterKind.var_positional:
+            prefix = "*"
+            keyword_only = True
+        elif p.kind == griffe.ParameterKind.var_keyword:
+            prefix = "**"
+        piece = prefix + p.name
         if p.annotation is not None:
             piece += f": {p.annotation}"
-        if p.default is not None:
+        if p.default is not None and not prefix:
             piece += f" = {p.default}"
-        params.append(piece)
-    return ", ".join(params)
+        parts.append((p.name, piece))
+        if p.kind == griffe.ParameterKind.positional_only and (
+            index + 1 == len(params) or params[index + 1].kind != griffe.ParameterKind.positional_only
+        ):
+            parts.append(("/", "/"))
+    return parts
+
+
+def _render_signature(obj: griffe.Function | griffe.Class) -> str:
+    """Render a parameter list for a function/class; skip 'self'/'cls'."""
+    return ", ".join(piece for _, piece in _signature_parts(obj))
 
 
 _SECTION_COMMENT = re.compile(r"^\s*#\s*---\s*(.+?)\s*---\s*$")
@@ -158,20 +182,13 @@ def _render_call_multiline(name: str, obj: griffe.Function | griffe.Class) -> st
     sections = _field_sections(source_file)
 
     lines: list[str] = []
-    for p in obj.parameters:
-        if p.name in ("self", "cls"):
-            continue
-        if p.name in sections:
-            header = sections[p.name]
+    for param_name, piece in _signature_parts(obj):
+        if param_name in sections:
+            header = sections[param_name]
             # Blank line before each section except the first.
             if lines:
                 lines.append("")
             lines.append(f"    # --- {header} ---")
-        piece = p.name
-        if p.annotation is not None:
-            piece += f": {p.annotation}"
-        if p.default is not None:
-            piece += f" = {p.default}"
         lines.append(f"    {piece},")
 
     if not lines:
@@ -248,17 +265,20 @@ def _render_function(fn: griffe.Function, *, heading: str = "###") -> str:
     if fn.returns:
         returns = f" -> {fn.returns}"
     doc = _render_docstring(fn.docstring)
-    pieces = [f"{heading} `{fn.name}({sig}){returns}`"]
+    prefix = "async " if "async" in fn.labels else ""
+    pieces = [f"{heading} `{prefix}{fn.name}({sig}){returns}`"]
     if doc:
         pieces.append(doc)
     return "\n\n".join(pieces)
 
 
-def _render_class(cls: griffe.Class) -> str:
+def _render_class(cls: griffe.Class, *, brief: bool = False) -> str:
     base_names = [str(b) for b in cls.bases] if cls.bases else []
     bases = f"({', '.join(base_names)})" if base_names else ""
     pieces: list[str] = [f"## `class {cls.name}{bases}`"]
     doc = _render_docstring(cls.docstring)
+    if brief:
+        doc = doc.split("\n\n", 1)[0]
     if doc:
         pieces.append(doc)
 
@@ -305,11 +325,13 @@ def _render_class(cls: griffe.Class) -> str:
 def _render_module_body(
     mod: griffe.Module,
     include: tuple[str, ...] | None = None,
+    *,
+    brief: bool = False,
 ) -> str:
     """Render the body of a module (no frontmatter). Can be
     concatenated with other module bodies onto a single page."""
     pieces: list[str] = []
-    mod_doc = _render_docstring(mod.docstring)
+    mod_doc = "" if brief else _render_docstring(mod.docstring)
     if mod_doc:
         pieces.append(mod_doc)
 
@@ -338,7 +360,7 @@ def _render_module_body(
         functions.sort(key=lambda f: f.name)
 
     for cls in classes:
-        pieces.append(_render_class(cls))
+        pieces.append(_render_class(cls, brief=brief))
 
     if functions:
         if len(functions) > 1 and not classes:
@@ -403,7 +425,7 @@ def main() -> int:
                 sections.append(f"## `{dotted}`")
             else:
                 sections.append(f"_module: `{dotted}`_")
-            sections.append(_render_module_body(mod, spec.include))
+            sections.append(_render_module_body(mod, spec.include, brief=spec.brief))
 
         text = "\n\n".join(s for s in sections if s).rstrip() + "\n"
         out_file = OUT_DIR / spec.out_path

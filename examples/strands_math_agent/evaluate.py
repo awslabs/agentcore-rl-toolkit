@@ -1,4 +1,4 @@
-"""Evaluation script for GSM8K math agent using RolloutClient.run_batch().
+"""Evaluation script for GSM8K math agent through background HTTP invocations.
 
 Loads GSM8K data from HuggingFace, extracts prompt/ground_truth,
 and performs bulk invocation through a deployed AgentCore runtime.
@@ -6,21 +6,27 @@ and performs bulk invocation through a deployed AgentCore runtime.
 Usage:
     uv run python evaluate.py \
         --agent_arn arn:aws:bedrock-agentcore:us-west-2:123456789:runtime/abc123 \
-        --s3_bucket my-rollout-bucket \
         --base_url http://localhost:8000/v1 \
         --model_id my-model \
         --limit 100
 """
 
 import argparse
+import asyncio
 import json
 import logging
+import math
+import tempfile
 import time
+import uuid
 from pathlib import Path
 
 from datasets import load_dataset
 
-from agentcore_rl_toolkit import RolloutClient
+from agentcore_rl_toolkit.aws_tools.agentcore_tools import close_shared_agentcore_clients
+from agentcore_rl_toolkit.aws_tools.persistent_dict import NullPersister, PersistentDict
+from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
+from agentcore_rl_toolkit.rollout_session.agentcore_http_session import AgentCoreHttpSession
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +52,82 @@ def load_gsm8k(split: str = "test", limit: int | None = None) -> list[dict]:
     return examples
 
 
+async def evaluate(args, entries, result_path):
+    benchmark_start = time.monotonic()
+    semaphore = asyncio.Semaphore(args.max_concurrent)
+    starts = LocalRateLimiter(args.tps_limit)
+    sampling = {"temperature": args.temperature, "max_completion_tokens": args.max_tokens}
+
+    async def run_one(index, entry):
+        async with semaphore:
+            sid = str(uuid.uuid4())
+            started = time.monotonic()
+            task = dict(entry)
+            task["_config"] = {
+                "base_url": args.base_url,
+                "model_id": args.model_id,
+                "api_key": sid,
+                "sampling_params": sampling or {},
+            }
+            record = {
+                "index": index,
+                "session_id": sid,
+                "success": False,
+                "prompt": entry["prompt"],
+                "ground_truth": entry["answer"],
+            }
+            try:
+                async with AgentCoreHttpSession(
+                    sid, PersistentDict(persister=NullPersister()), agentcore_runtime_arn=args.agent_arn
+                ) as session:
+                    await starts.wait_async()
+                    async with asyncio.timeout(args.timeout):
+                        dump = await session.run(task)
+                if dump.exception:
+                    raise RuntimeError(dump.exception)
+                result = dump.task_output or {}
+                reward = result.get("reward")
+                if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(reward):
+                    raise ValueError(f"Expected a finite scalar reward, got {reward!r}")
+                record.update(success=True, result=result, reward=reward)
+            except Exception as exc:
+                record["error"] = f"{type(exc).__name__}: {exc}"
+            record["elapsed"] = time.monotonic() - started
+            return record
+
+    completed = succeeded = task_successes = 0
+    rewards = []
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(run_one(i, entry)) for i, entry in enumerate(entries)]
+            for future in asyncio.as_completed(tasks):
+                record = await future
+                completed += 1
+                succeeded += int(record["success"])
+                passed = record.get("reward") == 1.0
+                task_successes += int(passed)
+                if record["success"]:
+                    rewards.append(record["reward"])
+                with open(result_path, "a") as stream:
+                    stream.write(json.dumps(record) + "\n")
+                logger.info(
+                    "[%d/%d] index=%d elapsed=%.1fs reward=%s error=%s",
+                    completed,
+                    len(entries),
+                    record["index"],
+                    record["elapsed"],
+                    record.get("reward"),
+                    record.get("error"),
+                )
+    finally:
+        await close_shared_agentcore_clients()
+    logger.info("Completed=%d successful_invocations=%d task_successes=%d", completed, succeeded, task_successes)
+    logger.info(
+        "Scored=%d/%d mean_reward=%s", len(rewards), len(entries), sum(rewards) / len(rewards) if rewards else None
+    )
+    logger.info("Total time=%.1fs results=%s", time.monotonic() - benchmark_start, result_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate GSM8K math agent via AgentCore runtime")
     parser.add_argument(
@@ -53,12 +135,6 @@ def main():
         type=str,
         required=True,
         help="AgentCore runtime ARN",
-    )
-    parser.add_argument(
-        "--s3_bucket",
-        type=str,
-        required=True,
-        help="S3 bucket for storing rollout results",
     )
     parser.add_argument(
         "--base_url",
@@ -122,7 +198,19 @@ def main():
         help="Max output tokens per LLM call (default: 1024, matches train.sh MAX_RESPONSE_LEN)",
     )
 
+    parser.add_argument(
+        "--output_dir", type=Path, default=Path(tempfile.gettempdir()) / "strands_math_agent-evaluations"
+    )
     args = parser.parse_args()
+
+    for field in ("max_concurrent", "tps_limit", "timeout"):
+        if getattr(args, field) <= 0:
+            parser.error(f"--{field} must be positive")
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
+    for field in ("base_url", "model_id"):
+        if not getattr(args, field):
+            parser.error(f"--{field} is required")
 
     # Load and process GSM8K data
     logger.info(f"Loading GSM8K {args.split} split from HuggingFace...")
@@ -130,8 +218,8 @@ def main():
     logger.info(f"Loaded {len(examples)} examples")
 
     # Setup results directory and file
-    results_dir = Path(__file__).parent / "results"
-    results_dir.mkdir(exist_ok=True)
+    results_dir = args.output_dir
+    results_dir.mkdir(parents=True, exist_ok=True)
     result_path = results_dir / f"{args.exp_id}.jsonl"
 
     if result_path.exists():
@@ -141,85 +229,7 @@ def main():
 
     logger.info(f"Results will be written to: {result_path}")
 
-    # Create client. sampling_params flow into every request's _rollout field;
-    # the agent (rl_app.py) reads them and applies to the OpenAIModel. Default
-    # temperature=1.0 and max_tokens=1024 match train.sh so eval mirrors the
-    # sampling distribution the policy sees during RL training.
-    client = RolloutClient(
-        agent_runtime_arn=args.agent_arn,
-        s3_bucket=args.s3_bucket,
-        exp_id=args.exp_id,
-        base_url=args.base_url,
-        model_id=args.model_id,
-        tps_limit=args.tps_limit,
-        sampling_params={
-            "temperature": args.temperature,
-            "max_completion_tokens": args.max_tokens,
-        },
-    )
-
-    # Run batch evaluation
-    logger.info(f"Starting evaluation with max_concurrent={args.max_concurrent}, timeout={args.timeout}s...")
-
-    benchmark_start = time.time()
-    completed = 0
-    succeeded = 0
-    failed = 0
-    rewards: list[float] = []
-
-    for item in client.run_batch(examples, max_concurrent_sessions=args.max_concurrent, timeout=args.timeout):
-        completed += 1
-
-        record = {
-            "index": item.index,
-            "success": item.success,
-            "prompt": examples[item.index]["prompt"],
-            "ground_truth": examples[item.index]["answer"],
-        }
-
-        if item.success:
-            succeeded += 1
-            record["result"] = item.result
-            record["elapsed"] = item.elapsed
-            # Use the reward produced by rl_app.py (via GSM8KReward). This is the
-            # same scalar the training loop scores against, so eval and train
-            # accuracy are directly comparable.
-            raw = item.result.get("rewards")
-            reward = float(raw) if isinstance(raw, (int, float)) else None
-            if reward is None:
-                logger.warning(
-                    f"Index {item.index} succeeded but 'rewards' was {raw!r} — "
-                    "check rl_app.py return shape. Skipping in accuracy aggregate."
-                )
-            else:
-                rewards.append(reward)
-                record["reward"] = reward
-            logger.info(
-                f"[{completed}/{len(examples)}] Index {item.index} completed in {item.elapsed:.1f}s - "
-                f"reward: {reward}"
-            )
-        else:
-            failed += 1
-            record["error"] = item.error
-            record["elapsed"] = item.elapsed
-            logger.warning(
-                f"[{completed}/{len(examples)}] Index {item.index} failed in {item.elapsed:.1f}s: {item.error}"
-            )
-
-        with open(result_path, "a") as f:
-            f.write(json.dumps(record) + "\n")
-
-    # Summary. Accuracy is computed over examples that produced a numeric reward
-    # (excludes both failed runs and successful-but-malformed responses).
-    total = len(examples)
-    accuracy = sum(rewards) / len(rewards) if rewards else 0.0
-    total_time = time.time() - benchmark_start
-    logger.info("=" * 50)
-    logger.info(f"Evaluation complete: {succeeded} succeeded, {failed} failed out of {total}")
-    logger.info(f"Scored: {len(rewards)} / {total}")
-    logger.info(f"Accuracy: {accuracy:.4f} ({sum(rewards):.0f}/{len(rewards)})")
-    logger.info(f"Total time: {total_time:.1f}s ({total_time / 60:.1f}m)")
-    logger.info(f"Results saved to: {result_path}")
+    asyncio.run(evaluate(args, examples, result_path))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 
-def build_payload(task_file: str, base_url: str, model_id: str, s3_bucket: str) -> dict:
+def build_payload(task_file: str, base_url: str, model_id: str) -> dict:
     """Build the ACR invocation payload from a raw tau2-bench task file."""
     with open(task_file) as f:
         task = json.load(f)
@@ -19,11 +19,7 @@ def build_payload(task_file: str, base_url: str, model_id: str, s3_bucket: str) 
             "initial_state": task.get("initial_state"),
             "evaluation_criteria": task.get("evaluation_criteria"),
         },
-        "_rollout": {
-            "exp_id": "test",
-            "s3_bucket": s3_bucket,
-            "session_id": "session_123",
-            "input_id": "task_123",
+        "_config": {
             "base_url": base_url,
             "model_id": model_id,
             "sampling_params": {
@@ -50,9 +46,9 @@ def run_acr(payload: dict, agent_name: str) -> None:
     deployed container can reach the vLLM server. Port and path are preserved.
     """
     cluster_ip = subprocess.check_output("hostname -I | awk '{print $1}'", shell=True, text=True).strip()
-    parsed = urlparse(payload["_rollout"]["base_url"])
+    parsed = urlparse(payload["_config"]["base_url"])
     new_netloc = f"{cluster_ip}:{parsed.port}" if parsed.port else cluster_ip
-    payload["_rollout"]["base_url"] = urlunparse(parsed._replace(netloc=new_netloc))
+    payload["_config"]["base_url"] = urlunparse(parsed._replace(netloc=new_netloc))
 
     result = subprocess.run(
         ["agentcore", "invoke", "--agent", agent_name, json.dumps(payload)],
@@ -73,14 +69,11 @@ def main() -> None:
     parser.add_argument(
         "--model-id", required=True, help="Assistant model id (must match the vLLM --served-model-name)"
     )
-    parser.add_argument(
-        "--s3-bucket", default="agentcore-rl", help="S3 bucket for rollout results (default: agentcore-rl)"
-    )
     parser.add_argument("--acr", action="store_true", help="Invoke the deployed ACR agent instead of a local server")
     parser.add_argument("--agent-name", default="strands_taubench_agent_rl", help="ACR agent name (used with --acr)")
     args = parser.parse_args()
 
-    payload = build_payload(args.task, args.base_url, args.model_id, args.s3_bucket)
+    payload = build_payload(args.task, args.base_url, args.model_id)
     if args.acr:
         run_acr(payload, args.agent_name)
     else:

@@ -154,7 +154,7 @@ for component-specific dependencies and the deployment CLI.
    your baseline, then launch the backend's training recipe.
 
 Already have an agent? The
-[`AgentCoreRuntimeApp` example](examples/strands_math_agent/runtime_app.py)
+[`AgentCoreRuntimeApp` example](examples/strands_math_agent/rl_app.py)
 shows how to keep `@app.entrypoint` while running rollouts and returning task
 rewards. Follow your [training backend's guide](#training-backends) for its
 supported agent setup and deployment steps.

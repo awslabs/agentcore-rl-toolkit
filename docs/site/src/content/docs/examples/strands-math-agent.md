@@ -32,11 +32,11 @@ to train.
 
 - **`basic_app.py`** — deployment-ready reference using `BedrockModel`.
 - **`rl_app.py`** — RL-adapted version; reads `base_url` / `model_id`
-  from `_rollout`, returns `{"rewards": ...}`.
+  from `_config`, returns `{"reward": ...}`.
 - **`reward.py`** — `GSM8KReward`: extract the `####` answer, exact-match against ground truth.
-- **`evaluate.py`** — batch-evaluate a deployed ACR agent via `RolloutClient`.
+- **`evaluate.py`** — batch-evaluate a deployed ACR agent via `AgentCoreHttpSession`.
 
-For local setup (Bedrock credentials, local vLLM, S3 bucket,
+For local setup (Bedrock credentials, local vLLM,
 sending `curl` requests), Docker builds, ECR push, IAM setup, and
 full deploy instructions, see the
 [full README on GitHub](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md).

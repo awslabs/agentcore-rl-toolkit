@@ -64,7 +64,7 @@ properties matter, all available in AgentCore Runtime without bespoke infrastruc
 AgentCore Runtime handles hosting; the toolkit wires the
 **training-data pipeline** that makes an agent trainable.
 
-<figure class="art-diagram" role="img" aria-label="Example training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via the rollout gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents save rewards to S3. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
+<figure class="art-diagram" role="img" aria-label="Example training topology: the training backend (right) submits prompts to AgentCore Runtime (left), which runs parallel rollouts. Each rollout's agent calls models via the rollout gateway (center), which proxies to the backend's inference servers and captures rollout data. Agents return rewards. The training engine consumes rollout data + rewards and syncs updated weights back to the inference servers.">
   <svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="dg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -121,13 +121,13 @@ AgentCore Runtime handles hosting; the toolkit wires the
     <text class="dg-sublabel" x="450" y="298" text-anchor="middle">Loss masks</text>
     <text class="dg-sublabel" x="450" y="320" text-anchor="middle">Rewards</text>
 
-    {/* S3 — bottom */}
+    {/* Reward — bottom */}
     <rect class="dg-node" x="340" y="378" width="220" height="56" rx="4" />
-    <text class="dg-label" x="450" y="412" text-anchor="middle">S3 (rewards)</text>
+    <text class="dg-label" x="450" y="412" text-anchor="middle">Reward</text>
 
     {/* Gateway → Rollout Data */}
     <path class="dg-edge" d="M 450 160 L 450 200" marker-end="url(#dg-arrow)" />
-    {/* S3 → Rollout Data */}
+    {/* Reward → Rollout Data */}
     <path class="dg-edge" d="M 450 378 L 450 340" marker-end="url(#dg-arrow)" />
 
     {/* ── Right column — Training Backend ── */}
@@ -159,10 +159,10 @@ AgentCore Runtime handles hosting; the toolkit wires the
     {/* Inference Servers → Gateway */}
     <path class="dg-edge" d="M 640 142 L 560 142" marker-end="url(#dg-arrow)" />
 
-    {/* Evaluate (x=60..216, y=340..396, center y=368) → S3 (x=340..560, y=378..434, center y=406).
-         Route with an elbow: out of Evaluate's right edge, down a bit, then into S3's left edge. */}
+    {/* Evaluate (x=60..216, y=340..396, center y=368) → Reward (x=340..560, y=378..434, center y=406).
+         Route with an elbow: out of Evaluate's right edge, down a bit, then into the reward node's left edge. */}
     <path class="dg-edge" d="M 216 368 L 278 368 L 278 406 L 340 406" marker-end="url(#dg-arrow)" />
-    <text class="dg-edge-label" x="228" y="360" text-anchor="start">save reward</text>
+    <text class="dg-edge-label" x="228" y="360" text-anchor="start">return result</text>
 
     {/* Rollout Data (x=340..560, y=200..340, right-edge center y=270) → Training Engine (x=640..860, y=320..400, center y=360).
          Elbow: out of Rollout Data right edge, down, then into Training Engine left edge. */}

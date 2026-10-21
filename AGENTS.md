@@ -27,9 +27,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 
 | File | Purpose |
 |------|---------|
-| `src/agentcore_rl_toolkit/app.py` | `AgentCoreRLApp` base class, `@rollout_entrypoint` decorator |
 | `src/agentcore_rl_toolkit/runtime/` | `AgentCoreRuntimeApp`: optional HTTP `start/get` invocation lifecycle with filesystem records |
-| `src/agentcore_rl_toolkit/client.py` | `RolloutClient` and `RolloutFuture` for training integration and batch evaluation |
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
 | `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl extras that have not graduated into `backends/verl/`: `RolloutSessionAgentLoop` (sandbox-session rollouts, used by the SWE agent example), its task runner, and trainer mixins |
@@ -43,6 +41,12 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
 | `examples/strands_appworld_agent/` | AppWorld API interaction agent example |
+
+### Migrating from v0.1.x
+
+`AgentCoreRLApp`, `RolloutClient` / `RolloutFuture`, and `AgentCoreS3Session`
+are deprecated and retained for existing callers. To upgrade an existing agent,
+training configuration, or evaluator, see [MIGRATION.md](MIGRATION.md).
 
 ---
 
@@ -80,25 +84,11 @@ for the full API.
 
 ### What agentcore-rl-toolkit Provides
 
-When performing rollout in ACR during RL, we need to collect the rollout and reward and return them to the training engine. A naive approach of waiting synchronously requires maintaining many TCP connections, which is brittle and hard to manage.
-
-#### Design Pattern 1: Fire-and-forget with background async processing
-
-With `@app.rollout_entrypoint` decorator replacing `@app.entrypoint`:
-- Agent processing moves to the background immediately
-- Server returns an in-progress message right away
-- Health status from `/ping` is automatically managed (busy while working, idle when done)
-- ACR can manage session lifecycle to avoid early termination or wasteful idle sessions
-
-#### Design Pattern 2: S3-based result delivery with HEAD polling
-
-Since the client won't get results directly from HTTP:
-- `@app.rollout_entrypoint` requires returning rollout and reward from the entrypoint
-- Rollout data is saved to S3 with a predictable key returned in the immediate HTTP response
-- Client polls S3 using efficient HEAD requests to detect when each result is available
-- No additional messaging infrastructure required — S3 is the single source of truth
-
-On the client side, `RolloutClient` and `RolloutFuture` are the complement to these server-side patterns — they handle submitting requests to ACR and polling S3 for results, so both sides work together to manage long-running async agent tasks end-to-end. See the [Evaluation](#evaluation) section for details.
+Training uses `AgentCoreRuntimeApp` with `@app.entrypoint`. The trainer sends task
+fields plus `_config` (model endpoint, model ID, capture-session API key), requests
+background execution, and retrieves the scalar `reward` through HTTP `start/get`.
+The rollout gateway captures token IDs, logprobs, and loss masks independently.
+`AgentCoreHttpSession` owns per-rollout session cleanup.
 
 #### Core Classes
 
@@ -113,7 +103,7 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
 - Records live under configurable `state_dir`, defaulting to `.agentcore_runtime` under the OS temporary directory (`TMPDIR`).
 - One app process serves one Runtime session; live tasks are keyed by invocation ID. Filesystem records retain session-specific paths; use a managed mount for stop/resume persistence.
 - Protocol handlers return JSON values; terminal errors use an `error` string. Terminal errors, `interrupted`, and `not_found` are HTTP 200 states, while storage failures are operation errors.
-- `AgentCoreHttpClient` drives this app; the existing `RolloutClient` still uses S3. See [the app design](designs/agentcore_runtime_app.md) for HTTP mapping and implementation decisions, and [RIP](designs/runtime_invocation_protocol.md) for the shared lifecycle contract.
+- `AgentCoreHttpClient` drives this app. See [the app design](designs/agentcore_runtime_app.md) for HTTP mapping and implementation decisions, and [RIP](designs/runtime_invocation_protocol.md) for the shared lifecycle contract.
 - `AgentCoreHttpClient.invoke()` returns a foreground result or a background `InvocationHandle`.
   `AgentCoreHttpSession` owns per-rollout cleanup;
   the Tinker backend uses it with flat task payloads and singular `reward`.
@@ -123,12 +113,6 @@ On the client side, `RolloutClient` and `RolloutFuture` are the complement to th
   `RUNTIME_TEST_ARN=arn:... uv run pytest tests/runtime/test_live.py`.
   Without the ARN they skip. Each test stops its own sessions; the Runtime stays
   deployed for reuse. The agent needs no model, S3, or managed session storage.
-
-**AgentCoreRLApp** (`src/agentcore_rl_toolkit/app.py`)
-- Inherits `BedrockAgentCoreApp` - drop-in replacement
-- Provides `@app.rollout_entrypoint` decorator
-- Expects `_rollout` dict in payload with `RolloutConfig` fields (`exp_id`, `input_id`, `s3_bucket`) plus optional pass-through config (`base_url`, `model_id`, `sampling_params`)
-- Framework-agnostic: works with any agent framework, not just Strands
 
 #### Utilities
 
@@ -286,8 +270,7 @@ Key pieces:
   `tc.stop()` is the first statement in the `finally` and a `SIGTERM` handler cancels the
   task rather than letting the signal kill the interpreter before teardown.
 - `rollout.py` — `run_one_rollout()`: drives an `AgentCoreRuntimeApp` agent through
-  `AgentCoreHttpClient` / `AgentCoreHttpSession` (`AgentCoreRLApp` agents are not
-  supported). One UUID per rollout serves as gateway session id, ACR
+  `AgentCoreHttpClient` / `AgentCoreHttpSession`. One UUID per rollout serves as gateway session id, ACR
   `runtimeSessionId`, **and** `api_key` (sent in the payload's `_config` with
   `base_url` / `model_id`). The agent returns a scalar `{"reward": ...}`; reward is
   0.0 (logged, never raised) on timeout, ACR error, agent exception, or a
@@ -355,7 +338,7 @@ via two hook entry points, requiring no changes to slime itself:
   `_config`, alongside `base_url` / `model_id`), runs the task in a `RolloutSession`
   built by `rollout_session.factory.make_session` from the `rollout_session_backend`
   config (e.g. `AgentCoreHttpSession` for an `AgentCoreRuntimeApp` agent such as
-  `examples/strands_math_agent/runtime_app.py`; the session shuts down on exit), drains
+  `examples/strands_math_agent/rl_app.py`; the session shuts down on exit), drains
   `gateway.finish_session` into `TraceRecord`s, and maps each record to a slime
   `Sample`. `tps_limit` caps new sessions per second. A timeout, invocation error, or
   agent exception scores captured turns 0; a rollout with no captured turns returns an
@@ -440,82 +423,12 @@ uv run pytest tests/sandbox/
 Live ACR tests require `SANDBOX_RUNTIME_ARN`. Go CI runs in
 `.github/workflows/sandboxd.yml`.
 
-### Migration Guide (basic_app → rl_app)
+### Agent adaptation
 
-See `examples/strands_math_agent` for a complete example adapting from `basic_app.py` to `rl_app.py`.
-
-#### Step 1: Switch to AgentCoreRLApp & Add Reward Function
-
-- `AgentCoreRLApp` is a thin wrapper around `BedrockAgentCoreApp` — framework-agnostic
-- Users implement the reward function for their use case
-
-```diff
-- from bedrock_agentcore.runtime import BedrockAgentCoreApp
-+ from agentcore_rl_toolkit import AgentCoreRLApp
-+ from reward import GSM8KReward
-
-- app = BedrockAgentCoreApp()
-+ app = AgentCoreRLApp()
-+ reward_fn = GSM8KReward()
-```
-
-#### Step 2: Create Model & Agent Inside Entrypoint
-
-- Model config (`base_url`, `model_id`) comes from the `_rollout` payload, not environment variables
-- Optional `sampling_params` (e.g., `max_completion_tokens`, `temperature`) can also be passed via `_rollout` for training-engine-controlled generation settings
-- Use standard `OpenAIModel` — no custom model wrappers needed. For evaluation, `base_url` can point directly to any OpenAI-compatible endpoint (vLLM, SGLang, LiteLLM, etc.), or you can use `BedrockModel` directly
-- `api_key` is set from `payload["_rollout"].get("api_key")` — the training engine passes the trajectory-capture session key in the `_rollout` config (the verl backend keys token capture off the api-key slot). Fall back to `"EMPTY"` (the standard vLLM convention for unauthenticated servers) for local runs, evaluation endpoints, and gateways with per-session URLs, which ignore the api key
-- Model and agent are created per-invocation inside the entrypoint
-- This gives flexibility for the training engine to pass runtime configuration (inference address, sampling parameters, system prompt, etc.) to accommodate different learning scenarios
-- This is safe because RL rollouts are single-invocation — the agent doesn't need persistent conversation history across requests, so there's no need to keep model/agent as global state
-
-```diff
-- model = BedrockModel(model_id="us.anthropic.claude-sonnet-5-5")
-- agent = Agent(model=model, tools=[calculator], system_prompt="...")
-
-- @app.entrypoint
-- def invoke_agent(payload):
--     response = agent(user_input)
-+ @app.rollout_entrypoint
-+ def invoke_agent(payload: dict, context):
-+     base_url = payload["_rollout"]["base_url"]
-+     model_id = payload["_rollout"]["model_id"]
-+     params = payload["_rollout"].get("sampling_params", {})
-+     api_key = payload["_rollout"].get("api_key") or "EMPTY"  # session key for trajectory-capture gateways
-+     model = OpenAIModel(client_args={"api_key": api_key, "base_url": base_url}, model_id=model_id, params=params)
-+     agent = Agent(model=model, tools=[calculator], system_prompt="...")
-+     response = agent(user_input)
-```
-
-#### Step 3: Compute Rewards & Return Result
-
-The `@rollout_entrypoint` decorator automatically:
-- Executes the function in the background (works with both sync and async functions)
-- Saves the returned dict to S3 with a predictable key
-- Handles errors and saves error results for client awareness
-
-The return value must be a JSON-serializable dict when S3 save is configured. Any dict structure is accepted — there are no required keys. For training, return rewards; for evaluation, return whatever artifacts you need (metrics, conversation history, etc.). You can also persist raw data and run evaluation logic client-side.
-
-**Reserved keys**: The SDK injects metadata into the saved S3 JSON. Avoid using these keys in your return dict:
-- `status_code`, `stop_reason` — added only if not already present in your dict
-- `input_id`, `s3_bucket`, `result_key`, `payload` — always overwritten with SDK values
-
-```diff
--   return response.message["content"][0]["text"]
-+   rewards = reward_fn(response_text=response.message["content"][0]["text"], ground_truth=answer)
-+   return {"rewards": rewards}
-```
-
-Other valid return patterns:
-```python
-# Evaluation-only (no rollout_data needed)
-return {"rewards": rewards, "metrics": {"latency_ms": elapsed}}
-
-# Custom artifacts
-return {"summary": "...", "artifacts": {...}}
-```
-
-Each example in `/examples` contains `basic_app.py` and `rl_app.py` to demonstrate this adaptation.
+Use `AgentCoreRuntimeApp` and retain `@app.entrypoint`. Read model settings from
+`payload["_config"]`, forward its `api_key` to the model client, and return
+`{"reward": float}`. Create the model and agent per invocation. See
+`examples/strands_math_agent/rl_app.py` for the complete example.
 
 ### Deployment to ACR
 
@@ -533,56 +446,19 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
      --tag=latest \
      --context=examples/strands_math_agent
    ```
-3. Training engine takes ECR URI as config for deployment
-4. Model config (`base_url`, `model_id`, and optionally `sampling_params`) is passed via the `_rollout` payload at invocation time
+3. Deploy the image and pass the Runtime ARN to the training backend
+4. Model config (`base_url`, `model_id`, and optionally `sampling_params`) is passed via the `_config` payload at invocation time
 
 ### Evaluation
 
-Users can evaluate agents before and after training using the same `rl_app.py`.
+The Math, MigrationBench, OfficeBench, and AppWorld evaluators use
+`AgentCoreHttpSession` for background HTTP invocations. They bound concurrency
+and session starts, validate the scalar `reward`, write completed results to
+JSONL, and stop sessions on completion or timeout. MigrationBench's
+`examples/strands_migration_agent/evaluate.py` is the reference pattern.
+All four examples use `rl_app.py` backed by
+`AgentCoreRuntimeApp`. Model configuration is supplied in `_config`.
 
-**RolloutClient** (`src/agentcore_rl_toolkit/client.py`) provides both sync and async invocation patterns:
-
-**Sync API** (blocking — suitable for scripts and simple loops):
-- **`invoke()`**: Returns a `RolloutFuture` for fine-grained control — ideal for training loops (e.g., GRPO) where you submit individual rollouts and group results by `input_id`
-- **`run_batch()`**: Higher-level API for batch evaluation — manages concurrency, timeouts, and polling automatically
-
-**Async API** (non-blocking — suitable for `asyncio` event loops in RL training frameworks):
-- **`invoke_async()`**: Like `invoke()` but doesn't block the event loop. Cold starts on one request don't block submission of others.
-- **`run_batch_async()`**: Like `run_batch()` but returns an async iterator with concurrent submission.
-- **`RolloutFuture`** supports `await future`, `future.result_async(timeout=...)`, and `future.done_async()`.
-
-Concretely, `invoke()` / `invoke_async()` sends the request to ACR and returns a `RolloutFuture` immediately — meaning ACR has received the request and a background agent session is processing it. Calling `future.result(timeout=...)` or `await future.result_async(timeout=...)` blocks/waits until the result appears in S3, polling with exponential backoff. It returns the result (rewards, metrics, etc.) once the agent finishes and writes to S3.
-
-Both sync and async patterns share the same infrastructure:
-- **Rate limiting**: Handles ACR TPS limits (25)
-- **Concurrency control**: Manages ACR session limits (1000/account) and model API rate limits
-- **S3 HEAD polling**: Polls S3 for completed results using efficient HEAD requests
-- **Automatic session cancellation**: Sessions are automatically cancelled after result fetch, timeout, or error — callers don't need to manage ACR session lifecycle
-
-**Async usage example:**
-
-```python
-import asyncio
-from agentcore_rl_toolkit import RolloutClient
-
-client = RolloutClient(agent_runtime_arn="arn:...", s3_bucket="my-bucket", exp_id="exp-1")
-
-async def run():
-    # Fire all requests concurrently (cold starts don't block each other)
-    tasks = [asyncio.create_task(client.invoke_async(p)) for p in payloads]
-    futures = await asyncio.gather(*tasks)
-
-    # Wait for all results concurrently
-    results = await asyncio.gather(*[f.result_async(timeout=300) for f in futures])
-    # Or without timeout: results = await asyncio.gather(*futures)
-
-    # Or use run_batch_async for managed concurrency:
-    async for item in client.run_batch_async(payloads, max_concurrent_sessions=100):
-        if item.success:
-            process(item.result)
-```
-
-**Note:** For evaluation, pass the appropriate `base_url`, `model_id`, and optionally `sampling_params` in the `_rollout` payload to point to the desired inference server (training cluster or hosted cloud model).
 
 ---
 
@@ -594,8 +470,6 @@ async def run():
 | `AWS_ACCOUNT` | AWS account ID | Deployment |
 | `ECR_REPO_NAME` | ECR repository name | Deployment |
 
-**Note:** `BASE_URL` and `MODEL_ID` are no longer set via environment variables. They are passed in the `_rollout` payload field along with optional `sampling_params`, allowing the training engine to configure them per-invocation.
-
 See `.env.example` for template. The build script sources `.env` for deployment values.
 
 ---
@@ -606,7 +480,7 @@ See `.env.example` for template. The build script sources `.env` for deployment 
 
 1. Create folder in `examples/{agent_name}/`
 2. Add `basic_app.py` (production version using `BedrockAgentCoreApp`)
-3. Add `rl_app.py` (RL-adapted version using `AgentCoreRLApp` + `OpenAIModel`)
+3. Add `rl_app.py` (RL-adapted version using `AgentCoreRuntimeApp` + `OpenAIModel`)
 4. Add `reward.py` with `RewardFunction` implementation
 5. Add `pyproject.toml` with example-specific dependencies
 6. Run `uv sync` in the example folder
@@ -663,8 +537,8 @@ uv pip install -e . -e '../../[core]'
 - When implementing or changing behavior covered by a document in `designs/`, update the relevant design content in the same change. Do not change its `Implementation` status unless explicitly requested.
 - The `Implementation` field permits exactly three values with this capitalization: `Proposal`, `In progress`, or `Done`. Do not use synonyms, parenthetical explanations, component lists, or other qualifiers.
 - Preserve the existing `Implementation` state unless the user explicitly requests a state transition. Implementing, testing, refactoring, or adding a consumer does not authorize changing this field.
-- Return a JSON-serializable dict from `@rollout_entrypoint` (any structure accepted — no required keys)
-- Create model and agent inside the entrypoint function (not at module level) so config comes from the `_rollout` payload
+- Return a JSON-serializable dict with a finite scalar `reward` from the training `@app.entrypoint`
+- Create model and agent inside the entrypoint function (not at module level) so config comes from the `_config` payload
 - Use standard `OpenAIModel` for OpenAI-compatible inference endpoints (token capture during training is handled at the infrastructure layer)
 - Implement reward functions as classes inheriting `RewardFunction`
 

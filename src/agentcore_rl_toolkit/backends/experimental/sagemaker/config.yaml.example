@@ -5,7 +5,7 @@ role_arn: "arn:aws:iam::<account-id>:role/<your-sagemaker-role>"
 s3_output_path: "s3://<your-s3-bucket>/output/" # S3 to store model checkpoints
 model_package_group_arn: "arn:aws:sagemaker:<region>:<account-id>:model-package-group/<your-group>"
 base_model_arn: "arn:aws:sagemaker:<region>:aws:hub-content/SageMakerPublicHub/Model/<model-name>"
-agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<your-agent-id>" # an AgentCoreRuntimeApp agent, e.g. examples/strands_math_agent/runtime_app.py
+agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<your-agent-id>" # an AgentCoreRuntimeApp agent, e.g. examples/strands_math_agent/rl_app.py
 
 region: "us-east-1"
 

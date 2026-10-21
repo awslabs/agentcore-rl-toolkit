@@ -10,7 +10,7 @@
 
 ## 0. Deploy your agent to AgentCore Runtime (ACR)
 
-Build and deploy an `AgentCoreRuntimeApp` agent to Bedrock AgentCore Runtime; `AgentCoreRLApp` (`rl_app.py`) agents are not supported by this backend. In this instruction, we take `examples/strands_math_agent/runtime_app.py` as an example; see the "Run Runtime App (No S3)" section of its `README.md` to deploy it.
+Build and deploy an `AgentCoreRuntimeApp` agent to Bedrock AgentCore Runtime. In this instruction, we take `examples/strands_math_agent/rl_app.py` as an example; see the "Run RL App" section of its `README.md` to deploy it.
 
 ## 1. Install agentcore-rl-toolkit and SageMaker training SDK
 

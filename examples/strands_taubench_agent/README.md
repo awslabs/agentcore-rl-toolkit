@@ -28,18 +28,18 @@ Training Cluster (e.g. HyperPod)
      ├── Agent Session 2       + Bedrock (user simulator)
      └── ...                   + tau-bench env (tools + DB)
          │
-         └──► S3 (rollout data + rewards)
+         └──► HTTP result (reward + conversation)
 ```
 
 The assistant model is reached over HTTP via `base_url` (passed per-invocation
-in the `_rollout` payload). The user simulator calls Bedrock using the ACR
-container's execution-role credentials — see [IAM permissions](#5-set-up-iam-permissions).
+in the `_config` payload). The user simulator calls Bedrock using the ACR
+container's execution-role credentials — see [IAM permissions](#4-set-up-iam-permissions).
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `rl_app.py` | Entrypoint — multi-turn orchestrator with `@rollout_entrypoint` |
+| `rl_app.py` | Entrypoint — multi-turn orchestrator with `@app.entrypoint` |
 | `reward.py` | `TauBenchReward` — DB / COMMUNICATE / ENV_ASSERTION / ACTION axes, dispatched per task by `reward_basis` |
 | `utils.py` | Strands tool wrapping, message-role conversion, thinking-token handling |
 | `constants.py` | System prompts, user-model config, orchestrator config, `DOMAINS_USER_TOOLS` |
@@ -49,16 +49,14 @@ container's execution-role credentials — see [IAM permissions](#5-set-up-iam-p
 
 ## Prerequisites
 
-- **AWS credentials** with access to Bedrock (user simulator), S3 (rollout
-  results), and AgentCore. Verify with `aws sts get-caller-identity`.
+- **AWS credentials** with access to Bedrock (user simulator) and AgentCore. Verify with `aws sts get-caller-identity`.
 - A **vLLM server** serving the model being trained.
-- An **S3 bucket** for rollout results.
 
 Two separate packages are involved — don't confuse them:
 
 | Package | What it gives you | Source |
 |---------|-------------------|--------|
-| `agentcore-rl-toolkit` (this repo) | The RL SDK (`AgentCoreRLApp`, `@rollout_entrypoint`) **and this example** | `git clone` (below) |
+| `agentcore-rl-toolkit` (this repo) | The RL SDK (`AgentCoreRuntimeApp`, `@app.entrypoint`) **and this example** | `git clone` (below) |
 | `bedrock-agentcore-starter-toolkit` | AWS's `agentcore` CLI used to deploy to ACR | `pip install` (below) |
 
 ## Installation
@@ -159,46 +157,16 @@ printed in the deploy logs):
 - **`agent_runtime_arn`** — the training engine needs it to invoke the agent.
 - **`execution_role`** — the IAM role the agent runs as, e.g.
   `arn:aws:iam::123456789:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123`.
-  You grant it S3 + Bedrock permissions in [step 5](#5-set-up-iam-permissions).
+  You grant it Bedrock permissions in [step 4](#4-set-up-iam-permissions).
 
-### 4. Set up S3
-
-```bash
-aws s3 mb s3://agentcore-rl   # skip if the bucket already exists
-```
-
-Rollout results are written here as `s3://<bucket>/<exp_id>/<input_id>_<session_id>.json`.
-
-### 5. Set up IAM permissions
-
-Grant the ACR agent's execution role permission to write rollout results to S3:
-
-```bash
-# Find execution_role in .bedrock_agentcore.yaml, e.g.
-# arn:aws:iam::123456789:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123
-# -> set ROLE_NAME to the part after "role/"
-ROLE_NAME="YOUR_ROLE_NAME_HERE"
-
-aws iam put-role-policy --role-name $ROLE_NAME \
-  --policy-name TauBenchRLAccess \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": ["s3:PutObject", "s3:GetObject"],
-        "Resource": "arn:aws:s3:::agentcore-rl/*"
-      }
-    ]
-  }'
-```
+### 4. Set up IAM permissions
 
 > The user simulator calls Bedrock (defaults to `global.anthropic.claude-opus-4-6-v1`;
 > see `USER_MODEL_CONFIG` in `constants.py`). The auto-generated ACR execution
 > role normally already grants Bedrock invoke access — if user turns fail with
 > `AccessDeniedException`, add `bedrock:InvokeModel` permission to the role.
 
-### 6. Set up the vLLM server
+### 5. Set up the vLLM server
 
 Serve the model being trained from a vLLM server reachable by ACR. For example:
 
@@ -209,20 +177,16 @@ CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-4B-Instruct-2507 \
 ```
 
 The training engine (or your test) passes this server's address and model id to
-the agent per-invocation via the `_rollout` payload:
+the agent per-invocation via the `_config` payload:
 
 ```jsonc
-"_rollout": {
+"_config": {
   "base_url": "http://<vllm-host>:4000/v1",   // assistant inference endpoint
-  "model_id": "Qwen/Qwen3-4B-Instruct-2507",  // must match --served-model-name
-  "exp_id": "test",
-  "s3_bucket": "agentcore-rl",
-  "session_id": "session_123",
-  "input_id": "task_123"
+  "model_id": "Qwen/Qwen3-4B-Instruct-2507"   // must match --served-model-name
 }
 ```
 
-### 7. Test the agent
+### 6. Test the agent
 
 `test_local.py` runs a single tau-bench task end-to-end. Three sample tasks ship
 in `tasks/` (one per domain) — each is a raw tau2-bench task with a single write
@@ -257,16 +221,14 @@ needed here; the agent runs inside the container, which already has it:
 python test_local.py --task tasks/retail_example.json --acr \
   --agent-name strands_taubench_agent_rl_test \
   --base-url http://localhost:4000/v1 \
-  --model-id Qwen/Qwen3-4B-Instruct-2507 \
-  --s3-bucket agentcore-rl
+  --model-id Qwen/Qwen3-4B-Instruct-2507
 ```
 
-The result (rollout data, reward, conversation, metadata) is written to
-`s3://<bucket>/test/task_123_session_123.json`. Swap `--task` to any of
+The result (`reward`, conversation, metadata) is returned over HTTP. Swap `--task` to any of
 `tasks/{airline,retail,telecom}_example.json` to exercise a different domain —
 the same image serves all three.
 
-### 8. Redeployment
+### 7. Redeployment
 
 After code changes, rebuild and re-register:
 

@@ -40,9 +40,8 @@ a `token_ids -> token_ids + logprobs` sampling backend over the SageMaker
 - AWS credentials with permission to invoke an AgentCore Runtime and create
   SageMaker training sessions.
 - An AgentCore Runtime deployment of an `AgentCoreRuntimeApp` agent, such as
-  [`examples/strands_math_agent/runtime_app.py`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/runtime_app.py).
-  `AgentCoreRLApp` (`@rollout_entrypoint`) agents are not supported by this
-  backend. Save the resulting **runtime ARN** (`agent_runtime_arn` below). The
+  [`examples/strands_math_agent/rl_app.py`](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/rl_app.py).
+  Save the resulting **runtime ARN** (`agent_runtime_arn` below). The
   agent reads `base_url`, `model_id`, and `api_key` from the payload's
   `_config` field (`config.get("api_key") or "EMPTY"`) — the gateway keys token
   capture off the api-key / Bearer slot — and returns `{"reward": <float>}`.

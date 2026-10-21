@@ -3,6 +3,7 @@ import json
 import logging
 import traceback
 import uuid
+import warnings
 from dataclasses import dataclass
 from functools import wraps
 
@@ -38,7 +39,18 @@ class RolloutConfig:
 
 
 class AgentCoreRLApp(BedrockAgentCoreApp):
+    """Deprecated S3 rollout app. Use ``AgentCoreRuntimeApp`` with ``@app.entrypoint``.
+
+    Migration: https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md
+    """
+
     def __init__(self):
+        warnings.warn(
+            "AgentCoreRLApp is deprecated; use AgentCoreRuntimeApp with @app.entrypoint. "
+            "See https://github.com/awslabs/agentcore-rl-toolkit/blob/main/MIGRATION.md",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__()
         configure_logging()
         self.s3_client = boto3.client("s3")

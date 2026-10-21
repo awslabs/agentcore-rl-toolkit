@@ -139,11 +139,8 @@ curl -X POST http://localhost:8080/invocations \
     "require_maximal_migration": false,
     "use_dependency_search_tool": true,
     "apply_static_update": true,
-    "_rollout": {
-        "exp_id": "dev",
-        "s3_bucket": "agentcore-rl",
-        "session_id": "session_x",
-        "input_id": "prompt_y",
+    "_config": {
+        "api_key": "EMPTY",
         "base_url": "http://localhost:4000/v1",
         "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
         "sampling_params": {"max_completion_tokens": 8192}
@@ -264,9 +261,6 @@ Grant IAM permissions to the ACR execution role. The execution role name is stor
 #### 3.1 Grant S3 permission
 
 ```bash
-# Create an S3 bucket to store ACR rollout data
-aws s3 mb s3://agentcore-rl
-
 # Add S3 permissions to the execution role,
 # which is the first `execution_role` in `.bedrock_agentcore.yaml`.
 YOUR_EXECUTION_ROLE=$(grep -m1 'execution_role:' .bedrock_agentcore.yaml | sed 's|.*role/||')
@@ -279,8 +273,8 @@ aws iam put-role-policy --role-name $YOUR_EXECUTION_ROLE \
     "Statement": [
       {
         "Effect": "Allow",
-        "Action": ["s3:PutObject", "s3:GetObject"],
-        "Resource": "arn:aws:s3:::agentcore-rl/*"
+        "Action": ["s3:GetObject"],
+        "Resource": "arn:aws:s3:::my-migration-bench-data/*"
       }
     ]
   }'
@@ -332,7 +326,7 @@ EOF
 
 ## Evaluate
 
-After deploying the agent to ACR, you can run batch evaluation against the MigrationBench dataset. The evaluation scripts use `RolloutClient` to submit requests to ACR and poll S3 for results.
+After deploying the agent to ACR, you can run batch evaluation against the MigrationBench dataset. The evaluation script uses `AgentCoreHttpSession` for background HTTP invocations and session cleanup, and writes completed results to JSONL.
 
 First, create `config.toml` from the example and fill in the `agent_arn` and `[eval]` section:
 
@@ -343,7 +337,6 @@ cp config.example.toml config.toml
 
 - **`agent_arn`**: The ARN saved in `.bedrock_agentcore.yaml` after the deploy step.
 - **`s3_input_bucket`**: The S3 path where `preprocess.py` uploaded the dataset. For example, if you ran `python preprocess.py --s3-bucket-name my-migration-bench-data`, the test split is at `my-migration-bench-data/tars/test/`.
-- **`s3_output_bucket`**: The S3 bucket where evaluation rollout results will be saved.
 
 ```toml
 [agentcore]
@@ -351,13 +344,12 @@ agent_arn = "arn:aws:bedrock-agentcore:REGION:ACCOUNT_ID:runtime/AGENT_ID"
 
 [eval]
 s3_input_bucket = "my-migration-bench-data/tars/test/"
-s3_output_bucket = "agentcore-rl"
 base_url = "http://INFERENCE_SERVER_IP:4000/v1"
 model_id = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
 sampling_params = {max_completion_tokens = 8192}
 ```
 
-### Sync evaluation
+### Run evaluation
 
 ```bash
 cd $MIGRATION_DIR
@@ -369,32 +361,10 @@ python evaluate.py --exp_id my_eval --max_concurrent 50 --timeout 1800
 python evaluate.py --exp_id my_eval_test --limit 5
 ```
 
-### Async evaluation
-
-The async script supports two modes:
-- **batch** (default): Uses `run_batch_async()` with managed concurrency
-- **individual**: Uses `invoke_async()` + `gather` for fine-grained control
-
-```bash
-cd $MIGRATION_DIR
-
-# With custom concurrency and timeout
-python evaluate_async.py --mode batch --exp_id my_eval_async --max_concurrent 50 --timeout 1800
-```
-
-Note that all arguments can also be passed via CLI to override `config.toml` values.
-
-Both `evaluate.py` (sync) and `evaluate_async.py` (async) can run multiple agent instances concurrently via `--max_concurrent`. The difference is that the sync script submits requests sequentially — a slow submission (e.g., ACR cold start) blocks the next one — while the async script dispatches submissions as concurrent tasks so cold starts don't block each other.
-
-#### Connection pool sizing
-
-Both scripts accept `--max_pool_connections` (default: 10) to control the urllib3 connection pool size for boto3 clients. If this value is smaller than `--max_concurrent`, you may see urllib3 warnings like `"Connection pool is full, discarding connection"`. This is **not an error** — requests still succeed, but excess connections are created and discarded instead of being reused from the pool, adding minor TCP/TLS handshake overhead. If you want to eliminate these warnings, you can set `--max_pool_connections` to match `--max_concurrent`:
-
-```bash
-python evaluate.py --exp_id my_eval --max_concurrent 50 --max_pool_connections 50
-```
-
-Results are saved as JSONL files under `results/` (e.g., `results/my_eval.jsonl`).
+`evaluate.py` dispatches concurrent background HTTP invocations. Set
+`--max_concurrent`, `--tps_limit`, and `--timeout` to bound the run. Results are
+saved to `<output_dir>/<exp_id>.jsonl`; pass `--output_dir ./results` to choose a
+directory. The default is under the operating system's temporary directory.
 
 ## 📚 Citation
 If you use our work on code migration, please cite

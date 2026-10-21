@@ -12,12 +12,12 @@ from strands_tools import shell
 from tools import ALL_TOOLS
 from utils import load_task_from_s3, setup_testbed
 
-from agentcore_rl_toolkit import AgentCoreRLApp
+from agentcore_rl_toolkit import AgentCoreRuntimeApp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = AgentCoreRLApp()
+app = AgentCoreRuntimeApp()
 
 load_dotenv()
 
@@ -36,9 +36,9 @@ SYSTEM_PROMPT = (
 reward_fn = OfficeBenchReward()
 
 
-@app.rollout_entrypoint
+@app.entrypoint
 def invoke_agent(payload: dict):
-    rollout_config = payload.get("_rollout", {})
+    rollout_config = payload.get("_config", {})
     api_key = rollout_config.get("api_key") or "EMPTY"
 
     # Choose model based on config
@@ -113,7 +113,7 @@ def invoke_agent(payload: dict):
 
     return {
         "messages": messages,
-        "rewards": reward,
+        "reward": reward,
     }
 
 

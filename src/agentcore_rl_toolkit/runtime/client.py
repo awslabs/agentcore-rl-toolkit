@@ -1,6 +1,6 @@
 """Async HTTP invocations and recoverable execution handles.
 
-Included in the base ``agentcore-rl-toolkit`` installation. One client shares
+Install with ``agentcore-rl-toolkit[rollout]``. One client shares
 its AWS connection pool across sessions on the same asyncio event loop.
 """
 

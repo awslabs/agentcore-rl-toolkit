@@ -7,12 +7,12 @@ from strands import Agent, tool
 from strands.agent.conversation_manager import NullConversationManager
 from strands.models.openai import OpenAIModel
 
-from agentcore_rl_toolkit import AgentCoreRLApp
+from agentcore_rl_toolkit import AgentCoreRuntimeApp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = AgentCoreRLApp()
+app = AgentCoreRuntimeApp()
 reward_fn = AppWorldReward()
 
 MAX_TOOL_OUTPUT_LENGTH = 12000
@@ -92,9 +92,9 @@ requested - not full sentences.
 # ── Entrypoint ───────────────────────────────────────────────────────────────
 
 
-@app.rollout_entrypoint
+@app.entrypoint
 def invoke_agent(payload: dict):
-    rollout_config = payload.get("_rollout", {})
+    rollout_config = payload.get("_config", {})
     api_key = rollout_config.get("api_key") or "EMPTY"
 
     model = OpenAIModel(
@@ -168,7 +168,7 @@ def invoke_agent(payload: dict):
 
     reward = reward_fn(test_tracker=test_tracker)
 
-    return {"rewards": reward}
+    return {"reward": reward}
 
 
 if __name__ == "__main__":
