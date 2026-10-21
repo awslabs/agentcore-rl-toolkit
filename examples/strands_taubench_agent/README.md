@@ -16,24 +16,8 @@ additionally exposes user-side tools (device actions). The reward follows
 tau-bench's `reward_basis` (DB / COMMUNICATE / ENV_ASSERTION / ACTION) and is
 computed deterministically at the end of the rollout.
 
-## Architecture
-
-```
-Training Cluster (e.g. HyperPod)
-├── Training Engine (veRL / GRPO)
-├── vLLM Inference Server (serves the model being trained)
-│
-└──► ACR (Bedrock AgentCore Runtime)
-     ├── Agent Session 1  ──► vLLM       (assistant inference)
-     ├── Agent Session 2       + Bedrock (user simulator)
-     └── ...                   + tau-bench env (tools + DB)
-         │
-         └──► HTTP result (reward + conversation)
-```
-
-The assistant model is reached over HTTP via `base_url` (passed per-invocation
-in the `_config` payload). The user simulator calls Bedrock using the ACR
-container's execution-role credentials — see [IAM permissions](#4-set-up-iam-permissions).
+For shared agent setup, see the
+[toolkit guide](../../README.md#getting-started).
 
 ## Files
 

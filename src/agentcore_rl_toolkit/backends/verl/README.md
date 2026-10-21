@@ -85,7 +85,7 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
                                              │       _config.base_url=<gateway>/v1  ────────────> ACR agent
    RolloutGateway (thread, this process) <───┼─────  agent's OpenAI/Anthropic calls
      └─ VerlSamplingBackend ──> verl LLMServerClient (token-in/token-out, sticky by sid)
-                                             │  3. await HTTP result (completion + scalar reward)
+                                             │  3. await result (completion + scalar reward)
                                              │  4. finish_session -> TraceRecords -> AgentLoopOutputs
 ```
 
