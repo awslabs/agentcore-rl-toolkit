@@ -422,8 +422,6 @@ The Python client calls an independent Go daemon inside each sandbox.
 
 - Execution ownership is independent of HTTP connections. Retries reuse invocation
   IDs, `get` never executes work, and terminal results are persisted before completion.
-- Completion waits for process exit and output EOF. Execution timeout kills only the
-  direct process; descendants may survive until session termination.
 - Execution timeout raises `ExecTimeoutError` with the persisted result. Local
   `ExecHandle.result(timeout=...)` timeout raises `TimeoutError` and leaves work running.
 

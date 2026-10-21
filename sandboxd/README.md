@@ -47,8 +47,8 @@ A response contains `version`, `invocation_id`, and `status`:
 
 - `in_progress`: a registered execution still owns the command.
 - `completed`: `result` contains `exit_code`, `stdout`, `stderr`, `timed_out`,
-  `stdout_truncated`, and `stderr_truncated`; infrastructure execution failures
-  instead contain an `error` with `code` and `message`.
+  `output_complete`, `stdout_truncated`, and `stderr_truncated`; infrastructure
+  execution failures instead contain an `error` with `code` and `message`.
 - `interrupted`: a start record survives but there is no tracked execution or
   terminal result. The daemon does not adopt or rerun orphaned processes.
 - `not_found`: no invocation record exists in this store.
@@ -64,15 +64,17 @@ published before reporting completion. Persistence failures never report success
 the remaining elements as literal arguments, without an implicit shell. Optional
 `cwd` sets the working directory; `env` overrides inherited environment variables.
 Shell scripts use an explicit command such as `["/bin/sh", "-c", "ls | head"]`.
-Completion waits for the direct process to exit and stdout/stderr to reach EOF.
-The execution deadline defaults to 300 seconds
-(range 1–3600), including output waiting. On expiry, only the direct process is
-killed and output readers are closed; the result has `timed_out=true` and captured
-output. Descendants may survive completion or timeout until session termination.
+Completion waits for the direct process to exit, then snapshots output after
+EOF or a 100 ms grace period. `output_complete` records whether both streams
+reached EOF. The execution deadline defaults to 300 seconds
+(range 1–3600) and applies to the direct process. On expiry, that process is
+killed and the result has `timed_out=true`. Descendants and output readers may
+survive command completion; see the [output lifecycle](../designs/sandbox_sdk.md#process-ownership-storage-and-output).
 
 Output is drained independently of HTTP clients. The first **256 KiB per stream**
-is saved to disk; subsequent bytes are discarded and explicitly marked truncated.
-There is no real-time output subscription or replay API in this version.
+is saved to disk; subsequent bytes are discarded. Truncation flags describe the
+immutable result snapshot. For reader lifetime and subsequent output, see the
+[output contract](../designs/sandbox_sdk.md#output-capture-and-live-delivery).
 
 `--state-dir` selects the store root (default: `agentcore-sandboxd` beneath the
 OS temporary directory, which honors `TMPDIR`). One daemon owns one root:

@@ -82,22 +82,19 @@ def test_live_descendant_output():
     with client.start() as sandbox:
         command = "printf parent-done; (sleep 2; printf late; printf warning >&2) & exit 7"
         result = sandbox.exec(["/bin/sh", "-c", command], timeout=10)
-        assert (result.stdout, result.stderr, result.exit_code) == ("parent-donelate", "warning", 7)
+        assert (result.stdout, result.stderr, result.exit_code) == ("parent-done", "", 7)
         assert not result.timed_out
+        assert result.output_complete is False
 
         handle = sandbox.exec(
             ["/bin/sh", "-c", "(sleep 5; printf late) & printf early; exit 0"], timeout=1, background=True
         )
-        with pytest.raises(ExecTimeoutError) as caught:
-            handle.result(timeout=30)
-        result = caught.value.result
-        assert result.timed_out
+        result = handle.result(timeout=30)
+        assert not result.timed_out
+        assert result.output_complete is False
         assert (result.exit_code, result.stdout) == (0, "early")
-        assert caught.value.handle is handle
         other = SandboxClient(runtime_arn=client.runtime_arn).attach(sandbox.session_id)
-        with pytest.raises(ExecTimeoutError) as reread:
-            other.get_exec(handle.invocation_id).result()
-        assert reread.value.result == result
+        assert other.get_exec(handle.invocation_id).result() == result
 
 
 def test_live_child_lifetime():
@@ -106,7 +103,7 @@ def test_live_child_lifetime():
         for command, exit_code, timed_out in (
             ("sleep 30 >/dev/null 2>&1 & echo $!", 0, False),
             ("sleep 30 & echo $!; wait", -1, True),
-            ("sleep 30 & echo $!; exit 7", 7, True),
+            ("sleep 30 & echo $!; exit 7", 7, False),
         ):
             if timed_out:
                 with pytest.raises(ExecTimeoutError) as caught:

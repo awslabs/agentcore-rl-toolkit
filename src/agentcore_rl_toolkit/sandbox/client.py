@@ -189,8 +189,10 @@ class Sandbox:
 
         ``timeout`` is the daemon-enforced execution deadline in seconds
         (1–3600, default 300), independent of ``ExecHandle.result(timeout=...)``.
-        It includes output waiting after process exit. Expiry kills only the
-        direct process and stops reading output; child processes may survive.
+        Expiry kills only the direct process; child processes may survive.
+        Results contain an output snapshot taken after the direct process exits.
+        ``output_complete`` indicates whether both output streams reached EOF;
+        the daemon continues draining open streams after returning the result.
         ``invocation_id`` defaults to a UUID generated before the request. Reuse
         it to address an existing execution; a repeated start ignores the new
         command while its record survives. Foreground and background executions
@@ -384,7 +386,7 @@ class ExecError(RuntimeError):
 
 
 class ExecTimeoutError(ExecError):
-    """The execution deadline expired, including while waiting for output.
+    """The direct process reached its execution deadline.
 
     ``result`` retains captured output, the exit code, and truncation flags.
     ``handle`` identifies the completed invocation; reading it again raises

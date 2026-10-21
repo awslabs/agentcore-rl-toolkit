@@ -106,13 +106,14 @@ different IDs permit intentionally identical commands.
 
 ### Results and errors
 
-`ExecResult` contains `exit_code`, `stdout`, `stderr`, `timed_out`, and per-stream
-truncation flags. Nonzero exit codes are returned as normal result data.
+`ExecResult` contains `exit_code`, `stdout`, `stderr`, `timed_out`,
+`output_complete`, and per-stream truncation flags. Nonzero exit codes are
+returned as normal result data.
 
 The SDK ignores unknown result fields and validates the types of known fields.
-`exit_code`, `stdout`, `stderr`, and `timed_out` are required; omitted truncation
-flags default to false. Missing required fields or invalid types raise
-`SandboxProtocolError`.
+`exit_code`, `stdout`, `stderr`, `timed_out`, and `output_complete` are required;
+omitted truncation flags default to false. Missing required fields or invalid
+types raise `SandboxProtocolError`.
 
 An execution deadline raises `ExecTimeoutError`, a subclass of `ExecError`.
 Its `.result` contains the persisted `ExecResult`, including partial output and
@@ -130,8 +131,8 @@ the caller already holds the handle and can retry that read.
 
 ### Execution, waiting, and session lifetime
 
-- `exec(timeout=...)` limits remote command execution: default 300 seconds, range
-  1–3600, including output waiting after process exit.
+- `exec(timeout=...)` limits the direct process's execution: default 300 seconds,
+  range 1–3600. Output collection after process exit does not consume this budget.
 - `handle.result(timeout=...)` limits local polling. A wait timeout leaves the
   command and session running and raises Python's built-in `TimeoutError`;
   the handle remains usable for a later wait. `ExecTimeoutError` represents a
@@ -188,19 +189,22 @@ per-call `env["PATH"]` affects the child environment, not this initial lookup.
 Use an explicit executable path to select a program outside that search path.
 Relative executable paths containing `/` are resolved from `cwd`.
 
-Like envd's ordinary command path, completion waits for both process exit and EOF
-on stdout/stderr. Descendants can keep those pipes open after the process exits;
-the execution deadline still bounds that wait. Expiry kills only the direct
-process and closes the output readers. The result retains captured output and
-sets `timed_out=true`, even if the direct process already exited with code 0.
+Completion waits for the direct process to exit, then allows up to 100 ms for
+stdout/stderr to reach EOF before publishing an immutable output snapshot.
+`output_complete` is true when both streams reached EOF before the snapshot;
+it is false while either stream is still open. Capacity truncation is reported
+separately. The execution deadline kills only the direct process and sets
+`timed_out=true`.
 
 The daemon does not kill descendants on completion or timeout. A background
-service with redirected output can continue running for later commands to use.
-Remaining processes are cleaned up when the Runtime session terminates; Runtime
-remains the isolation boundary.
+service can continue running for later commands to use. The daemon owns the
+output pipes and continues draining them after result publication until EOF or
+daemon shutdown. Output readers alone do not keep `/ping` busy; callers use the
+session hold to keep the environment available between commands. Remaining
+processes are cleaned up when the Runtime session terminates.
 
 One daemon owns one local store root. It writes a start record before execution
-and atomically publishes a terminal result after collecting output. The start
+and atomically publishes the terminal result snapshot. The start
 record excludes command text and environment values. Output still contains
 whatever the workload prints.
 
@@ -214,11 +218,12 @@ retention policy has not been implemented.
 ### Output capture and live delivery
 
 Output collection continues whether or not a client is waiting. Each stdout/stderr
-file retains its first **256 KiB**. Later bytes are drained and discarded, and the
-result explicitly marks the affected stream as truncated. This bounds per-command
-output storage and final response size.
+file retains its first **256 KiB**, including bytes captured after result
+publication. Later bytes are drained and discarded. The result's truncation flags
+describe the snapshot at publication; subsequent `get` calls return that same
+snapshot. This bounds per-command output storage and response size.
 
-The current SDK returns final output only. It does not expose callbacks,
+The current SDK returns the terminal output snapshot only. It does not expose callbacks,
 incremental output retrieval, or stream replay. This is a delivery choice, separate
 from process ownership and result persistence. A later output subscription can
 attach to the same execution without making that connection own its lifecycle;

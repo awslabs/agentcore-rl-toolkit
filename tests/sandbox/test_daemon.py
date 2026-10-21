@@ -134,6 +134,7 @@ def test_sdk_foreground_preserves_shell_and_result(sdk, tmp_path):
     assert result.stderr == f"{tmp_path}\n"
     assert result.exit_code == 7
     assert not result.timed_out
+    assert result.output_complete
 
 
 def test_sdk_background_reconnect_and_retry(sdk, tmp_path):
@@ -171,7 +172,7 @@ def test_sdk_execution_timeout_survives_reattachment_and_retry(sdk, tmp_path, ba
     sandbox = sdk().start()
     with pytest.raises(ExecTimeoutError) as caught:
         handle = sandbox.exec(
-            ["/bin/sh", "-c", "printf x >> count; printf early; printf warning >&2; (sleep 2; printf late) & exit 0"],
+            ["/bin/sh", "-c", "printf x >> count; printf early; printf warning >&2; exec sleep 30"],
             timeout=1,
             cwd=str(tmp_path),
             background=background,
@@ -180,7 +181,7 @@ def test_sdk_execution_timeout_survives_reattachment_and_retry(sdk, tmp_path, ba
 
     error = caught.value
     assert error.result.timed_out
-    assert (error.result.exit_code, error.result.stdout, error.result.stderr) == (0, "early", "warning")
+    assert (error.result.exit_code, error.result.stdout, error.result.stderr) == (-1, "early", "warning")
     assert error.handle.status() == "completed"
     recovered = sdk().attach(error.handle.session_id).get_exec(error.handle.invocation_id)
     with pytest.raises(ExecTimeoutError) as reread:
@@ -193,3 +194,60 @@ def test_sdk_execution_timeout_survives_reattachment_and_retry(sdk, tmp_path, ba
         )
     assert retry.value.result == error.result
     assert (tmp_path / "count").read_text() == "x"
+
+
+def test_sdk_background_server_survives_command_completion(sdk, tmp_path):
+    script = tmp_path / "server.py"
+    script.write_text(
+        "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+        "from pathlib import Path\n"
+        "class Handler(BaseHTTPRequestHandler):\n"
+        "    def do_GET(self):\n"
+        "        self.send_response(200)\n"
+        "        self.end_headers()\n"
+        "        self.wfile.write(b'healthy')\n"
+        "server = HTTPServer(('127.0.0.1', 0), Handler)\n"
+        "Path('port').write_text(str(server.server_port))\n"
+        "server.serve_forever()\n"
+    )
+    sandbox = sdk().start()
+    invocation_id = "background-server"
+    result = sandbox.exec(
+        ["/bin/sh", "-c", '"$PYTHON" server.py & echo $! > pid'],
+        env={"PYTHON": sys.executable},
+        cwd=str(tmp_path),
+        timeout=1,
+        invocation_id=invocation_id,
+    )
+    try:
+        assert result.exit_code == 0
+        assert not result.timed_out
+        assert result.output_complete is False
+        # Probe in a later exec, beyond the original execution deadline.
+        probe = sandbox.exec(
+            [
+                sys.executable,
+                "-c",
+                "import time, urllib.request\n"
+                "from pathlib import Path\n"
+                "time.sleep(1.2)\n"
+                "deadline = time.monotonic() + 2\n"
+                "while True:\n"
+                "    try:\n"
+                "        port = Path('port').read_text()\n"
+                "        with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=1) as response:\n"
+                "            print(response.read().decode())\n"
+                "        break\n"
+                "    except OSError:\n"
+                "        if time.monotonic() >= deadline:\n"
+                "            raise\n"
+                "        time.sleep(0.05)\n",
+            ],
+            cwd=str(tmp_path),
+            timeout=5,
+        )
+        assert probe.stdout == "healthy\n"
+        assert probe.output_complete
+        assert sandbox.get_exec(invocation_id).result() == result
+    finally:
+        os.kill(int((tmp_path / "pid").read_text()), 9)

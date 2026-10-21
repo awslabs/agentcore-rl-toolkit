@@ -12,10 +12,11 @@ class ExecResult:
 
     Attributes:
         exit_code: The command's exit code. ``-1`` means it was killed by a signal.
-        stdout: Accumulated standard output.
-        stderr: Accumulated standard error.
-        timed_out: True if execution or output waiting hit the deadline.
+        stdout: Standard output captured in the result snapshot.
+        stderr: Standard error captured in the result snapshot.
+        timed_out: True if the direct process hit the execution deadline.
             Partial output produced before the timeout is retained.
+        output_complete: Both streams reached EOF before the snapshot.
         stdout_truncated: Output exceeded the daemon's per-stream limit.
         stderr_truncated: Error output exceeded the daemon's per-stream limit.
     """
@@ -24,6 +25,7 @@ class ExecResult:
     stdout: str
     stderr: str
     timed_out: bool
+    output_complete: bool
     stdout_truncated: bool = False
     stderr_truncated: bool = False
 

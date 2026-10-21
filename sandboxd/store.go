@@ -12,6 +12,7 @@ type execResult struct {
 	Stdout          string `json:"stdout"`
 	Stderr          string `json:"stderr"`
 	TimedOut        bool   `json:"timed_out"`
+	OutputComplete  bool   `json:"output_complete"`
 	StdoutTruncated bool   `json:"stdout_truncated"`
 	StderrTruncated bool   `json:"stderr_truncated"`
 }

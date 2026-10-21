@@ -61,7 +61,8 @@ func TestForegroundPersistsResult(t *testing.T) {
 	srv, s := newTestServer(t)
 	result := call(t, srv.URL, shellRequest("foreground", "printf hello; printf warning >&2; exit 3", false))
 	if result.Status != "completed" || result.Result.ExitCode != 3 ||
-		result.Result.Stdout != "hello" || result.Result.Stderr != "warning" || result.Result.TimedOut {
+		result.Result.Stdout != "hello" || result.Result.Stderr != "warning" || result.Result.TimedOut ||
+		!result.Result.OutputComplete {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	// A new manager can recover the terminal result using only the filesystem.
@@ -172,17 +173,48 @@ func TestDisconnectDoesNotCancelExecution(t *testing.T) {
 	}
 }
 
-func TestWaitsForDescendantOutput(t *testing.T) {
+func TestDescendantOutputContinuesAfterCompletion(t *testing.T) {
 	for _, exitCode := range []int{0, 7} {
 		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
-			srv, _ := newTestServer(t)
+			srv, s := newTestServer(t)
+			release := filepath.Join(t.TempDir(), "release")
+			t.Cleanup(func() { _ = os.WriteFile(release, nil, 0600) })
 			command := fmt.Sprintf(
-				"(sleep 2; printf late; printf warning >&2) & printf parent-done; exit %d", exitCode,
+				"(while [ ! -e %q ]; do sleep 0.01; done; printf late; printf warning >&2) & "+
+					"printf parent-done; exit %d", release, exitCode,
 			)
-			result := call(t, srv.URL, shellRequest("output-wait", command, false)).Result
+			req := shellRequest("output-wait", command, false)
+			timeout := 1
+			req.Timeout = &timeout
+			result := call(t, srv.URL, req).Result
 			if result == nil || result.ExitCode != exitCode || result.TimedOut ||
-				result.Stdout != "parent-donelate" || result.Stderr != "warning" {
-				t.Fatalf("lost descendant output or shell exit code: %+v", result)
+				result.Stdout != "parent-done" || result.Stderr != "" || result.OutputComplete {
+				t.Fatalf("unexpected exit snapshot: %+v", result)
+			}
+			_, ping := getJSON(t, srv.URL+"/ping")
+			if ping["status"] != "Healthy" {
+				t.Fatal("output readers alone must not keep a session busy")
+			}
+			// The execution deadline must not close a surviving child's pipes.
+			time.Sleep(time.Second)
+			if err := os.WriteFile(release, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, func() bool {
+				m := s.processes
+				m.mu.Lock()
+				defer m.mu.Unlock()
+				return len(m.outputs) == 0
+			})
+			for stream, want := range map[string]string{"stdout": "parent-donelate", "stderr": "warning"} {
+				data, err := os.ReadFile(filepath.Join(s.processes.store.dir("output-wait"), stream))
+				if err != nil || string(data) != want {
+					t.Fatalf("lost late %s: %q, %v", stream, data, err)
+				}
+			}
+			req.Runtime.Operation = "get"
+			if reread := call(t, srv.URL, req).Result; reread == nil || *reread != *result {
+				t.Fatalf("terminal snapshot changed: %+v", reread)
 			}
 		})
 	}
@@ -197,7 +229,7 @@ func TestChildSurvivesCompletionAndTimeout(t *testing.T) {
 	}{
 		{"redirected-output", "sleep 30 >/dev/null 2>&1 & echo $!", 0, false},
 		{"timeout-running-shell", "sleep 30 & echo $!; wait", -1, true},
-		{"timeout-after-shell-exit", "sleep 30 & echo $!; exit 7", 7, true},
+		{"shell-exit-with-open-output", "sleep 30 & echo $!; exit 7", 7, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := newTestServer(t)
@@ -226,6 +258,16 @@ func TestChildSurvivesCompletionAndTimeout(t *testing.T) {
 				t.Fatalf("child did not survive: %s, %v", stat, err)
 			}
 		})
+	}
+}
+
+func TestForegroundWaitsForProcess(t *testing.T) {
+	srv, _ := newTestServer(t)
+	start := time.Now()
+	result := call(t, srv.URL, shellRequest("foreground-sleep", "sleep 0.3; printf late", false)).Result
+	if result == nil || result.ExitCode != 0 || result.Stdout != "late" || !result.OutputComplete ||
+		result.TimedOut || time.Since(start) < 250*time.Millisecond {
+		t.Fatalf("returned before the foreground command finished: %+v", result)
 	}
 }
 
@@ -281,12 +323,56 @@ func TestOutputLimitDrainsAndMarksTruncation(t *testing.T) {
 	srv, s := newTestServer(t)
 	result := call(t, srv.URL, shellRequest("output", "head -c 300000 /dev/zero; printf done >&2", false)).Result
 	if result == nil || result.ExitCode != 0 || len(result.Stdout) != outputLimit ||
-		!result.StdoutTruncated || result.StderrTruncated || result.Stderr != "done" {
+		!result.StdoutTruncated || result.StderrTruncated || result.Stderr != "done" || !result.OutputComplete {
 		t.Fatalf("output limit failed: %+v", result)
 	}
 	info, err := os.Stat(filepath.Join(s.processes.store.dir("output"), "stdout"))
 	if err != nil || info.Size() != outputLimit {
 		t.Fatalf("output file not bounded: %v, %v", info, err)
+	}
+}
+
+func TestLateOutputLimitAndReaderCleanup(t *testing.T) {
+	srv, s := newTestServer(t)
+	release := filepath.Join(t.TempDir(), "release")
+	req := shellRequest("late-limit", fmt.Sprintf(
+		"(while [ ! -e %q ]; do sleep 0.01; done; head -c 1000000 /dev/zero; printf done >&2; exec sleep 30) & echo $!",
+		release,
+	), false)
+	result := call(t, srv.URL, req).Result
+	if result == nil || result.OutputComplete || result.TimedOut {
+		t.Fatalf("unexpected snapshot: %+v", result)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(result.Stdout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if err := os.WriteFile(release, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		data, _ := os.ReadFile(filepath.Join(s.processes.store.dir("late-limit"), "stderr"))
+		return string(data) == "done"
+	})
+	info, err := os.Stat(filepath.Join(s.processes.store.dir("late-limit"), "stdout"))
+	if err != nil || info.Size() != outputLimit {
+		t.Fatalf("late output file not bounded: %v, %v", info, err)
+	}
+	closed := make(chan struct{})
+	go func() {
+		s.processes.close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown blocked on a descendant's output")
+	}
+	s.processes.mu.Lock()
+	defer s.processes.mu.Unlock()
+	if len(s.processes.outputs) != 0 {
+		t.Fatal("output readers survived shutdown")
 	}
 }
 
@@ -351,7 +437,7 @@ func TestOutputWriteFailureIsPreserved(t *testing.T) {
 		t.Fatalf("expected disk-full write error, got %v", err)
 	}
 	// Sync on /dev/full also fails, but that must not mask the original ENOSPC.
-	if _, err := output.finish(); !errors.Is(err, syscall.ENOSPC) {
+	if _, _, _, err := output.snapshot(); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatalf("expected the original disk-full write error, got %v", err)
 	}
 }

@@ -24,6 +24,7 @@ EXEC_RESULT = {
     "stdout": "hello",
     "stderr": "warn",
     "timed_out": False,
+    "output_complete": True,
 }
 
 
@@ -150,6 +151,7 @@ class TestExec:
         set_execution_response(mock_acr)
         result = client.attach(FAKE_SESSION_ID).exec(["echo", "hello"])
         assert (result.exit_code, result.stdout, result.stderr, result.timed_out) == (0, "hello", "warn", False)
+        assert result.output_complete is True
         kwargs = mock_acr.invoke_agent_runtime.call_args.kwargs
         assert kwargs["agentRuntimeArn"] == FAKE_ARN
         assert kwargs["runtimeSessionId"] == FAKE_SESSION_ID
@@ -168,14 +170,14 @@ class TestExec:
         client, mock_acr = make_client_and_mock()
         set_execution_response(
             mock_acr,
-            result={**EXEC_RESULT, "output_complete": False, "future": {"detail": "value"}},
+            result={**EXEC_RESULT, "duration_ms": 123, "future": {"detail": "value"}},
         )
         result = client.attach(FAKE_SESSION_ID).exec(["cmd"], background=background)
         if background:
             result = result.result()
         assert result == ExecResult(**EXEC_RESULT, stdout_truncated=False, stderr_truncated=False)
 
-    @pytest.mark.parametrize("field", ["exit_code", "stdout", "stderr", "timed_out"])
+    @pytest.mark.parametrize("field", ["exit_code", "stdout", "stderr", "timed_out", "output_complete"])
     def test_missing_required_result_field(self, field):
         client, mock_acr = make_client_and_mock()
         set_execution_response(mock_acr, result={key: value for key, value in EXEC_RESULT.items() if key != field})
@@ -192,6 +194,9 @@ class TestExec:
             ("stderr", []),
             ("timed_out", "false"),
             ("timed_out", 0),
+            ("output_complete", None),
+            ("output_complete", 1),
+            ("output_complete", "true"),
             ("stdout_truncated", "false"),
             ("stderr_truncated", 0),
         ],
@@ -223,6 +228,7 @@ class TestExec:
                 "timed_out": False,
                 "stdout_truncated": True,
                 "stderr_truncated": False,
+                "output_complete": False,
             },
         )
         result = client.attach(FAKE_SESSION_ID).exec(["cmd"])
@@ -231,6 +237,7 @@ class TestExec:
         assert result.stdout == "partial"
         assert result.stdout_truncated is True
         assert result.stderr_truncated is False
+        assert result.output_complete is False
 
     @pytest.mark.parametrize("exit_code", [0, -1])
     def test_execution_timeout_retains_result_and_handle(self, exit_code):
@@ -240,10 +247,11 @@ class TestExec:
             "stdout": "partial",
             "stderr": "warning",
             "timed_out": True,
+            "output_complete": True,
             "stdout_truncated": True,
             "stderr_truncated": False,
         }
-        set_execution_response(mock_acr, result={**result, "output_complete": False})
+        set_execution_response(mock_acr, result={**result, "duration_ms": 123})
         with pytest.raises(ExecTimeoutError, match="execution timed out") as caught:
             client.attach(FAKE_SESSION_ID).exec(["cmd"], invocation_id="deadline")
         assert caught.value.result == ExecResult(**result)
