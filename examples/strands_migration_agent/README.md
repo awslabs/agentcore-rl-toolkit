@@ -326,9 +326,8 @@ EOF
 
 ## Evaluate
 
-After deploying the agent to ACR, you can run batch evaluation against the MigrationBench dataset. The evaluation script uses `AgentCoreHttpSession` for background HTTP invocations and session cleanup, and writes completed results to JSONL.
-
-First, create `config.toml` from the example and fill in the `agent_arn` and `[eval]` section:
+To evaluate the deployed agent on MigrationBench, create `config.toml` and fill
+in its Runtime ARN, dataset path, and model settings:
 
 ```bash
 cd $MIGRATION_DIR
@@ -361,10 +360,10 @@ python evaluate.py --exp_id my_eval --max_concurrent 50 --timeout 1800
 python evaluate.py --exp_id my_eval_test --limit 5
 ```
 
-`evaluate.py` dispatches concurrent background HTTP invocations. Set
-`--max_concurrent`, `--tps_limit`, and `--timeout` to bound the run. Results are
-saved to `<output_dir>/<exp_id>.jsonl`; pass `--output_dir ./results` to choose a
-directory. The default is under the operating system's temporary directory.
+Use `--max_concurrent` to limit parallel tasks, `--tps_limit` to limit session
+starts per second, and `--timeout` to set the per-task deadline.
+Results are saved to `<output_dir>/<exp_id>.jsonl`; pass `--output_dir ./results`
+to choose a directory. The default is under the operating system's temporary directory.
 
 ## 📚 Citation
 If you use our work on code migration, please cite

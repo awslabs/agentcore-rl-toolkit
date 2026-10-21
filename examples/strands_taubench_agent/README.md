@@ -16,14 +16,11 @@ additionally exposes user-side tools (device actions). The reward follows
 tau-bench's `reward_basis` (DB / COMMUNICATE / ENV_ASSERTION / ACTION) and is
 computed deterministically at the end of the rollout.
 
-For shared agent setup, see the
-[toolkit guide](../../README.md#getting-started).
-
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `rl_app.py` | Entrypoint — multi-turn orchestrator with `@app.entrypoint` |
+| `rl_app.py` | Multi-turn agent and user simulator |
 | `reward.py` | `TauBenchReward` — DB / COMMUNICATE / ENV_ASSERTION / ACTION axes, dispatched per task by `reward_basis` |
 | `utils.py` | Strands tool wrapping, message-role conversion, thinking-token handling |
 | `constants.py` | System prompts, user-model config, orchestrator config, `DOMAINS_USER_TOOLS` |
@@ -208,7 +205,7 @@ python test_local.py --task tasks/retail_example.json --acr \
   --model-id Qwen/Qwen3-4B-Instruct-2507
 ```
 
-The result (`reward`, conversation, metadata) is returned over HTTP. Swap `--task` to any of
+The result contains the reward, conversation, and metadata. Swap `--task` to any of
 `tasks/{airline,retail,telecom}_example.json` to exercise a different domain —
 the same image serves all three.
 

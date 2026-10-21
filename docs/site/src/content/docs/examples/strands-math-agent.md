@@ -34,7 +34,7 @@ to train.
 - **`rl_app.py`** — RL-adapted version; reads `base_url` / `model_id`
   from `_config`, returns `{"reward": ...}`.
 - **`reward.py`** — `GSM8KReward`: extract the `####` answer, exact-match against ground truth.
-- **`evaluate.py`** — batch-evaluate a deployed ACR agent via `AgentCoreHttpSession`.
+- **`evaluate.py`** — batch evaluation on GSM8K.
 
 For local setup (Bedrock credentials, local vLLM,
 sending `curl` requests), Docker builds, ECR push, IAM setup, and

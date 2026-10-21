@@ -53,9 +53,6 @@ components. See the complete
 [Math entrypoint](examples/strands_math_agent/rl_app.py).
 Use a finite scalar reward; reduce any old per-turn reward list in your agent.
 
-The training client requests background execution explicitly, so
-`AgentCoreRuntimeApp()` does not require `background=True`. Ordinary requests
-without the protocol envelope return the handler's JSON directly.
 For persistent results, configure an S3 Files mount and point `state_dir` at it;
 see the [Runtime storage contract](designs/agentcore_runtime_app.md#filesystem-storage-and-recovery).
 
@@ -100,14 +97,12 @@ async def evaluate_one(runtime_arn, payload, base_url, model_id):
             return dump.task_output
 ```
 
-The example evaluators bound concurrency and session starts, validate rewards,
-and append completed results to JSONL. For
+For batching and JSONL output, see the
 [Math](examples/strands_math_agent/evaluate.py),
 [MigrationBench](examples/strands_migration_agent/evaluate.py),
 [OfficeBench](examples/strands_officebench_agent/evaluate.py), and
-[AppWorld](examples/strands_appworld_agent/evaluate.py), deploy `rl_app.py`,
-which now uses `AgentCoreRuntimeApp`.
+[AppWorld](examples/strands_appworld_agent/evaluate.py) evaluators.
 
 Remove the evaluator's `--s3_bucket` / `--s3_output_bucket` option and choose
-`--output_dir` for JSONL results. AppWorld now uses one concurrent HTTP
-evaluation flow; remove its old `--mode` and `--max_pool_connections` options.
+`--output_dir` for JSONL results. Also remove AppWorld's `--mode` and
+`--max_pool_connections` options.

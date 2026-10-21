@@ -80,9 +80,7 @@ def invoke_agent(payload: dict):
 
     response = agent(payload["prompt"])
 
-    # reward_fn is a callable with flexible input — pass whatever
-    # context it needs (response text, ground truth, env state, etc.).
-    # Return the scalar reward consumed by the training backend.
+    # Compute a scalar reward.
     content = response.message.get("content") or []
     reward = reward_fn(
         response_text="".join(block["text"] for block in content if "text" in block),

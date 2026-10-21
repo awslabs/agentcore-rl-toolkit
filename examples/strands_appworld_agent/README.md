@@ -69,8 +69,7 @@ curl -X POST http://localhost:8080/invocations \
      }'
 ```
 
-The request returns `{"reward": ...}`. Training and evaluation clients use
-background HTTP start/get with the same `_config` fields.
+The request returns `{"reward": ...}`.
 
 ## Docker
 
@@ -149,11 +148,7 @@ The deploy script will print the Amazon Resource Name (ARN) of your deployed age
 
 ## Evaluate
 
-After deploying the agent to ACR, you can run batch evaluation against the AppWorld benchmark. The evaluation script uses `AgentCoreHttpSession` for background HTTP invocations and session cleanup, and writes completed results to JSONL.
-
-First, fill in the `agent_arn` and the `[eval]` section in your `config.toml`:
-
-- **`agent_arn`**: The ARN printed in the deploy step output log.
+To evaluate the deployed agent, set its ARN and model settings in `config.toml`:
 
 ```toml
 [agentcore]
@@ -165,8 +160,8 @@ model_id = "Qwen/Qwen3-4B-Instruct-2507"
 sampling_params = {temperature = 0.0}
 ```
 
-The evaluator bounds concurrency with `--max_concurrent` and session starts with
-`--tps_limit`, and stops every session on completion or timeout.
+Use `--max_concurrent` to limit parallel tasks and `--tps_limit` to limit
+session starts per second.
 
 Ensure you have run `appworld download data` to download appworld dataset folder into the same path where you will run evaluation, evaluation script will load AppWorlds's built-in dataset splits (`train`, `dev`, `test_normal`, `test_challenge`) via `--dataset` from the dataset folder.
 
@@ -181,10 +176,9 @@ python evaluate.py --dataset test_normal --exp_id my_eval_test --limit 5
 
 # Only difficulty-1 tasks from the train split
 python evaluate.py --dataset train --difficulty 1 --exp_id my_eval_easy
-
 ```
 
-Note that all arguments can also be passed via CLI to override `config.toml` values.
+CLI arguments override `config.toml` values.
 
 Results are saved as `<output_dir>/<exp_id>.jsonl`; pass `--output_dir ./results`
 to choose a directory. The default is under the operating system's temporary directory.
@@ -193,9 +187,9 @@ to choose a directory. The default is under the operating system's temporary dir
 
 ```
 strands_appworld_agent/
-├── rl_app.py            # AgentCoreRuntimeApp with @app.entrypoint (ReAct code agent)
+├── rl_app.py            # ReAct code agent
 ├── reward.py            # AppWorldReward (pass_count / num_tests)
-├── evaluate.py          # Async batch evaluation via AgentCoreHttpSession (ACR)
+├── evaluate.py          # Batch evaluation
 ├── deploy.py            # Deploy container to AgentCore
 ├── Dockerfile           # ACR container (AppWorld data baked in)
 ├── config.example.toml  # Configuration template

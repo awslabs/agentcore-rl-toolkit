@@ -1,8 +1,6 @@
 # Strands Math Agent
 
-We provide instructions to run `basic_app.py` and `rl_app.py` both as local servers and as
-HTTP endpoints deployed to AgentCore Runtime (ACR).
-
+Run `basic_app.py` or `rl_app.py` locally or on AgentCore Runtime (ACR).
 Use `rl_app.py` for training and evaluation.
 
 ## Installation
@@ -100,15 +98,12 @@ CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-4B-Instruct-2507 --max-model-len 81
 
 ## Run RL App
 
-`rl_app.py` is the same agent on [`AgentCoreRuntimeApp`](../../designs/agentcore_runtime_app.md). It keeps
-`@app.entrypoint`, reads model config from `_config`, and returns `{"reward": float}`. Results are fetched over
-HTTP. This is the agent shape the
+`rl_app.py` uses [`AgentCoreRuntimeApp`](../../designs/agentcore_runtime_app.md),
+reads model config from `_config`, and returns `{"reward": float}`. It supports the
 [verl](../../src/agentcore_rl_toolkit/backends/verl/README.md),
 [Tinker API](../../src/agentcore_rl_toolkit/backends/tinker_api/README.md),
 [slime](../../docs/site/src/content/docs/guides/slime-backend-setup.md), and
-[SageMaker](../../src/agentcore_rl_toolkit/backends/experimental/sagemaker/SETUP.md) backends drive.
-
-Install the example dependencies above before running it.
+[SageMaker](../../src/agentcore_rl_toolkit/backends/experimental/sagemaker/SETUP.md) backends.
 
 ```bash
 python rl_app.py
@@ -127,8 +122,8 @@ curl -X POST http://localhost:8080/invocations -H "Content-Type: application/jso
 
 ### Deploy
 
-Configure and deploy the HTTP entrypoint. When the gateway or inference server
-uses a private address, deploy into its VPC:
+If the gateway or inference server uses a private address, deploy the agent
+into its VPC:
 
 ```bash
 agentcore configure --entrypoint rl_app.py --name strands_math_agent_rl \
@@ -140,8 +135,7 @@ agentcore deploy --agent strands_math_agent_rl
 
 ### Evaluate
 
-The evaluator sends background HTTP invocations, validates each scalar reward,
-and stops each Runtime session when it completes or times out:
+Evaluate the deployed agent on GSM8K:
 
 ```bash
 uv pip install datasets

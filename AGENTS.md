@@ -452,13 +452,8 @@ This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aw
 ### Evaluation
 
 The Math, MigrationBench, OfficeBench, and AppWorld evaluators use
-`AgentCoreHttpSession` for background HTTP invocations. They bound concurrency
-and session starts, validate the scalar `reward`, write completed results to
-JSONL, and stop sessions on completion or timeout. MigrationBench's
-`examples/strands_migration_agent/evaluate.py` is the reference pattern.
-All four examples use `rl_app.py` backed by
-`AgentCoreRuntimeApp`. Model configuration is supplied in `_config`.
-
+`AgentCoreHttpSession` for concurrent evaluation and write results to JSONL.
+Use `examples/strands_migration_agent/evaluate.py` as the reference.
 
 ---
 

@@ -57,8 +57,7 @@ python benchmark.py --limit 1            # smoke test
   the testbed directory after the agent finishes.
 - **`tools.py`** — 20 Strands `@tool` functions wrapping
   OfficeBench app scripts (calendar, email, Excel, Word, PDF, OCR).
-- **`benchmark.py`** — parallel evaluation over the 300-task
-  benchmark through HTTP sessions.
+- **`benchmark.py`** — parallel evaluation over the 300-task benchmark.
 - **`run_local_eval.py`** / **`test_local.py`** — local
   (no-ACR) evaluation and smoke tests.
 - **`Dockerfile`** + **`deploy.py`** + **`config.toml`** —

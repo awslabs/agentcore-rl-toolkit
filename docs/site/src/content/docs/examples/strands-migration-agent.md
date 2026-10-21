@@ -44,7 +44,7 @@ flow, then evaluate with `evaluate.py`.
   preservation vs. the original commit.
 - **`preprocess.py`** — convert the MigrationBench dataset into
   per-repo tarballs + metadata + JSONL rollout requests.
-- **`evaluate.py`** — concurrent HTTP evaluation via `AgentCoreHttpSession`.
+- **`evaluate.py`** — batch evaluation on MigrationBench.
 - **`Dockerfile`** + **`deploy.py`** + **`config.toml`** —
   container build + programmatic ACR deploy.
 - **`models.py`**, **`utils.py`**, **`eval_utils.py`** — shared

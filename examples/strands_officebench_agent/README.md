@@ -118,10 +118,12 @@ python benchmark.py --exp_id my_run_1app --category 1
 python benchmark.py --exp_id my_run --resume
 ```
 
-The benchmark uses background HTTP sessions and cleans up after each task.
 Set `--output_dir ./results` to save:
+
 - `results/{exp_id}/rollouts.jsonl` — per-task results with full conversation history
 - `results/{exp_id}/summary.json` — scores by category
+
+The default output directory is under the operating system's temporary directory.
 
 > **Security note — where `task_uri`/`testbed_uri` come from, and why they are a trust
 > boundary.** `benchmark.py` lists the S3 prefix you populated in step 1
@@ -141,8 +143,6 @@ Set `--output_dir ./results` to save:
 > is free-form text driving `shell`. Only point the benchmark at a prefix in a **bucket
 > you control**; do not accept `task_uri`/`testbed_uri` values that originate from
 > untrusted principals.
-
-The default output directory is under the operating system's temporary directory.
 
 ## Configuration
 
@@ -223,13 +223,13 @@ OFFICEBENCH_DIR=/path/to/OfficeBench python run_local_eval.py --exp_id local_tes
 
 ```
 strands_officebench_agent/
-├── rl_app.py           # AgentCoreRuntimeApp with @app.entrypoint (runs in ACR)
+├── rl_app.py           # Office agent and reward computation
 ├── tools.py            # 20 Strands @tool wrappers for OfficeBench apps
 ├── reward.py           # OfficeBenchReward with 9 evaluation functions
 ├── models.py           # Pydantic request models
 ├── utils.py            # S3 helpers (load task, setup testbed)
 ├── benchmark.py        # Full benchmark runner (ACR)
-├── evaluate.py         # Batch evaluation via AgentCoreHttpSession (ACR, lower-level)
+├── evaluate.py         # Batch evaluation
 ├── preprocess.py       # Package OfficeBench tasks for S3
 ├── Dockerfile          # Custom ACR container (LibreOffice, Tesseract, OfficeBench apps) — copy over the auto-generated one
 ├── test_local.py       # Single-task local testing (no ACR)
