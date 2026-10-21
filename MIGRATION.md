@@ -104,5 +104,4 @@ For batching and JSONL output, see the
 [AppWorld](examples/strands_appworld_agent/evaluate.py) evaluators.
 
 Remove the evaluator's `--s3_bucket` / `--s3_output_bucket` option and choose
-`--output_dir` for JSONL results. Also remove AppWorld's `--mode` and
-`--max_pool_connections` options.
+`--output_dir` for JSONL results.
