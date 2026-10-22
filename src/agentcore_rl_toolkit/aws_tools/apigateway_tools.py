@@ -70,40 +70,33 @@ _SIGV4_HEADERS = ("Authorization", "X-Amz-Date", "X-Amz-Security-Token")
 # --- Signing ---------------------------------------------------------------------------
 
 
-def resolve_credentials(session: boto3.Session | None, region: str | None) -> tuple[Credentials, str]:
+def _credentials_and_region(session: boto3.Session, region: str | None) -> tuple[Credentials, str]:
     """The session's credentials and the signing Region; fails if either is missing."""
-    session = session or boto3.Session()
     region = region or session.region_name
     if not region:
         raise ValueError("no region: pass region= or configure one for the boto3 session")
-    # Refreshing credentials (assumed roles, instance profiles, SSO) renew themselves.
+    # Loaded once, then cached by the session. Refreshing credentials (assumed roles, instance
+    # profiles, SSO) renew themselves, one thread at a time, under their own lock.
     credentials = session.get_credentials()
     if credentials is None:
         raise ValueError("the boto3 session has no AWS credentials")
     return credentials, region
 
 
-def sigv4_headers(method: str, url: str, body: bytes, credentials: Credentials, region: str) -> dict[str, str]:
-    """The SigV4 headers (``Authorization``, ``X-Amz-*``) for an ``execute-api`` request.
-
-    Only ``host`` and the ``X-Amz-*`` headers are signed, plus the body's hash, so other
-    headers can be sent as they are.
-    """
-    signed = AWSRequest(method=method, url=url, data=body)
-    SigV4Auth(credentials.get_frozen_credentials(), SERVICE, region).add_auth(signed)
-    return {name: signed.headers[name] for name in _SIGV4_HEADERS if name in signed.headers}
-
-
 def signed_headers(
     method: str, url: str, body: bytes = b"", *, session: boto3.Session | None = None, region: str | None = None
 ) -> dict[str, str]:
-    """``sigv4_headers`` with credentials and Region resolved as by ``resolve_credentials``.
+    """The SigV4 headers (``Authorization``, ``X-Amz-*``) for an ``execute-api`` request.
 
-    Without ``session``, each call creates a ``boto3.Session()`` and resolves its
-    credentials again; pass one session to reuse them across requests.
+    Only ``host`` and the ``X-Amz-*`` headers are signed, plus the body's hash, so other
+    headers can be sent as they are. The Region defaults to the session's. Without
+    ``session``, each call creates a ``boto3.Session()`` and resolves its credentials
+    again; pass one session to reuse them across requests.
     """
-    credentials, region = resolve_credentials(session, region)
-    return sigv4_headers(method, url, body, credentials, region)
+    credentials, region = _credentials_and_region(session or boto3.Session(), region)
+    signed = AWSRequest(method=method, url=url, data=body)
+    SigV4Auth(credentials.get_frozen_credentials(), SERVICE, region).add_auth(signed)
+    return {name: signed.headers[name] for name in _SIGV4_HEADERS if name in signed.headers}
 
 
 # --- Proxy -----------------------------------------------------------------------------
@@ -138,6 +131,10 @@ class ExecuteApiProxy:
     ``session`` (default ``boto3.Session()``), and the Region defaults to the session's;
     either missing fails here. ``timeout`` bounds each wait for upstream bytes, not the
     whole response.
+
+    The proxy signs on its serving threads with ``session``'s credentials, which are
+    safe to share between threads. The session itself isn't, so while the proxy runs,
+    use a passed ``session`` only on the thread that created the proxy.
     """
 
     def __init__(
@@ -155,7 +152,9 @@ class ExecuteApiProxy:
         if upstream.scheme not in ("http", "https") or not upstream.hostname:
             raise ValueError(f"upstream_url must be an http(s) URL, not {upstream_url!r}")
         self.upstream_origin = f"{upstream.scheme}://{upstream.netloc}"
-        self.credentials, self.region = resolve_credentials(session, region)
+        self.session = session or boto3.Session()
+        # Loads the credentials now, so a missing one fails here and serving threads only read the session's cache.
+        _, self.region = _credentials_and_region(self.session, region)
         self.api_key = secrets.token_urlsafe(32)
         self.pool = urllib3.PoolManager(
             retries=False, timeout=urllib3.Timeout(connect=connect_timeout, read=timeout), maxsize=64, block=False
@@ -210,7 +209,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
         url = self.proxy.upstream_origin + self.path
         headers = self._upstream_headers()
-        headers.update(sigv4_headers(self.command, url, body, self.proxy.credentials, self.proxy.region))
+        headers.update(signed_headers(self.command, url, body, session=self.proxy.session, region=self.proxy.region))
         try:
             response = self.proxy.pool.urlopen(
                 self.command,

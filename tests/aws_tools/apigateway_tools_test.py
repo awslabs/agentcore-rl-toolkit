@@ -102,12 +102,12 @@ def assert_valid_signature(
 # --- Signer ----------------------------------------------------------------------------
 
 
-class SigV4HeadersTest(unittest.TestCase):
+class SignedHeadersTest(unittest.TestCase):
     URL = "https://abc123.execute-api.us-west-2.amazonaws.com/prod/v1/chat/completions"
 
-    def sign(self, url=URL, body=b'{"a": 1}', token=None):
+    def sign(self, url=URL, body=b'{"a": 1}', token=None, **kwargs):
         """The headers a request carries: its Host plus the SigV4 headers."""
-        headers = apigateway_tools.sigv4_headers("POST", url, body, Credentials("AKIDEXAMPLE", SECRET, token), REGION)
+        headers = apigateway_tools.signed_headers("POST", url, body, session=session(token), **kwargs)
         return {"Host": urlsplit(url).netloc, **headers}
 
     def test_signature_verifies(self):
@@ -132,15 +132,6 @@ class SigV4HeadersTest(unittest.TestCase):
         self.assertIn("x-amz-security-token", _AUTHORIZATION.match(headers["Authorization"])["signed"])
         assert_valid_signature(self, "POST", self.URL, headers, b'{"a": 1}')
 
-
-class SignedHeadersTest(unittest.TestCase):
-    URL = SigV4HeadersTest.URL
-
-    def test_resolves_credentials_and_region(self):
-        headers = apigateway_tools.signed_headers("POST", self.URL, b"{}", session=session(), region="eu-west-1")
-        headers["Host"] = urlsplit(self.URL).netloc
-        assert_valid_signature(self, "POST", self.URL, headers, b"{}", region="eu-west-1")
-
     def test_signs_an_empty_body_by_default(self):
         headers = {
             "Host": urlsplit(self.URL).netloc,
@@ -148,20 +139,18 @@ class SignedHeadersTest(unittest.TestCase):
         }
         assert_valid_signature(self, "GET", self.URL, headers, b"")
 
-
-class ResolveCredentialsTest(unittest.TestCase):
     def test_uses_the_sessions_region_unless_given(self):
-        self.assertEqual(apigateway_tools.resolve_credentials(session(), None)[1], REGION)
-        self.assertEqual(apigateway_tools.resolve_credentials(session(), "eu-west-1")[1], "eu-west-1")
+        assert_valid_signature(self, "POST", self.URL, self.sign(), b'{"a": 1}', region=REGION)
+        assert_valid_signature(self, "POST", self.URL, self.sign(region="eu-west-1"), b'{"a": 1}', region="eu-west-1")
 
     def test_fails_without_a_region(self):
         with self.assertRaisesRegex(ValueError, "no region"):
-            apigateway_tools.resolve_credentials(mock.Mock(region_name=None), None)
+            apigateway_tools.signed_headers("GET", self.URL, session=mock.Mock(region_name=None))
 
     def test_fails_without_credentials(self):
         no_credentials = mock.Mock(region_name=REGION, get_credentials=mock.Mock(return_value=None))
         with self.assertRaisesRegex(ValueError, "no AWS credentials"):
-            apigateway_tools.resolve_credentials(no_credentials, None)
+            apigateway_tools.signed_headers("GET", self.URL, session=no_credentials)
 
 
 # --- Proxy -----------------------------------------------------------------------------
@@ -408,6 +397,12 @@ class GuardTest(ProxyTestCase):
         for url in ("ftp://example.com/v1", "example.com/v1", "https:///v1"):
             with self.subTest(url), self.assertRaises(ValueError):
                 ExecuteApiProxy(url, session=session())
+
+    def test_keeps_the_session_and_loads_its_credentials_when_built(self):
+        given = mock.Mock(wraps=session(), region_name=REGION)
+        with ExecuteApiProxy(self.upstream.base_url, session=given) as proxy:
+            self.assertIs(proxy.session, given)
+            given.get_credentials.assert_called_once_with()
 
     def test_fails_without_credentials(self):
         no_credentials = mock.Mock(region_name=REGION, get_credentials=mock.Mock(return_value=None))
