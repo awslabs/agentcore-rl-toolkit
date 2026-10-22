@@ -22,7 +22,7 @@ which does the signing::
 Or without the proxy, signing each request with ``signed_headers``. Send exactly the
 signed URL and body bytes, sign every retry again, and don't follow redirects::
 
-    url = canonical_url(base_url + "/chat/completions")
+    url = base_url + "/chat/completions"
     body = json.dumps({"model": model_id, "messages": messages}).encode()
     headers = {"Content-Type": "application/json", **signed_headers("POST", url, body, region="us-east-2")}
     response = requests.post(url, data=body, headers=headers, allow_redirects=False)
@@ -32,13 +32,15 @@ on a custom domain, whose hostname doesn't name its Region.
 
 The proxy listens on loopback and only forwards requests carrying its random
 ``api_key`` as a bearer token, so other local processes can't use it to sign their
-own requests. The token is removed before forwarding. Redirects are returned to the
-client, not followed, since a redirected request needs a new signature; a ``Location``
-on the endpoint's origin is rewritten to the proxy, so a client that follows it is
-signed again.
+own requests. The token is removed before forwarding. The request target (path and
+query) is forwarded byte for byte, so API Gateway checks the signature against exactly
+what the client sent. Redirects are returned to the client, not followed, since a
+redirected request needs a new signature; a ``Location`` on the endpoint's origin is
+rewritten to the proxy, so a client that follows it is signed again.
 
-Each connection is served by its own thread, and upstream connections are pooled.
-Needs only ``boto3``; upstream requests use ``urllib3`` (>=2.2), a dependency of ``botocore``.
+Each client connection is served by its own thread, with its own upstream connection,
+kept alive and closed along with it. Needs only ``boto3``; upstream requests use the
+standard library's ``http.client``.
 A forked child process doesn't inherit the serving thread, so start the proxy in the
 process that uses it.
 """
@@ -46,17 +48,19 @@ process that uses it.
 from __future__ import annotations
 
 import hmac
+import http.client
 import json
 import logging
 import secrets
+import select
 import socket
+import ssl
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qsl, quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit, urlunsplit
 
 import boto3
-import urllib3
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.credentials import Credentials
@@ -84,21 +88,20 @@ def _credentials_and_region(session: boto3.Session, region: str | None) -> tuple
     return credentials, region
 
 
-def canonical_url(url: str) -> str:
-    """``url`` as it should be both signed and sent.
+def _with_canonical_query(url: str) -> str:
+    """``url`` with its query encoded as SigV4 canonicalizes it, which botocore assumes.
 
-    It's the form ``urllib3`` (and so ``requests``) sends: percent-encodings uppercased,
-    dot segments removed, spaces and non-ASCII characters percent-encoded. The query is
-    also re-encoded the way SigV4 canonicalizes it, since botocore signs a query string as
-    written: every character except ``A-Z a-z 0-9 - _ . ~`` percent-encoded, a ``+`` read
-    as a space, and every name given a value (``?flag`` becomes ``?flag=``).
+    API Gateway decodes the query it receives and re-encodes it before checking the
+    signature (a ``+`` reads as a space), while botocore signs a query string as written,
+    so the query is put in that form for signing. The path is left alone: botocore
+    canonicalizes a raw path the same way API Gateway does.
     """
-    parsed = urllib3.util.parse_url(url)
-    if not parsed.query:
-        return parsed.url
-    pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
     query = "&".join(f"{quote(name, safe='-_.~')}={quote(value, safe='-_.~')}" for name, value in pairs)
-    return parsed._replace(query=query).url
+    return urlunsplit(parts._replace(query=query))
 
 
 def signed_headers(
@@ -107,14 +110,15 @@ def signed_headers(
     """The SigV4 headers (``Authorization``, ``X-Amz-*``) for an ``execute-api`` request.
 
     Only ``host`` and the ``X-Amz-*`` headers are signed, plus the body's hash, so other
-    headers can be sent as they are. ``url`` must be exactly the URL sent; pass it
-    through ``canonical_url`` first unless it's already in that form. The Region
-    defaults to the session's. Without
-    ``session``, each call creates a ``boto3.Session()`` and resolves its credentials
-    again; pass one session to reuse them across requests.
+    headers can be sent as they are. ``url``'s query may be in any encoding, but its path
+    must be exactly the path sent: clients such as ``requests`` uppercase percent-encodings
+    and percent-encode non-ASCII characters in a path before sending it, so write a path
+    that way. The Region defaults to the session's. Without ``session``, each call
+    creates a ``boto3.Session()`` and resolves its credentials again; pass one session to
+    reuse them across requests.
     """
     credentials, region = _credentials_and_region(session or boto3.Session(), region)
-    signed = AWSRequest(method=method, url=url, data=body)
+    signed = AWSRequest(method=method, url=_with_canonical_query(url), data=body)
     SigV4Auth(credentials.get_frozen_credentials(), SERVICE, region).add_auth(signed)
     return {name: signed.headers[name] for name in _SIGV4_HEADERS if name in signed.headers}
 
@@ -138,7 +142,7 @@ _HOP_BY_HOP = frozenset(
 )
 # Replaced by the proxy: the token, the upstream Host and the body's framing.
 _REQUEST_REPLACED = frozenset(["authorization", "host", "content-length", "x-amz-date", "x-amz-security-token"])
-_STREAM_CHUNK_BYTES = 64 * 1024
+_STREAM_CHUNK_BYTES = 64 * 1024  # the most read1() returns at once; it doesn't wait to fill it
 _SHUTDOWN_POLL_SECONDS = 0.1  # how long close() may wait for the serving thread
 
 
@@ -168,22 +172,18 @@ class ExecuteApiProxy:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     ):
-        if not hasattr(urllib3.HTTPResponse, "read1"):
-            raise RuntimeError(
-                f"ExecuteApiProxy needs urllib3>=2.2, which streams responses without buffering them; "
-                f"found {urllib3.__version__}"
-            )
         upstream = urlsplit(upstream_url)
         if upstream.scheme not in ("http", "https") or not upstream.hostname:
             raise ValueError(f"upstream_url must be an http(s) URL, not {upstream_url!r}")
         self.upstream_origin = f"{upstream.scheme}://{upstream.netloc}"
+        self._upstream_address = (upstream.scheme, upstream.hostname, upstream.port)
+        self._tls = ssl.create_default_context() if upstream.scheme == "https" else None  # verifies certificates
+        self.timeout = timeout
+        self.connect_timeout = connect_timeout
         self.session = session or boto3.Session()
         # Loads the credentials now, so a missing one fails here and serving threads only read the session's cache.
         _, self.region = _credentials_and_region(self.session, region)
         self.api_key = secrets.token_urlsafe(32)
-        self.pool = urllib3.PoolManager(
-            retries=False, timeout=urllib3.Timeout(connect=connect_timeout, read=timeout), maxsize=64, block=False
-        )
         self._lock = threading.Lock()  # guards _closed and the handlers' busy flags
         self._closed = False
         self._connections: set[_ProxyHandler] = set()
@@ -217,7 +217,17 @@ class ExecuteApiProxy:
         self._server.shutdown()
         self._server.server_close()
         self._thread.join()
-        self.pool.clear()
+
+    def _connect(self) -> http.client.HTTPConnection:
+        """A new upstream connection, read timeout set once connected."""
+        scheme, host, port = self._upstream_address
+        if scheme == "https":
+            connection = http.client.HTTPSConnection(host, port, timeout=self.connect_timeout, context=self._tls)
+        else:
+            connection = http.client.HTTPConnection(host, port, timeout=self.connect_timeout)
+        connection.connect()
+        connection.sock.settimeout(self.timeout)
+        return connection
 
     def __enter__(self) -> ExecuteApiProxy:
         return self
@@ -246,6 +256,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
     proxy: ExecuteApiProxy
     protocol_version = "HTTP/1.1"  # keep-alive, so clients pool their connections to the proxy
     busy = False  # handling a request, as opposed to waiting for the connection's next one
+    upstream: http.client.HTTPConnection | None = None  # kept alive between this connection's requests
 
     def setup(self) -> None:
         super().setup()
@@ -255,6 +266,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
     def finish(self) -> None:
         with self.proxy._lock:
             self.proxy._connections.discard(self)
+        self._close_upstream()
         super().finish()
 
     def do_proxy(self) -> None:
@@ -281,35 +293,37 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_error(400, str(exc))
             return
-        url = canonical_url(self.proxy.upstream_origin + self.path)  # the URL signed is the URL sent
         headers = self._upstream_headers()
+        url = self.proxy.upstream_origin + self.path
         headers.update(signed_headers(self.command, url, body, session=self.proxy.session, region=self.proxy.region))
         try:
-            response = self.proxy.pool.urlopen(
-                self.command,
-                url,
-                body=body,
-                headers=headers,
-                redirect=False,
-                preload_content=False,
-                decode_content=False,
-            )
-        except urllib3.exceptions.NewConnectionError as exc:  # before TimeoutError, which it subclasses
-            self._send_error(502, f"upstream connection failed: {exc}")
-            return
-        except urllib3.exceptions.TimeoutError as exc:
+            upstream = self._upstream_connection()
+            # The request target goes out byte for byte; http.client adds Host and the body's Content-Length.
+            upstream.request(self.command, self.path, body=body or None, headers=headers)
+            response = upstream.getresponse()
+        except TimeoutError as exc:
+            self._close_upstream()
             self._send_error(504, f"upstream timed out: {exc}")
             return
-        except urllib3.exceptions.HTTPError as exc:
-            self._send_error(502, f"upstream request failed: {exc}")
+        except (OSError, http.client.HTTPException) as exc:
+            self._close_upstream()
+            self._send_error(502, f"upstream request failed: {exc!r}")
             return
-        complete = False
-        try:
-            complete = self._relay(response)
-        finally:
-            if not complete:
-                response.close()  # a partly read connection can't go back to the pool
-            response.release_conn()
+        if not self._relay(response):
+            self._close_upstream()  # a partly read connection can't send another request
+
+    def _upstream_connection(self) -> http.client.HTTPConnection:
+        """The kept-alive upstream connection, or a new one if upstream closed or dropped it."""
+        if self.upstream is not None and (self.upstream.sock is None or _dropped(self.upstream.sock)):
+            self._close_upstream()
+        if self.upstream is None:
+            self.upstream = self.proxy._connect()
+        return self.upstream
+
+    def _close_upstream(self) -> None:
+        if self.upstream is not None:
+            self.upstream.close()
+            self.upstream = None
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = do_proxy
 
@@ -350,13 +364,13 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 headers[name] = f"{headers[name]}, {value}" if name in headers else value
         return headers
 
-    def _relay(self, response: urllib3.BaseHTTPResponse) -> bool:
+    def _relay(self, response: http.client.HTTPResponse) -> bool:
         """Sends the upstream response as it arrives, body still encoded; whether it was read to the end."""
         has_body = self.command != "HEAD" and response.status not in (204, 304) and response.status >= 200
-        length = response.headers.get("Content-Length")
+        length = response.getheader("Content-Length")
         chunked = has_body and length is None
         self.send_response(response.status)
-        for name, value in response.headers.items():
+        for name, value in response.getheaders():
             if name.lower() == "location" and value.startswith(self.proxy.upstream_origin + "/"):
                 value = self.proxy.origin + value[len(self.proxy.upstream_origin) :]
             if name.lower() not in _HOP_BY_HOP and name.lower() != "content-length":
@@ -370,22 +384,27 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.close_connection = True
         self.end_headers()
         if not has_body:
+            response.read()  # http.client sends a connection's next request only after this one is read
             return True
-        try:
-            for chunk in _upstream_chunks(response):
-                if chunk:
-                    self.wfile.write(b"%X\r\n%s\r\n" % (len(chunk), chunk) if chunked else chunk)
-            if chunked:
-                self.wfile.write(b"0\r\n\r\n")
-        except urllib3.exceptions.HTTPError as exc:
-            # The status line is already sent; dropping the connection tells the client the body is cut short.
-            logger.warning("upstream response failed mid-body: %s", exc)
-            self.close_connection = True
-            return False
-        except OSError:  # the client disconnected
-            self.close_connection = True
-            return False
-        return True
+        while True:
+            try:
+                # read1 returns what has arrived, so streamed (SSE) responses aren't held back;
+                # http.client takes care of upstream's chunked framing.
+                chunk = response.read1(_STREAM_CHUNK_BYTES)
+            except (OSError, http.client.HTTPException) as exc:
+                # The status line is already sent; dropping the connection tells the client the body is cut short.
+                logger.warning("upstream response failed mid-body: %r", exc)
+                self.close_connection = True
+                return False
+            try:
+                if not chunk:
+                    if chunked:
+                        self.wfile.write(b"0\r\n\r\n")
+                    return True
+                self.wfile.write(b"%X\r\n%s\r\n" % (len(chunk), chunk) if chunked else chunk)
+            except OSError:  # the client disconnected
+                self.close_connection = True
+                return False
 
     def _send_error(self, status: int, message: str) -> None:
         """An OpenAI-style error; the connection closes, since the request body may be unread."""
@@ -402,11 +421,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         logger.debug("%s " + format, self.address_string(), *args)
 
 
-def _upstream_chunks(response: urllib3.BaseHTTPResponse) -> Iterator[bytes]:
-    """The raw body in pieces as they arrive, so streamed (SSE) responses aren't held back."""
-    if response.chunked and response.supports_chunked_reads():
-        yield from response.read_chunked(decode_content=False)
-    else:
-        # read1 (urllib3>=2.2) returns what has arrived; read(amt) would wait for amt bytes or EOF.
-        while chunk := response.read1(_STREAM_CHUNK_BYTES, decode_content=False):
-            yield chunk
+def _dropped(sock: socket.socket) -> bool:
+    """Whether an idle kept-alive connection was closed by upstream (readable means EOF or garbage)."""
+    return bool(select.select([sock], [], [], 0)[0])

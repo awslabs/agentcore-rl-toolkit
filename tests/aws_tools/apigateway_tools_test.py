@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -26,7 +27,6 @@ from urllib.parse import parse_qsl, quote, urlsplit
 
 import boto3
 import httpx
-import urllib3
 from botocore.credentials import Credentials
 
 from agentcore_rl_toolkit.aws_tools import apigateway_tools
@@ -38,7 +38,6 @@ SECRET = "secret"
 HAS_OPENAI = importlib.util.find_spec("openai") is not None
 HAS_STRANDS = importlib.util.find_spec("strands") is not None
 HAS_REQUESTS = importlib.util.find_spec("requests") is not None
-STREAMING_URLLIB3 = hasattr(urllib3.HTTPResponse, "read1")  # urllib3>=2.2, which the proxy needs
 COMPLETION = {
     "id": "c",
     "object": "chat.completion",
@@ -65,11 +64,40 @@ def _hmac(key: bytes, message: str) -> bytes:
     return hmac.new(key, message.encode(), hashlib.sha256).digest()
 
 
+def wait_for(condition, timeout: float = 5) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("timed out waiting for a condition")
+        time.sleep(0.01)
+
+
+def normalize_path(path: str) -> str:
+    """Dot segments removed (RFC 3986 section 5.2.4) and consecutive slashes collapsed.
+
+    Enough for the paths the tests send.
+    """
+    segments: list[str] = []
+    for segment in path.split("/"):
+        if segment == "..":
+            if segments:
+                segments.pop()
+        elif segment not in ("", "."):
+            segments.append(segment)
+    trailing = "/" if path.endswith("/") and segments else ""
+    return "/" + "/".join(segments) + trailing
+
+
 def expected_signature(method: str, url: str, headers, body: bytes, signed_headers: str, scope: str) -> str:
-    """SigV4 as API Gateway computes it from the request it receives (written from the spec, not botocore)."""
+    """SigV4 as API Gateway computes it from the request it receives (written from the spec, not botocore).
+
+    The path is canonicalized as received, with dot segments removed and consecutive
+    slashes collapsed; the query is decoded (``+`` as a space) and re-encoded. Both match
+    what a live endpoint accepted.
+    """
     parts = urlsplit(url)
     # Non-S3 services encode the (already URL-encoded) path a second time.
-    canonical_uri = quote(parts.path or "/", safe="/~")
+    canonical_uri = quote(normalize_path(parts.path or "/"), safe="/~")
     query = sorted((quote(k, safe="-_.~"), quote(v, safe="-_.~")) for k, v in parse_qsl(parts.query, True))
     names = signed_headers.split(";")
     canonical_headers = "".join(f"{name}:{' '.join(headers[name].split())}\n" for name in names)
@@ -144,6 +172,18 @@ class SignedHeadersTest(unittest.TestCase):
         }
         assert_valid_signature(self, "GET", self.URL, headers, b"")
 
+    def test_signs_a_query_in_any_encoding(self):
+        for query in ("q=x%2fy", "q=x/y", "e=%7e", "p=1+2", "s=a b", "flag", "b=2&a=1&a=0", "x=(a)!*'", "k=caf%c3%a9"):
+            url = f"{self.URL}?{query}"
+            with self.subTest(query):
+                assert_valid_signature(self, "POST", url, self.sign(url), b'{"a": 1}')
+
+    def test_signs_the_path_as_given(self):
+        for path in ("/prod/v1/files/a%2fb", "/prod/v1/a/../files/./x", "/prod/v1/caf%C3%A9", "/prod/v1//x"):
+            url = "https://abc123.execute-api.us-west-2.amazonaws.com" + path
+            with self.subTest(path):
+                assert_valid_signature(self, "POST", url, self.sign(url), b'{"a": 1}')
+
     def test_uses_the_sessions_region_unless_given(self):
         assert_valid_signature(self, "POST", self.URL, self.sign(), b'{"a": 1}', region=REGION)
         assert_valid_signature(self, "POST", self.URL, self.sign(region="eu-west-1"), b'{"a": 1}', region="eu-west-1")
@@ -156,31 +196,6 @@ class SignedHeadersTest(unittest.TestCase):
         no_credentials = mock.Mock(region_name=REGION, get_credentials=mock.Mock(return_value=None))
         with self.assertRaisesRegex(ValueError, "no AWS credentials"):
             apigateway_tools.signed_headers("GET", self.URL, session=no_credentials)
-
-
-class CanonicalUrlTest(unittest.TestCase):
-    CASES = {
-        "https://h/prod/v1/files/a%2fb": "https://h/prod/v1/files/a%2Fb",
-        "https://h/prod/v1/a/../models/./x": "https://h/prod/v1/models/x",
-        "https://h/prod/v1/caf\u00e9": "https://h/prod/v1/caf%C3%A9",
-        "https://h/v1/m?q=x%2fy&s=a b&p=1+2&e=%7e&t=~": "https://h/v1/m?q=x%2Fy&s=a%20b&p=1%202&e=~&t=~",
-        "https://h/v1/m?b=2&a=1&flag": "https://h/v1/m?b=2&a=1&flag=",
-        "https://h/v1/m?k=a%26b%3Dc&k=2": "https://h/v1/m?k=a%26b%3Dc&k=2",
-        "https://h:8443/v1/m": "https://h:8443/v1/m",
-        "https://h/v1/m?": "https://h/v1/m?",
-    }
-
-    def test_normalizes_the_path_and_query(self):
-        for url, expected in self.CASES.items():
-            with self.subTest(url):
-                self.assertEqual(apigateway_tools.canonical_url(url), expected)
-
-    def test_is_what_urllib3_sends(self):
-        for url in self.CASES:
-            canonical = apigateway_tools.canonical_url(url)
-            with self.subTest(url):
-                self.assertEqual(apigateway_tools.canonical_url(canonical), canonical)
-                self.assertEqual(urllib3.util.parse_url(canonical).url, canonical)
 
 
 # --- Proxy -----------------------------------------------------------------------------
@@ -205,12 +220,22 @@ class Upstream:
 
     def __init__(self):
         self.requests = []
+        self.connections = []  # the sockets of the connections upstream accepted
+        self.finished = 0  # connections that have ended
         self.release = threading.Event()
         self.stalled = False  # a client waited for /stream's rest before seeing its first event
         upstream = self
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+
+            def setup(self):
+                super().setup()
+                upstream.connections.append(self.connection)
+
+            def finish(self):
+                super().finish()
+                upstream.finished += 1
 
             def handle_one(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -249,6 +274,8 @@ class Upstream:
                     status, headers, reply = 307, {"Location": upstream.origin + "/prod/v1/models"}, b""
                 elif route == "fail":
                     status, reply = 500, b'{"error": {"message": "boom"}}'
+                elif route == "close":
+                    headers["Connection"], self.close_connection = "close", True
                 self.send_response(status)
                 for name, value in headers.items():
                     self.send_header(name, value)
@@ -281,7 +308,6 @@ class Upstream:
             test.assertEqual(headers["Host"], self.origin.removeprefix("http://"))
 
 
-@unittest.skipUnless(STREAMING_URLLIB3, "the proxy needs urllib3>=2.2")
 class ProxyTestCase(unittest.TestCase):
     def setUp(self):
         self.upstream = Upstream()
@@ -322,17 +348,19 @@ class ForwardingTest(ProxyTestCase):
 
     def test_signs_the_url_it_forwards(self):
         """Request targets sent byte for byte, so only the proxy decides what reaches upstream."""
-        targets = {
-            "/prod/v1/files/a%2fb": "/prod/v1/files/a%2Fb",  # lowercase percent-encoding in the path
-            "/prod/v1/files/a%2Fb": "/prod/v1/files/a%2Fb",
-            "/prod/v1/models?q=x%2fy": "/prod/v1/models?q=x%2Fy",  # ... and in the query
-            "/prod/v1/models?e=%7e&s=a%20b&t=~": "/prod/v1/models?e=~&s=a%20b&t=~",  # encoded unreserved characters
-            "/prod/v1/models?p=1+2": "/prod/v1/models?p=1%202",  # a form-encoded space
-            "/prod/v1/models?b=2&a=1&flag": "/prod/v1/models?b=2&a=1&flag=",
-            "/prod/v1/a/../models/./x": "/prod/v1/models/x",  # dot segments
-            "/prod/v1/caf%c3%a9?x=%c3%a9": "/prod/v1/caf%C3%A9?x=%C3%A9",
-        }
-        for target, forwarded in targets.items():
+        targets = [
+            "/prod/v1/files/a%2fb",  # lowercase percent-encoding in the path
+            "/prod/v1/models?q=x%2fy",  # ... and in the query
+            "/prod/v1/models?q=x/y&e=%7e&s=a%20b&t=~",
+            "/prod/v1/models?p=1+2",  # a form-encoded space
+            "/prod/v1/models?b=2&a=1&flag",
+            "/prod/v1/models?x=(a)!*'",
+            "/prod/v1/a/../models/./x",  # dot segments
+            "/prod/v1//models",
+            "/prod/v1/caf%c3%a9?x=%c3%a9",
+        ]
+        forwarded_targets = {target: target for target in targets}  # byte for byte
+        for target, forwarded in forwarded_targets.items():
             with self.subTest(target):
                 self.upstream.requests.clear()
                 connection = http.client.HTTPConnection(urlsplit(self.proxy.origin).netloc)
@@ -408,6 +436,33 @@ class ForwardingTest(ProxyTestCase):
                     response.read()
         self.assertEqual(len(ports), 1)
 
+    def test_keeps_one_upstream_connection_per_client_connection(self):
+        for method, path in (("POST", "/chat/completions"), ("HEAD", "/models"), ("GET", "/gzip"), ("POST", "/stream")):
+            self.upstream.release.set()
+            self.assertEqual(self.http.request(method, path, json={} if method == "POST" else None).status_code, 200)
+        self.assertEqual(len(self.upstream.connections), 1)
+        with httpx.Client(base_url=self.proxy.base_url, headers=self.auth) as other:
+            other.get("/models")
+        self.assertEqual(len(self.upstream.connections), 2)
+        self.upstream.assert_signed(self, 5)
+
+    def test_reconnects_after_upstream_closes_the_connection(self):
+        self.assertEqual(self.http.get("/close").status_code, 200)
+        self.assertEqual(self.http.get("/models").status_code, 200)
+        self.assertEqual(len(self.upstream.connections), 2)
+
+    def test_reconnects_after_upstream_drops_an_idle_connection(self):
+        self.http.get("/models")
+        self.upstream.connections[0].shutdown(socket.SHUT_RDWR)
+        wait_for(lambda: self.upstream.finished == 1)
+        self.assertEqual(self.http.get("/models").status_code, 200)
+        self.assertEqual(len(self.upstream.connections), 2)
+
+    def test_closes_its_upstream_connection_with_the_client_connection(self):
+        with httpx.Client(base_url=self.proxy.base_url, headers=self.auth) as client:
+            client.get("/models")
+        wait_for(lambda: self.upstream.finished == 1)
+
 
 class GuardTest(ProxyTestCase):
     def test_rejects_requests_without_its_token(self):
@@ -469,9 +524,7 @@ class GuardTest(ProxyTestCase):
     def test_in_flight_requests_finish_after_close(self):
         connection = self.connection()
         connection.request("GET", "/prod/v1/slow", headers=self.auth)
-        deadline = time.monotonic() + 5
-        while not self.upstream.requests and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_for(lambda: self.upstream.requests)
         closer = threading.Thread(target=self.proxy.close)
         closer.start()
         closer.join(5)
@@ -577,10 +630,10 @@ class DirectSigningTest(unittest.TestCase):
     def test_signed_canonical_urls_verify(self):
         import requests
 
-        for path in ("/chat/completions", "/files/a%2fb?q=x%2fy&s=a b&p=1+2&flag"):
+        for path in ("/chat/completions", "/files/a%2Fb?q=x%2fy&s=a b&p=1+2&flag"):
             with self.subTest(path):
                 self.upstream.requests.clear()
-                url = apigateway_tools.canonical_url(self.upstream.base_url + path)
+                url = self.upstream.base_url + path
                 body = json.dumps({"model": "m", "messages": MESSAGES}).encode()
                 headers = {
                     "Content-Type": "application/json",
@@ -589,13 +642,6 @@ class DirectSigningTest(unittest.TestCase):
                 response = requests.post(url, data=body, headers=headers, allow_redirects=False)
                 self.assertEqual(response.status_code, 200)
                 self.upstream.assert_signed(self, 1)
-
-
-class ProxyRequirementsTest(unittest.TestCase):
-    def test_needs_a_urllib3_that_streams(self):
-        with mock.patch.object(apigateway_tools.urllib3, "HTTPResponse", object):
-            with self.assertRaisesRegex(RuntimeError, "urllib3>=2.2"):
-                ExecuteApiProxy("https://h.example.com/v1", session=session())
 
 
 class ModuleTest(unittest.TestCase):
