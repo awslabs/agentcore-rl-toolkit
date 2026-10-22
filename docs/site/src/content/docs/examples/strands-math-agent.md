@@ -22,11 +22,10 @@ uv pip install -e .
 python rl_app.py
 ```
 
-Deploy the same entrypoint to AgentCore Runtime via the
-[Prepare agent for RL → Deploy](/agentcore-rl-toolkit/guides/agent-adaptation/)
-flow, then feed the resulting runtime ARN into the
-[slime backend](/agentcore-rl-toolkit/guides/slime-backend-setup/)
-to train.
+Deploy using the commands in the
+[Math README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md#deploy-with-the-agentcore-cli),
+then use its Runtime ARN in the
+[slime training configuration](/agentcore-rl-toolkit/guides/slime-backend-setup/).
 
 ## What's in the example
 
@@ -36,7 +35,5 @@ to train.
 - **`reward.py`** — `GSM8KReward`: extract the `####` answer, exact-match against ground truth.
 - **`evaluate.py`** — batch evaluation on GSM8K.
 
-For local setup (Bedrock credentials, local vLLM,
-sending `curl` requests), Docker builds, ECR push, IAM setup, and
-full deploy instructions, see the
+For local setup, request examples, and GSM8K evaluation, see the
 [full README on GitHub](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md).

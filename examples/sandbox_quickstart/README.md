@@ -64,7 +64,7 @@ cp config.example.toml config.toml        # fill in image_uri and execution_role
 uv run python deploy.py
 ```
 
-`deploy.py` creates (or updates) the runtime from the pushed image and prints the
+`deploy.py` creates or updates the runtime from the pushed image and prints the
 runtime ARN when the endpoint is ready.
 
 The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`,

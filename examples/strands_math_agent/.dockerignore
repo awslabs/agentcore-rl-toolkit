@@ -15,6 +15,7 @@ __pycache__*
 # Virtual environments
 .venv/
 .env
+.env.*
 venv/
 env/
 ENV/
@@ -62,6 +63,9 @@ tests/
 .bedrock_agentcore.yaml
 .dockerignore
 .bedrock_agentcore/
+agentcore/
+deploy/
+results/
 
 # Keep wheelhouse for offline installations
 # wheelhouse/

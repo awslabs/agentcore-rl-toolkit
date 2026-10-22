@@ -47,16 +47,17 @@ hero:
         </div>
         <div class="hero-step-panel" data-panel="2">
           <pre class="hero-code"><code><span class="ln"><span style="color:#6a9955"># Install the AgentCore CLI</span></span>
-      <span class="ln">pip install bedrock-agentcore-starter-toolkit</span>
+      <span class="ln">npm install -g @aws/agentcore</span>
       <span class="ln"></span>
-      <span class="ln"><span style="color:#6a9955"># Configure and deploy</span></span>
-      <span class="ln">agentcore configure \</span>
-      <span class="ln">    --entrypoint rl_app.py \</span>
-      <span class="ln">    --name my_rl_agent \</span>
-      <span class="ln">    --deployment-type container \</span>
-      <span class="ln">    --non-interactive</span>
+      <span class="ln"><span style="color:#6a9955"># Create a deployment project</span></span>
+      <span class="ln">agentcore create --name agent --no-agent \</span>
+      <span class="ln">    --output-dir deploy --skip-git</span>
+      <span class="ln">cd deploy/agent</span>
       <span class="ln"></span>
-      <span class="ln">agentcore deploy --agent my_rl_agent</span>
+      <span class="ln"><span style="color:#6a9955"># Add your existing agent interactively</span></span>
+      <span class="ln">agentcore add agent</span>
+      <span class="ln"></span>
+      <span class="ln">agentcore deploy</span>
       <span class="ln"></span>
       <span class="ln"><span style="color:#6a9955"># → arn:aws:bedrock-agentcore:us-west-2:...</span></span></code></pre>
         </div>

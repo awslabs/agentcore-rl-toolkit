@@ -8,6 +8,8 @@ ENV UV_SYSTEM_PYTHON=1 \
     PYTHONUNBUFFERED=1 \
     AWS_REGION=us-west-2 \
     AWS_DEFAULT_REGION=us-west-2 \
+    BYPASS_TOOL_CONSENT=true \
+    STRANDS_NON_INTERACTIVE=true \
     APPWORLD_ROOT=/appworld \
     APPWORLD_CACHE=/appworld/cache
 
@@ -20,11 +22,7 @@ RUN apt-get update && \
 
 COPY . .
 
-# Install local toolkit from build context, then install example deps
-RUN --mount=type=bind,from=toolkit,source=.,target=/toolkit \
-    uv pip install '/toolkit[core]' && uv pip install .
-
-RUN uv pip install aws-opentelemetry-distro==0.12.2
+RUN UV_GIT_LFS=1 uv pip install . aws-opentelemetry-distro==0.12.2
 
 # Bake AppWorld data into image (as root, since appworld install writes to site-packages)
 RUN appworld install && appworld download data --root /appworld

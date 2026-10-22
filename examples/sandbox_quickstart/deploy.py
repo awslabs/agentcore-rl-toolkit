@@ -9,10 +9,59 @@ runtime provisioning into the SDK (SandboxClient.create()), at which point
 this script goes away.
 """
 
+import time
 import tomllib
+from contextlib import closing
 from pathlib import Path
 
-from bedrock_agentcore_starter_toolkit.services.runtime import BedrockAgentCoreClient
+import boto3
+from botocore.exceptions import ClientError
+
+
+def deploy(client, config, *, wait_seconds=120):
+    """Create or update the named runtime and wait for DEFAULT to serve its version."""
+    name = config["agent_name"]
+    desired = {
+        "agentRuntimeArtifact": {"containerConfiguration": {"containerUri": config["image_uri"]}},
+        "roleArn": config["execution_role_arn"],
+        "networkConfiguration": {"networkMode": "PUBLIC"},
+        "protocolConfiguration": {"serverProtocol": "HTTP"},
+        "environmentVariables": {},
+    }
+    existing = next(
+        (
+            runtime
+            for page in client.get_paginator("list_agent_runtimes").paginate(maxResults=100)
+            for runtime in page["agentRuntimes"]
+            if runtime["agentRuntimeName"] == name
+        ),
+        None,
+    )
+    if existing:
+        response = client.update_agent_runtime(agentRuntimeId=existing["agentRuntimeId"], **desired)
+    else:
+        response = client.create_agent_runtime(agentRuntimeName=name, **desired)
+
+    runtime_id = response["agentRuntimeId"]
+    version = response["agentRuntimeVersion"]
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        runtime = client.get_agent_runtime(agentRuntimeId=runtime_id)
+        if runtime["status"].endswith("FAILED"):
+            raise RuntimeError(f"Runtime {name}: {runtime.get('failureReason', runtime['status'])}")
+        if runtime["status"] == "READY":
+            try:
+                endpoint = client.get_agent_runtime_endpoint(agentRuntimeId=runtime_id, endpointName="DEFAULT")
+            except ClientError as error:
+                if error.response["Error"]["Code"] != "ResourceNotFoundException":
+                    raise
+            else:
+                if endpoint["status"].endswith("FAILED"):
+                    raise RuntimeError(f"Endpoint {name}: {endpoint.get('failureReason', endpoint['status'])}")
+                if endpoint["status"] == "READY" and endpoint["liveVersion"] == version:
+                    return runtime["agentRuntimeArn"]
+        time.sleep(5)
+    raise TimeoutError(f"Runtime {name} version {version} did not become ready within {wait_seconds}s")
 
 
 def main():
@@ -23,27 +72,8 @@ def main():
         config = tomllib.load(f)
 
     agentcore_config = config["agentcore"]
-
-    agentcore_client = BedrockAgentCoreClient(region=agentcore_config["region"])
-
-    # The sandbox container needs no env vars — unlike the agent examples,
-    # the image only runs the sandboxd daemon.
-    response = agentcore_client.create_agent(
-        agent_name=agentcore_config["agent_name"],
-        deployment_type="container",
-        image_uri=agentcore_config["image_uri"],
-        execution_role_arn=agentcore_config["execution_role_arn"],
-        network_config={"networkMode": "PUBLIC"},
-        env_vars={},
-        auto_update_on_conflict=True,
-    )
-
-    agent_id = response["id"]
-    agent_arn = response["arn"]
-
-    endpoint_response = agentcore_client.wait_for_agent_endpoint_ready(agent_id=agent_id, max_wait=120)
-    if agent_arn not in endpoint_response:
-        raise TimeoutError(endpoint_response)
+    with closing(boto3.client("bedrock-agentcore-control", region_name=agentcore_config["region"])) as client:
+        agent_arn = deploy(client, agentcore_config)
 
     print(f"Sandbox runtime ready: {agent_arn}")
     print(f'\nRun the demo with:\n  SANDBOX_RUNTIME_ARN="{agent_arn}" python run_sandbox.py')

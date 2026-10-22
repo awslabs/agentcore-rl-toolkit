@@ -65,10 +65,8 @@ That gives three requirements:
 
 1. **The ACR runtime must be in VPC mode, in a VPC that routes to the loop host.**
    ACR deploys to the public internet by default, which cannot reach a private IP.
-   Deploy into the host's own VPC (`agentcore configure ... --vpc --subnets
-   <subnet-id> --security-groups <sg-id>`); see the
-   [math agent README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md)
-   for the full flow.
+   For the Math agent, use the VPC deployment commands in its
+   [README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md#deploy-with-the-agentcore-cli).
 2. **The host's security group must allow inbound TCP on the gateway port** from
    the runtime's subnets or security group.
 3. **Pin the port.** `gateway_port` defaults to `0`, which binds an OS-assigned

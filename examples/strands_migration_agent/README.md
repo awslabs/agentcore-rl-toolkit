@@ -80,26 +80,23 @@ mvn --version
 
 ## Installation
 
-Set the repo root and migration agent paths — these variables are used throughout this document:
+Run from the repository root:
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export MIGRATION_DIR=$TOOLKIT_ROOT/examples/strands_migration_agent
-
-cd $MIGRATION_DIR
+cd examples/strands_migration_agent
 
 uv venv --python 3.13
 source .venv/bin/activate
-uv pip install -e . -e '../../[core]'  # example and local SDK
+uv pip install -e .
 ```
+
+Run the remaining commands from `examples/strands_migration_agent`.
 
 ## Run locally
 
 First, preprocess the MigrationBench dataset and upload to S3:
 
 ```bash
-cd $MIGRATION_DIR
-
 # Create S3 bucket if needed
 aws s3 mb s3://my-migration-bench-data
 
@@ -123,9 +120,8 @@ vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct \
 ```
 
 ```bash
-# Terminal 2: Start the app server with hot reloading (from $MIGRATION_DIR)
-cd $MIGRATION_DIR
-uvicorn rl_app:app --port 8080 --reload --reload-dir ../..
+# Terminal 2: Start the app server with hot reloading from the example directory
+uvicorn rl_app:app --port 8080 --reload
 ```
 
 ```bash
@@ -197,75 +193,61 @@ When these environment variables are not set, the agent uses Maven Central direc
 
 ## Deploy to AgentCore
 
-### 1. Configure the agent
-
-Pick the option that matches where your inference server lives.
-
-**Option 1: VPC deployment** — use this when your inference server is inside a VPC (e.g., training infra on AWS).
+Run from `examples/strands_migration_agent`. Set the VPC IDs for the
+host running your inference server:
 
 ```bash
-cd $MIGRATION_DIR
+npm install -g @aws/agentcore
 
-# Get your subnet and security group IDs from your instance's network details
-SUBNET_ID="subnet-xxxxxxxxxxxxxxxxx"
-SECURITY_GROUP_ID="sg-xxxxxxxxxxxxxxxxx"
-
-agentcore configure \
-  --entrypoint rl_app.py \
-  --name strands_migration_agent \
-  --requirements-file pyproject.toml \
-  --deployment-type container \
-  --vpc \
-  --subnets $SUBNET_ID \
-  --security-groups $SECURITY_GROUP_ID \
-  --disable-memory \
-  --non-interactive
+agentcore create --name migration --no-agent --output-dir ./deploy --skip-git
+cd deploy/migration
+agentcore add agent --name strands_migration_agent --type byo \
+  --code-location ../.. --entrypoint rl_app.py \
+  --build Container --language Python \
+  --framework Strands --model-provider Bedrock --protocol HTTP \
+  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
+  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
 ```
 
-**Option 2: Public net deployment** — use this when your inference server is accessible via a public URL.
+For a publicly reachable inference server, replace the VPC flags with
+`--network-mode PUBLIC`.
 
-```bash
-cd $MIGRATION_DIR
+If using the CodeArtifact mirror, set `envVars` on the runtime in
+`agentcore/agentcore.json` before deploying:
 
-agentcore configure \
-  --entrypoint rl_app.py \
-  --name strands_migration_agent \
-  --requirements-file pyproject.toml \
-  --deployment-type container \
-  --disable-memory \
-  --non-interactive
+```json
+"envVars": [
+  {"name": "CODEARTIFACT_DOMAIN", "value": "migration-aws-maven-mirror"},
+  {"name": "CODEARTIFACT_OWNER", "value": "123456789012"},
+  {"name": "CODEARTIFACT_REPO", "value": "maven-central-cache"}
+]
 ```
 
-### 2. Deploy the agent
+Deploy:
 
 ```bash
-cd $MIGRATION_DIR
-
-ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-
-agentcore deploy --agent strands_migration_agent \
-  --env CODEARTIFACT_DOMAIN=migration-aws-maven-mirror \
-  --env CODEARTIFACT_OWNER=$ACCOUNT \
-  --env CODEARTIFACT_REPO=maven-central-cache
+agentcore deploy --yes
+agentcore status --json
+cd ../..
 ```
 
-> If you are not using the CodeArtifact mirror, omit the three `CODEARTIFACT_*` env vars from the deploy command.
+Set `AGENT_RUNTIME_ARN` to the ARN printed by the deployment. Run
+`agentcore deploy --yes` from `deploy/migration` to redeploy after source changes.
 
-After deployment, the agent ARN is saved in `.bedrock_agentcore.yaml`. Copy it — you will need it for evaluation.
+### Runtime permissions
 
-### 3. Setup IAM Permissions for ACR
-Grant IAM permissions to the ACR execution role. The execution role name is stored in `.bedrock_agentcore.yaml` — the `execution_role` field, e.g.
-`arn:aws:iam::123456789:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123` ->
-`AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123`.
-
-#### 3.1 Grant S3 permission
+Get the execution role for the deployed runtime:
 
 ```bash
-# Add S3 permissions to the execution role,
-# which is the first `execution_role` in `.bedrock_agentcore.yaml`.
-YOUR_EXECUTION_ROLE=$(grep -m1 'execution_role:' .bedrock_agentcore.yaml | sed 's|.*role/||')
-echo "Execution role: $YOUR_EXECUTION_ROLE"
+EXECUTION_ROLE_ARN=$(aws bedrock-agentcore-control get-agent-runtime \
+  --agent-runtime-id "${AGENT_RUNTIME_ARN##*/}" \
+  --query roleArn --output text)
+YOUR_EXECUTION_ROLE="${EXECUTION_ROLE_ARN##*/}"
+```
 
+#### S3 access
+
+```bash
 aws iam put-role-policy --role-name $YOUR_EXECUTION_ROLE \
   --policy-name RLToolkitAccess \
   --policy-document '{
@@ -280,13 +262,11 @@ aws iam put-role-policy --role-name $YOUR_EXECUTION_ROLE \
   }'
 ```
 
-#### 3.2 Grant CodeArtifact permission
+#### CodeArtifact access
 
 Skip this step if you are not using the [CodeArtifact mirror](#codeartifact-mirror-optional).
 
 ```bash
-cd $MIGRATION_DIR
-
 REGION=$(aws ec2 describe-availability-zones --query 'AvailabilityZones[0].RegionName' --output text)
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 
@@ -330,11 +310,10 @@ To evaluate the deployed agent on MigrationBench, create `config.toml` and fill
 in its Runtime ARN, dataset path, and model settings:
 
 ```bash
-cd $MIGRATION_DIR
 cp config.example.toml config.toml
 ```
 
-- **`agent_arn`**: The ARN saved in `.bedrock_agentcore.yaml` after the deploy step.
+- **`agent_arn`**: The Runtime ARN printed by the deploy step.
 - **`s3_input_bucket`**: The S3 path where `preprocess.py` uploaded the dataset. For example, if you ran `python preprocess.py --s3-bucket-name my-migration-bench-data`, the test split is at `my-migration-bench-data/tars/test/`.
 
 ```toml
@@ -351,8 +330,6 @@ sampling_params = {max_completion_tokens = 8192}
 ### Run evaluation
 
 ```bash
-cd $MIGRATION_DIR
-
 # Run full evaluation
 python evaluate.py --exp_id my_eval --max_concurrent 50 --timeout 1800
 

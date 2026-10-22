@@ -6,22 +6,20 @@ The agent uses a **ReAct code agent** pattern: a single `execute` tool runs Pyth
 
 ## Installation
 
-Set the repo root and appworld agent paths — these variables are used throughout this document:
+Run from the repository root:
 
 ```bash
-export TOOLKIT_ROOT=/path/to/your/agentcore-rl-toolkit/repo
-export APPWORLD_DIR=$TOOLKIT_ROOT/examples/strands_appworld_agent
-
-cd $APPWORLD_DIR
+cd examples/strands_appworld_agent
 
 # Ensure git-lfs is installed (appworld stores bundle files in Git LFS)
 git lfs install
 
 uv venv --python 3.12
 source .venv/bin/activate
-UV_GIT_LFS=1 uv pip install -e . -e '../../[core]'  # example and local SDK
+UV_GIT_LFS=1 uv pip install -e .
 ```
 
+Run the remaining commands from `examples/strands_appworld_agent`.
 After installing, set up AppWorld data:
 
 ```bash
@@ -50,7 +48,6 @@ cp .env.example .env
 
 ```bash
 # Start the server in one terminal
-cd $APPWORLD_DIR
 python rl_app.py
 
 # Submit a request in another terminal
@@ -71,84 +68,40 @@ curl -X POST http://localhost:8080/invocations \
 
 The request returns `{"reward": ...}`.
 
-## Docker
-
-### Build & run locally
-
-Build the docker image:
-
-```bash
-docker buildx build \
-  --build-context toolkit=$TOOLKIT_ROOT \
-  -t appworld:dev --load \
-  -f $APPWORLD_DIR/Dockerfile \
-  $APPWORLD_DIR
-```
-
-Then start the server as follows, and send the request.
-```bash
-# Run with host network so the agent can access the locally hosted vLLM server
-docker run --network host --env-file $APPWORLD_DIR/.env appworld:dev python -m rl_app
-
-# Submit request (same curl as above)
-```
-
-### Build & push to ECR
-
-You need to build docker and push it to AWS ECR for deploying agent, running evaluation or running RL training with AgentCore.
-
-```bash
-cd $TOOLKIT_ROOT
-cp .env.example .env
-# Edit .env and fill in your AWS region, account ID, and ECR repo name before proceeding
-# AWS_REGION=us-west-2
-# AWS_ACCOUNT=your-aws-account-number
-# ECR_REPO_NAME=your-ecr-repo-name
-# The script uses the AWS CLI, which reads credentials from ~/.aws/credentials.
-# Make sure this is configured (e.g., run `aws configure`) before proceeding.
-
-./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=$APPWORLD_DIR/Dockerfile \
-  --tag=dev \
-  --context=$APPWORLD_DIR \
-  --additional-context=toolkit=$TOOLKIT_ROOT
-```
-
 ## Deploy
 
-Create your `config.toml` file and fill in the `[agentcore]` section:
+Run from `examples/strands_appworld_agent`. Set the VPC IDs for the
+host running your inference server:
 
 ```bash
-cd $APPWORLD_DIR
-cp config.example.toml config.toml
+npm install -g @aws/agentcore
+
+agentcore create --name appworld --no-agent --output-dir ./deploy --skip-git
+cd deploy/appworld
+agentcore add agent --name strands_appworld_agent --type byo \
+  --code-location ../.. --entrypoint rl_app.py \
+  --build Container --language Python \
+  --framework Strands --model-provider Bedrock --protocol HTTP \
+  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
+  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
+agentcore deploy --yes
+agentcore status --json
+cd ../..
 ```
 
-Edit `config.toml` with your deployment values:
-
-```toml
-[agentcore]
-region = "us-west-2"
-agent_name = "my_strands_appworld_agent"
-image_uri = "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/example-agent:tag"  # ECR image URI from the push step
-execution_role_arn = "arn:aws:iam::ACCOUNT_ID:role/EXAMPLE_ROLE"
-
-# Network configuration (optional — omit for PUBLIC mode)
-network_mode = "VPC"
-subnets = ["subnet-xxxxxxxxxxxxxxxxx"]
-security_groups = ["sg-xxxxxxxxxxxxxxxxx"]
-```
-
-Then run:
-
-```bash
-python deploy.py
-```
-
-The deploy script will print the Amazon Resource Name (ARN) of your deployed agent in its output log. Copy this value — you will need it for evaluation.
+For a publicly reachable inference server, replace the VPC flags with
+`--network-mode PUBLIC`. To redeploy after editing the agent, run
+`agentcore deploy --yes` from `deploy/appworld`.
 
 ## Evaluate
 
-To evaluate the deployed agent, set its ARN and model settings in `config.toml`:
+Copy the evaluation config:
+
+```bash
+cp config.example.toml config.toml
+```
+
+Set the Runtime ARN returned by the deployment and the model settings in `config.toml`:
 
 ```toml
 [agentcore]
@@ -166,8 +119,6 @@ session starts per second.
 Ensure you have run `appworld download data` to download appworld dataset folder into the same path where you will run evaluation, evaluation script will load AppWorlds's built-in dataset splits (`train`, `dev`, `test_normal`, `test_challenge`) via `--dataset` from the dataset folder.
 
 ```bash
-cd $APPWORLD_DIR
-
 # Run full evaluation on the normal test split
 python evaluate.py --dataset test_normal --exp_id my_eval --max_concurrent 50 --timeout 1800
 
@@ -190,7 +141,6 @@ strands_appworld_agent/
 ├── rl_app.py            # ReAct code agent
 ├── reward.py            # AppWorldReward (pass_count / num_tests)
 ├── evaluate.py          # Batch evaluation
-├── deploy.py            # Deploy container to AgentCore
 ├── Dockerfile           # ACR container (AppWorld data baked in)
 ├── config.example.toml  # Configuration template
 ├── .env.example         # Environment variable template

@@ -1,9 +1,13 @@
 import argparse
+import asyncio
 import json
 import subprocess
 from urllib.parse import urlparse, urlunparse
+from uuid import uuid4
 
 import requests
+
+from agentcore_rl_toolkit import AgentCoreHttpClient
 
 
 def build_payload(task_file: str, base_url: str, model_id: str) -> dict:
@@ -39,8 +43,8 @@ def run_local(payload: dict) -> None:
     print(json.dumps(resp.json(), indent=2))
 
 
-def run_acr(payload: dict, agent_name: str) -> None:
-    """Invoke a deployed ACR agent via the agentcore CLI.
+async def run_acr(payload: dict, agent_arn: str) -> None:
+    """Invoke a deployed ACR agent with its task payload.
 
     The host part of base_url is rewritten to the cluster's primary IP so the
     deployed container can reach the vLLM server. Port and path are preserved.
@@ -50,14 +54,13 @@ def run_acr(payload: dict, agent_name: str) -> None:
     new_netloc = f"{cluster_ip}:{parsed.port}" if parsed.port else cluster_ip
     payload["_config"]["base_url"] = urlunparse(parsed._replace(netloc=new_netloc))
 
-    result = subprocess.run(
-        ["agentcore", "invoke", "--agent", agent_name, json.dumps(payload)],
-        capture_output=True,
-        text=True,
-    )
-    print(result.stdout)
-    if result.stderr:
-        print(result.stderr)
+    session_id = str(uuid4())
+    async with AgentCoreHttpClient(agent_arn) as client:
+        try:
+            result = await client.invoke(payload, session_id=session_id)
+            print(json.dumps(result, indent=2))
+        finally:
+            await client.stop_session(session_id)
 
 
 def main() -> None:
@@ -70,12 +73,14 @@ def main() -> None:
         "--model-id", required=True, help="Assistant model id (must match the vLLM --served-model-name)"
     )
     parser.add_argument("--acr", action="store_true", help="Invoke the deployed ACR agent instead of a local server")
-    parser.add_argument("--agent-name", default="strands_taubench_agent_rl", help="ACR agent name (used with --acr)")
+    parser.add_argument("--agent-arn", help="Runtime ARN (required with --acr)")
     args = parser.parse_args()
 
     payload = build_payload(args.task, args.base_url, args.model_id)
     if args.acr:
-        run_acr(payload, args.agent_name)
+        if not args.agent_arn:
+            parser.error("--agent-arn is required with --acr")
+        asyncio.run(run_acr(payload, args.agent_arn))
     else:
         run_local(payload)
 

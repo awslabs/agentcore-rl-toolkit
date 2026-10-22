@@ -40,10 +40,11 @@ uv pip install -e .
 python test_local.py
 ```
 
-Deploy + run the full benchmark:
+Deploy using the commands in the
+[OfficeBench README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_officebench_agent/README.md#2-deploy),
+set the Runtime ARN in `config.toml`, then run the benchmark from the example directory:
 
 ```bash
-python deploy.py                         # build, push, deploy to ACR
 python benchmark.py --limit 300          # full 300-task run
 python benchmark.py --limit 1            # smoke test
 ```
@@ -60,12 +61,12 @@ python benchmark.py --limit 1            # smoke test
 - **`benchmark.py`** — parallel evaluation over the 300-task benchmark.
 - **`run_local_eval.py`** / **`test_local.py`** — local
   (no-ACR) evaluation and smoke tests.
-- **`Dockerfile`** + **`deploy.py`** + **`config.toml`** —
-  container build + programmatic ACR deploy.
+- **`Dockerfile`** — container dependencies.
+- **`config.example.toml`** — Runtime ARN and evaluation settings.
 - **`preprocess.py`**, **`models.py`**, **`utils.py`** — shared
   helpers (S3 task fetch, testbed setup, file readers).
 
 For the full list of divergences from the original OfficeBench,
-Docker + ECR setup, benchmark config, and local-testing workflow,
+benchmark config, and local-testing workflow,
 see the
 [full README on GitHub](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_officebench_agent/README.md).

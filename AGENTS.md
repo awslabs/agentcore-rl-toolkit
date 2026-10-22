@@ -13,12 +13,6 @@ uv sync --extra core
 # Run tests
 uv run pytest tests/
 
-# Build and push Docker image to ECR (current approach, may change)
-./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
-  --tag=latest \
-  --context=examples/strands_math_agent
-
 # Run example locally
 cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 ```
@@ -79,7 +73,7 @@ see the [HTTP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/l
 AWS's [`BedrockAgentCoreApp`](https://github.com/aws/bedrock-agentcore-sdk-python) wraps that
 contract (`@app.entrypoint`, `@app.websocket`, `@app.ping`, `@app.async_task`); see
 `examples/*/basic_app.py` for the production shape this repo adapts from, and the
-[runtime overview](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html)
+[Runtime SDK documentation](https://github.com/aws/bedrock-agentcore-sdk-python)
 for the full API.
 
 ### What agentcore-rl-toolkit Provides
@@ -428,24 +422,10 @@ Use `AgentCoreRuntimeApp` and retain `@app.entrypoint`. Read model settings from
 `{"reward": float}`. Create the model and agent per invocation. See
 `examples/strands_math_agent/rl_app.py` for the complete example.
 
-### Deployment to ACR
+### Example deployment and validation
 
-This package relies on [bedrock-agentcore-starter-toolkit](https://github.com/aws/bedrock-agentcore-starter-toolkit) for deployment:
-- CLI tool to generate Dockerfiles, build images, push to ECR, and launch on ACR
-- We prioritize container (ECR image) deployment for operational simplicity
-- Install separately with `uv tool install bedrock-agentcore-starter-toolkit`.
-
-**Current workflow:**
-1. Dockerfiles are generated in `examples/{agent_name}/.bedrock_agentcore/{app_name}/Dockerfile`
-2. Use `scripts/build_docker_image_and_push_to_ecr.sh` to build and push:
-   ```bash
-   ./scripts/build_docker_image_and_push_to_ecr.sh \
-     --dockerfile=examples/strands_math_agent/.bedrock_agentcore/strands_math_agent_rl/Dockerfile \
-     --tag=latest \
-     --context=examples/strands_math_agent
-   ```
-3. Deploy the image and pass the Runtime ARN to the training backend
-4. Model config (`base_url`, `model_id`, and optionally `sampling_params`) is passed via the `_config` payload at invocation time
+Use [deploy-and-test-agent](.agents/skills/deploy-and-test-agent/SKILL.md) for local
+and cloud validation, including deployment with unpublished toolkit changes.
 
 ### Evaluation
 
@@ -459,7 +439,7 @@ Use `examples/strands_migration_agent/evaluate.py` as the reference.
 
 | Variable | Description | When Required |
 |----------|-------------|---------------|
-| `AWS_REGION` | AWS region | Always |
+| `AWS_REGION` | AWS region | Build-and-push script |
 | `AWS_ACCOUNT` | AWS account ID | Deployment |
 | `ECR_REPO_NAME` | ECR repository name | Deployment |
 
@@ -507,20 +487,6 @@ the LLM server client is the faked seam, so no inference engine is needed).
 
 ## Development Tips
 
-### Per-Example Environments
-
-Each example has its own `pyproject.toml` and uv environment:
-```bash
-cd examples/strands_math_agent
-uv sync  # Creates .venv in this folder
-source .venv/bin/activate
-```
-
-To use the latest local source of `agentcore-rl-toolkit` (e.g., for testing unreleased changes):
-```bash
-uv pip install -e . -e '../../[core]'
-```
-
 ### Code Conventions
 
 - Commit messages must be [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`) — a commitizen pre-commit hook rejects anything else
@@ -559,6 +525,5 @@ uv pip install -e . -e '../../[core]'
 - **ACR Documentation**: https://docs.aws.amazon.com/bedrock-agentcore/
 - **ACR Runtime Guide**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html
 - **bedrock-agentcore-sdk-python** (provides `BedrockAgentCoreApp`): https://github.com/aws/bedrock-agentcore-sdk-python
-- **bedrock-agentcore-starter-toolkit** (CLI tools, Dockerfile generation): https://github.com/aws/bedrock-agentcore-starter-toolkit
-- **Runtime SDK Overview**: https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html
+- **AgentCore CLI**: https://github.com/aws/agentcore-cli
 - **HTTP Protocol Contract**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http

@@ -19,16 +19,15 @@ context stays small regardless of how many APIs exist.
 cd examples/strands_appworld_agent
 uv venv --python 3.12 && source .venv/bin/activate
 UV_GIT_LFS=1 uv pip install -e .
-uv pip install -e ../../ --force-reinstall --no-deps
 appworld install && appworld download data
 
 # Start the RL app (needs a local vLLM server running on :4000)
 python rl_app.py
 ```
 
-Deploy via the
-[Prepare agent for RL → Deploy](/agentcore-rl-toolkit/guides/agent-adaptation/)
-flow, then evaluate with `evaluate.py` or train with the
+Deploy using the commands in the
+[AppWorld README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_appworld_agent/README.md#deploy),
+then evaluate with `evaluate.py` or train with the
 [slime backend](/agentcore-rl-toolkit/guides/slime-backend-setup/).
 
 ## What's in the example
@@ -42,9 +41,8 @@ flow, then evaluate with `evaluate.py` or train with the
   splits (`train` / `dev` / `test_normal` / `test_challenge`).
 - **`few_shot_example.py`** — few-shot demo messages seeded into
   the agent's context.
-- **`Dockerfile`** + **`deploy.py`** + **`config.toml`** —
-  container build + programmatic ACR deploy.
+- **`Dockerfile`** — container dependencies and AppWorld dataset.
+- **`config.example.toml`** — Runtime ARN and evaluation settings.
 
-For AppWorld data download, Docker + ECR setup, full VPC deploy
-config, and evaluation options, see the
+For AppWorld data download and evaluation options, see the
 [full README on GitHub](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_appworld_agent/README.md).

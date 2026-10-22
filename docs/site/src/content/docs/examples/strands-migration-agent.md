@@ -21,19 +21,18 @@ baseline, rewired to use open-source LLMs through Strands.
 cd examples/strands_migration_agent
 uv venv --python 3.13 && source .venv/bin/activate
 uv pip install -e .
-uv pip install -e ../../ --force-reinstall --no-deps
 
 # Preprocess 2 repos as a smoke test
 python preprocess.py --s3-bucket-name my-migration-bench-data \
     --max-repos-per-split 2 --skip-s3-sync
 
 # Start the RL app (needs a local vLLM server running on :4000)
-uvicorn rl_app:app --port 8080 --reload --reload-dir ../..
+uvicorn rl_app:app --port 8080 --reload
 ```
 
-Deploy via the
-[Prepare agent for RL → Deploy](/agentcore-rl-toolkit/guides/agent-adaptation/)
-flow, then evaluate with `evaluate.py`.
+Deploy using the commands in the
+[Migration README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_migration_agent/README.md#deploy-to-agentcore),
+then evaluate with `evaluate.py`.
 
 ## What's in the example
 
@@ -45,12 +44,12 @@ flow, then evaluate with `evaluate.py`.
 - **`preprocess.py`** — convert the MigrationBench dataset into
   per-repo tarballs + metadata + JSONL rollout requests.
 - **`evaluate.py`** — batch evaluation on MigrationBench.
-- **`Dockerfile`** + **`deploy.py`** + **`config.toml`** —
-  container build + programmatic ACR deploy.
+- **`Dockerfile`** — Java, Maven, and agent dependencies.
+- **`config.example.toml`** — Runtime ARN and evaluation settings.
 - **`models.py`**, **`utils.py`**, **`eval_utils.py`** — shared
   helpers (S3 fetch, Maven setup, build verification).
 
-For Java/Maven install, Docker + ECR setup, CodeArtifact maven
+For Java/Maven install, the CodeArtifact Maven
 mirror (avoids Maven Central rate limits), and full evaluation
 config, see the
 [full README on GitHub](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_migration_agent/README.md).

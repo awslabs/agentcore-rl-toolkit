@@ -1,7 +1,7 @@
 # Copy this file to config.toml and fill in your values
 
 [agentcore]
-# Agent ARN printed by `agentcore deploy` (also saved in .bedrock_agentcore.yaml)
+# Runtime ARN printed by `agentcore deploy`
 agent_arn = "arn:aws:bedrock-agentcore:REGION:ACCOUNT_ID:runtime/AGENT_ID"
 
 [eval]

@@ -43,8 +43,12 @@ config.toml
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/check-cloudwatch-session-logs/
+!.claude/skills/deploy-and-test-agent/
 # Personal per-project Claude instructions (loaded alongside CLAUDE.md, never committed)
 CLAUDE.local.md
 
 .bedrock_agentcore.yaml
 .bedrock_agentcore/
+
+# Generated AgentCore CLI deployment projects
+examples/*/deploy/

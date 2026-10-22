@@ -31,7 +31,6 @@ credential chain uses automatic refresh.
 | `codex` | Codex main agent with four tools, port 8080 | HTTP |
 
 ```bash
-export AWS_REGION=us-west-2
 export IMAGE_URI=ACCOUNT.dkr.ecr.REGION.amazonaws.com/REPOSITORY:TAG
 docker buildx build --platform linux/arm64 --target mcp \
   -f deployment/Dockerfile -t "$IMAGE_URI" --push .
@@ -68,7 +67,7 @@ uv run python deployment/deploy.py \
   --role arn:aws:iam::ACCOUNT:role/YOUR_RUNTIME_ROLE \
   --env /path/to/biomedical-runtime.json \
   --subnet subnet-YOUR_SUBNET --security-group sg-YOUR_SECURITY_GROUP \
-  --protocol MCP --region "$AWS_REGION"
+  --protocol MCP
 ```
 
 The script selects platform V2, waits for `READY`, and prints the ARN.

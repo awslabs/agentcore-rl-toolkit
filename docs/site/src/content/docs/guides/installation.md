@@ -57,11 +57,15 @@ To configure and deploy an agent to AgentCore Runtime, install the `agentcore` C
 separately:
 
 ```bash
-uv tool install bedrock-agentcore-starter-toolkit
+npm install -g @aws/agentcore
 ```
 
-Continue with the
-[agent deployment instructions](/agentcore-rl-toolkit/guides/agent-adaptation/#deploy-to-agentcore-runtime).
+If `agentcore` still resolves to the old Python CLI, uninstall
+`bedrock-agentcore-starter-toolkit` with the tool that installed it.
+Keep the separate `bedrock-agentcore` Runtime SDK.
+
+To try deploying the Math example, use the commands in its
+[README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md#deploy-with-the-agentcore-cli).
 
 ## Install from source
 

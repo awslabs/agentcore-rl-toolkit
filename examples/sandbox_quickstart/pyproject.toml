@@ -5,7 +5,7 @@ description = "Run shell commands in an arbitrary Docker image on AgentCore Runt
 requires-python = ">=3.11"
 dependencies = [
     "agentcore-rl-toolkit[rollout]==0.2.0",
-    "bedrock-agentcore-starter-toolkit>=0.2.0",
+    "boto3>=1.40.55",
 ]
 
 [tool.setuptools]

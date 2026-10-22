@@ -33,17 +33,10 @@ computed deterministically at the end of the rollout.
 - **AWS credentials** with access to Bedrock (user simulator) and AgentCore. Verify with `aws sts get-caller-identity`.
 - A **vLLM server** serving the model being trained.
 
-Two separate packages are involved — don't confuse them:
-
-| Package | What it gives you | Source |
-|---------|-------------------|--------|
-| `agentcore-rl-toolkit` (this repo) | The RL SDK (`AgentCoreRuntimeApp`, `@app.entrypoint`) **and this example** | `git clone` (below) |
-| `bedrock-agentcore-starter-toolkit` | AWS's `agentcore` CLI used to deploy to ACR | `pip install` (below) |
-
 ## Installation
 
 ```bash
-# 1. Clone this repo — it provides both the RL SDK source and this example folder
+# 1. Clone this repo to get the example
 git clone https://github.com/awslabs/agentcore-rl-toolkit.git
 cd agentcore-rl-toolkit/examples/strands_taubench_agent
 
@@ -51,17 +44,11 @@ cd agentcore-rl-toolkit/examples/strands_taubench_agent
 uv venv --python 3.13
 source .venv/bin/activate
 
-# 3. Install dependencies into the venv:
-#    a) the example's own deps (pyproject.toml)
-#    b) agentcore-rl-toolkit from local source (so unreleased SDK changes are picked up)
-#    c) the agentcore CLI (separate AWS tool, used in the deploy steps below)
-uv pip install -e . -e '../../[core]'
-uv pip install bedrock-agentcore-starter-toolkit
+# 3. Install the example and its dependencies
+uv pip install -e .
 ```
 
-> tau2-bench is **not** a pip dependency — it is not on PyPI and its data files
-> require an editable install from the repo root, so it is not in `pyproject.toml`.
-> It is installed inside the container instead (see [step 2](#2-customize-the-dockerfile)).
+The [Dockerfile](Dockerfile) installs tau2-bench and its bundled datasets.
 
 ## Run RL App on ACR
 
@@ -69,85 +56,35 @@ The common RL-training setup serves the model being trained from a local vLLM
 server and runs many parallel rollouts on ACR. The steps below deploy this
 agent to ACR.
 
-### 1. Configure the ACR agent
+### 1. Deploy
+
+Run from `examples/strands_taubench_agent`. Set the VPC IDs for your
+vLLM server:
 
 ```bash
-cd examples/strands_taubench_agent
+npm install -g @aws/agentcore
 
-# Network details from your vLLM instance (so ACR can reach the server inside the VPC)
-SUBNET_ID="subnet-0123456789abcdefg"
-SECURITY_GROUP_ID="sg-0123456789abcdefg"
-
-agentcore configure --entrypoint rl_app.py \
-  --name strands_taubench_agent_rl_test \
-  --requirements-file pyproject.toml \
-  --deployment-type container \
-  --vpc --subnets $SUBNET_ID --security-groups $SECURITY_GROUP_ID \
-  --disable-memory \
-  --non-interactive
+agentcore create --name taubench --no-agent --output-dir ./deploy --skip-git
+cd deploy/taubench
+agentcore add agent --name strands_taubench_agent_rl --type byo \
+  --code-location ../.. --entrypoint rl_app.py \
+  --build Container --language Python \
+  --framework Strands --model-provider Bedrock --protocol HTTP \
+  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
+  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
+agentcore deploy --yes
+agentcore status --json
+cd ../..
 ```
 
-This writes config to `.bedrock_agentcore.yaml` and generates a Dockerfile at
-`.bedrock_agentcore/strands_taubench_agent_rl_test/Dockerfile`.
+Set `AGENT_RUNTIME_ARN` to the ARN printed by the deployment. For a publicly
+reachable vLLM server, replace the VPC flags with `--network-mode PUBLIC`.
+Run `agentcore deploy --yes` from `deploy/taubench` for subsequent deployments.
 
-> If your vLLM server is reachable at a public URL instead of inside a VPC, drop
-> the `--vpc --subnets --security-groups` flags to deploy to the public network.
+The user simulator uses Bedrock (`USER_MODEL_CONFIG` in `constants.py`), so the
+runtime execution role needs `bedrock:InvokeModel` access to that model.
 
-### 2. Customize the Dockerfile
-
-The auto-generated Dockerfile installs this example's dependencies but **not
-tau2-bench** (which isn't on PyPI). Add one section to clone and editable-install
-tau2-bench at a pinned commit, before the `COPY . .` line:
-
-```dockerfile
-# --- tau2-bench: editable install at a pinned commit ---
-# tau2-bench isn't on PyPI; its data/ dir must be reachable via the repo layout,
-# so an editable install is required.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-RUN git clone https://github.com/sierra-research/tau2-bench.git /opt/tau2-bench && \
-    cd /opt/tau2-bench && git checkout 70e700c && \
-    uv pip install -e .
-```
-
-> **Pin tau2-bench to the commit your tasks were authored against.** The reward
-> code is tightly coupled to a specific tau2 version: `_compute_db_reward`
-> compares DB hashes, `_compute_env_assertion_reward` runs tau2 assertion
-> functions, and tool schemas come from tau2's `openai_schema`. A different tau2
-> version (e.g. a future tau-3) can silently change rewards with no error. Pin it.
-
-The agent reads the stock tau2 DBs bundled at that commit. The reward stays
-correct because `_compute_db_reward` builds both the gold and predicted
-environments from the same `get_environment()` call, so both sides read the same
-DB — the hash comparison is internally consistent.
-
-### 3. Deploy to ACR
-
-```bash
-agentcore deploy --agent strands_taubench_agent_rl_test
-```
-
-This uploads the source, builds the (ARM64) image via CodeBuild, pushes it to
-ECR, and registers the agent runtime.
-
-Record two values from this step — both are in `.bedrock_agentcore.yaml` (and
-printed in the deploy logs):
-
-- **`agent_runtime_arn`** — the training engine needs it to invoke the agent.
-- **`execution_role`** — the IAM role the agent runs as, e.g.
-  `arn:aws:iam::123456789:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-abc123`.
-  You grant it Bedrock permissions in [step 4](#4-set-up-iam-permissions).
-
-### 4. Set up IAM permissions
-
-> The user simulator calls Bedrock (defaults to `global.anthropic.claude-opus-4-6-v1`;
-> see `USER_MODEL_CONFIG` in `constants.py`). The auto-generated ACR execution
-> role normally already grants Bedrock invoke access — if user turns fail with
-> `AccessDeniedException`, add `bedrock:InvokeModel` permission to the role.
-
-### 5. Set up the vLLM server
+### 2. Set up the vLLM server
 
 Serve the model being trained from a vLLM server reachable by ACR. For example:
 
@@ -167,7 +104,7 @@ the agent per-invocation via the `_config` payload:
 }
 ```
 
-### 6. Test the agent
+### 3. Test the agent
 
 `test_local.py` runs a single tau-bench task end-to-end. Three sample tasks ship
 in `tasks/` (one per domain) — each is a raw tau2-bench task with a single write
@@ -195,12 +132,12 @@ python test_local.py --task tasks/airline_example.json \
   --model-id Qwen/Qwen3-4B-Instruct-2507
 ```
 
-**Deployed ACR agent** — add `--acr` and `--agent-name`. No local tau2-bench
+**Deployed ACR agent** — run from the example directory with `--acr`. No local tau2-bench
 needed here; the agent runs inside the container, which already has it:
 
 ```bash
 python test_local.py --task tasks/retail_example.json --acr \
-  --agent-name strands_taubench_agent_rl_test \
+  --agent-arn "$AGENT_RUNTIME_ARN" \
   --base-url http://localhost:4000/v1 \
   --model-id Qwen/Qwen3-4B-Instruct-2507
 ```
@@ -208,13 +145,3 @@ python test_local.py --task tasks/retail_example.json --acr \
 The result contains the reward, conversation, and metadata. Swap `--task` to any of
 `tasks/{airline,retail,telecom}_example.json` to exercise a different domain —
 the same image serves all three.
-
-### 7. Redeployment
-
-After code changes, rebuild and re-register:
-
-```bash
-agentcore deploy --agent strands_taubench_agent_rl_test
-```
-
-The first invocation after a redeploy cold-starts (image pull + container init).
