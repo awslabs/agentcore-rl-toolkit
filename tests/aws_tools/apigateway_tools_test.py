@@ -9,6 +9,7 @@ import asyncio
 import gzip
 import hashlib
 import hmac
+import http.client
 import importlib.util
 import io
 import json
@@ -16,6 +17,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +26,7 @@ from urllib.parse import parse_qsl, quote, urlsplit
 
 import boto3
 import httpx
+import urllib3
 from botocore.credentials import Credentials
 
 from agentcore_rl_toolkit.aws_tools import apigateway_tools
@@ -34,6 +37,8 @@ REGION = "us-west-2"
 SECRET = "secret"
 HAS_OPENAI = importlib.util.find_spec("openai") is not None
 HAS_STRANDS = importlib.util.find_spec("strands") is not None
+HAS_REQUESTS = importlib.util.find_spec("requests") is not None
+STREAMING_URLLIB3 = hasattr(urllib3.HTTPResponse, "read1")  # urllib3>=2.2, which the proxy needs
 COMPLETION = {
     "id": "c",
     "object": "chat.completion",
@@ -153,6 +158,31 @@ class SignedHeadersTest(unittest.TestCase):
             apigateway_tools.signed_headers("GET", self.URL, session=no_credentials)
 
 
+class CanonicalUrlTest(unittest.TestCase):
+    CASES = {
+        "https://h/prod/v1/files/a%2fb": "https://h/prod/v1/files/a%2Fb",
+        "https://h/prod/v1/a/../models/./x": "https://h/prod/v1/models/x",
+        "https://h/prod/v1/caf\u00e9": "https://h/prod/v1/caf%C3%A9",
+        "https://h/v1/m?q=x%2fy&s=a b&p=1+2&e=%7e&t=~": "https://h/v1/m?q=x%2Fy&s=a%20b&p=1%202&e=~&t=~",
+        "https://h/v1/m?b=2&a=1&flag": "https://h/v1/m?b=2&a=1&flag=",
+        "https://h/v1/m?k=a%26b%3Dc&k=2": "https://h/v1/m?k=a%26b%3Dc&k=2",
+        "https://h:8443/v1/m": "https://h:8443/v1/m",
+        "https://h/v1/m?": "https://h/v1/m?",
+    }
+
+    def test_normalizes_the_path_and_query(self):
+        for url, expected in self.CASES.items():
+            with self.subTest(url):
+                self.assertEqual(apigateway_tools.canonical_url(url), expected)
+
+    def test_is_what_urllib3_sends(self):
+        for url in self.CASES:
+            canonical = apigateway_tools.canonical_url(url)
+            with self.subTest(url):
+                self.assertEqual(apigateway_tools.canonical_url(canonical), canonical)
+                self.assertEqual(urllib3.util.parse_url(canonical).url, canonical)
+
+
 # --- Proxy -----------------------------------------------------------------------------
 
 
@@ -251,6 +281,7 @@ class Upstream:
             test.assertEqual(headers["Host"], self.origin.removeprefix("http://"))
 
 
+@unittest.skipUnless(STREAMING_URLLIB3, "the proxy needs urllib3>=2.2")
 class ProxyTestCase(unittest.TestCase):
     def setUp(self):
         self.upstream = Upstream()
@@ -289,6 +320,28 @@ class ForwardingTest(ProxyTestCase):
         self.assertEqual(self.upstream.requests[0][2]["X-Amz-Security-Token"], "tok")
         self.upstream.assert_signed(self, 1)
 
+    def test_signs_the_url_it_forwards(self):
+        """Request targets sent byte for byte, so only the proxy decides what reaches upstream."""
+        targets = {
+            "/prod/v1/files/a%2fb": "/prod/v1/files/a%2Fb",  # lowercase percent-encoding in the path
+            "/prod/v1/files/a%2Fb": "/prod/v1/files/a%2Fb",
+            "/prod/v1/models?q=x%2fy": "/prod/v1/models?q=x%2Fy",  # ... and in the query
+            "/prod/v1/models?e=%7e&s=a%20b&t=~": "/prod/v1/models?e=~&s=a%20b&t=~",  # encoded unreserved characters
+            "/prod/v1/models?p=1+2": "/prod/v1/models?p=1%202",  # a form-encoded space
+            "/prod/v1/models?b=2&a=1&flag": "/prod/v1/models?b=2&a=1&flag=",
+            "/prod/v1/a/../models/./x": "/prod/v1/models/x",  # dot segments
+            "/prod/v1/caf%c3%a9?x=%c3%a9": "/prod/v1/caf%C3%A9?x=%C3%A9",
+        }
+        for target, forwarded in targets.items():
+            with self.subTest(target):
+                self.upstream.requests.clear()
+                connection = http.client.HTTPConnection(urlsplit(self.proxy.origin).netloc)
+                self.addCleanup(connection.close)
+                connection.request("GET", target, headers=self.auth)
+                self.assertEqual(connection.getresponse().status, 200)
+                self.assertEqual(self.upstream.requests[0][1], forwarded)
+                self.upstream.assert_signed(self, 1)
+
     def test_uses_rotated_credentials_on_the_next_request(self):
         credentials = Credentials("AKIDOLD", "old")
         rotating = mock.Mock(region_name=REGION, get_credentials=mock.Mock(return_value=credentials))
@@ -320,8 +373,8 @@ class ForwardingTest(ProxyTestCase):
 
     def test_streams_responses_as_they_arrive(self):
         for route in ("stream", "stream-unframed"):
+            self.upstream.release.clear()  # before the request starts, so upstream holds back the rest
             with self.subTest(route), self.http.stream("POST", "/" + route, json={}) as response:
-                self.upstream.release.clear()
                 lines = response.iter_lines()
                 self.assertTrue(next(lines).startswith("data: "))  # arrives while upstream holds the rest back
                 self.upstream.release.set()
@@ -387,6 +440,46 @@ class GuardTest(ProxyTestCase):
         with ExecuteApiProxy(self.upstream.base_url, session=session(), timeout=0.2) as proxy:
             response = httpx.get(proxy.base_url + "/slow", headers={"Authorization": f"Bearer {proxy.api_key}"})
         self.assertEqual(response.status_code, 504)
+
+    def connection(self) -> http.client.HTTPConnection:
+        connection = http.client.HTTPConnection(urlsplit(self.proxy.origin).netloc, timeout=5)
+        self.addCleanup(connection.close)
+        return connection
+
+    def test_kept_alive_connections_send_nothing_after_close(self):
+        connection = self.connection()
+        connection.request("GET", "/prod/v1/models", headers=self.auth)
+        self.assertEqual(connection.getresponse().read() and 200, 200)
+        self.proxy.close()
+        try:
+            connection.request("GET", "/prod/v1/models", headers=self.auth)
+            status = connection.getresponse().status
+        except (ConnectionError, http.client.HTTPException):
+            status = None
+        self.assertIn(status, (None, 503))
+        self.assertEqual(len(self.upstream.requests), 1)
+
+    def test_closes_idle_connections(self):
+        connection = self.connection()
+        connection.request("GET", "/prod/v1/models", headers=self.auth)
+        connection.getresponse().read()
+        self.proxy.close()
+        self.assertEqual(connection.sock.recv(1), b"")  # the proxy closed its end
+
+    def test_in_flight_requests_finish_after_close(self):
+        connection = self.connection()
+        connection.request("GET", "/prod/v1/slow", headers=self.auth)
+        deadline = time.monotonic() + 5
+        while not self.upstream.requests and time.monotonic() < deadline:
+            time.sleep(0.01)
+        closer = threading.Thread(target=self.proxy.close)
+        closer.start()
+        closer.join(5)
+        self.assertFalse(closer.is_alive(), "close() waits for in-flight requests")
+        self.upstream.release.set()
+        response = connection.getresponse()
+        self.assertEqual((response.status, response.read()), (200, json.dumps(COMPLETION).encode()))
+        self.assertEqual(response.getheader("Connection"), "close")
 
     def test_stops_serving_when_closed(self):
         self.proxy.close()
@@ -471,6 +564,38 @@ class StrandsTest(ProxyTestCase):
 
         asyncio.run(run())
         self.upstream.assert_signed(self, 4)
+
+
+@unittest.skipUnless(HAS_REQUESTS, "requests isn't installed")
+class DirectSigningTest(unittest.TestCase):
+    """The module docstring's requests example, signing without the proxy."""
+
+    def setUp(self):
+        self.upstream = Upstream()
+        self.addCleanup(self.upstream.close)
+
+    def test_signed_canonical_urls_verify(self):
+        import requests
+
+        for path in ("/chat/completions", "/files/a%2fb?q=x%2fy&s=a b&p=1+2&flag"):
+            with self.subTest(path):
+                self.upstream.requests.clear()
+                url = apigateway_tools.canonical_url(self.upstream.base_url + path)
+                body = json.dumps({"model": "m", "messages": MESSAGES}).encode()
+                headers = {
+                    "Content-Type": "application/json",
+                    **apigateway_tools.signed_headers("POST", url, body, session=session()),
+                }
+                response = requests.post(url, data=body, headers=headers, allow_redirects=False)
+                self.assertEqual(response.status_code, 200)
+                self.upstream.assert_signed(self, 1)
+
+
+class ProxyRequirementsTest(unittest.TestCase):
+    def test_needs_a_urllib3_that_streams(self):
+        with mock.patch.object(apigateway_tools.urllib3, "HTTPResponse", object):
+            with self.assertRaisesRegex(RuntimeError, "urllib3>=2.2"):
+                ExecuteApiProxy("https://h.example.com/v1", session=session())
 
 
 class ModuleTest(unittest.TestCase):

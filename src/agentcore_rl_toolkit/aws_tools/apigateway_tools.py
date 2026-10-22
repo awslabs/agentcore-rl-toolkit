@@ -22,7 +22,7 @@ which does the signing::
 Or without the proxy, signing each request with ``signed_headers``. Send exactly the
 signed URL and body bytes, sign every retry again, and don't follow redirects::
 
-    url = base_url + "/chat/completions"
+    url = canonical_url(base_url + "/chat/completions")
     body = json.dumps({"model": model_id, "messages": messages}).encode()
     headers = {"Content-Type": "application/json", **signed_headers("POST", url, body, region="us-east-2")}
     response = requests.post(url, data=body, headers=headers, allow_redirects=False)
@@ -38,7 +38,7 @@ on the endpoint's origin is rewritten to the proxy, so a client that follows it 
 signed again.
 
 Each connection is served by its own thread, and upstream connections are pooled.
-Needs only ``boto3``; upstream requests use ``urllib3``, a dependency of ``botocore``.
+Needs only ``boto3``; upstream requests use ``urllib3`` (>=2.2), a dependency of ``botocore``.
 A forked child process doesn't inherit the serving thread, so start the proxy in the
 process that uses it.
 """
@@ -49,10 +49,11 @@ import hmac
 import json
 import logging
 import secrets
+import socket
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import boto3
 import urllib3
@@ -83,13 +84,32 @@ def _credentials_and_region(session: boto3.Session, region: str | None) -> tuple
     return credentials, region
 
 
+def canonical_url(url: str) -> str:
+    """``url`` as it should be both signed and sent.
+
+    It's the form ``urllib3`` (and so ``requests``) sends: percent-encodings uppercased,
+    dot segments removed, spaces and non-ASCII characters percent-encoded. The query is
+    also re-encoded the way SigV4 canonicalizes it, since botocore signs a query string as
+    written: every character except ``A-Z a-z 0-9 - _ . ~`` percent-encoded, a ``+`` read
+    as a space, and every name given a value (``?flag`` becomes ``?flag=``).
+    """
+    parsed = urllib3.util.parse_url(url)
+    if not parsed.query:
+        return parsed.url
+    pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    query = "&".join(f"{quote(name, safe='-_.~')}={quote(value, safe='-_.~')}" for name, value in pairs)
+    return parsed._replace(query=query).url
+
+
 def signed_headers(
     method: str, url: str, body: bytes = b"", *, session: boto3.Session | None = None, region: str | None = None
 ) -> dict[str, str]:
     """The SigV4 headers (``Authorization``, ``X-Amz-*``) for an ``execute-api`` request.
 
     Only ``host`` and the ``X-Amz-*`` headers are signed, plus the body's hash, so other
-    headers can be sent as they are. The Region defaults to the session's. Without
+    headers can be sent as they are. ``url`` must be exactly the URL sent; pass it
+    through ``canonical_url`` first unless it's already in that form. The Region
+    defaults to the session's. Without
     ``session``, each call creates a ``boto3.Session()`` and resolves its credentials
     again; pass one session to reuse them across requests.
     """
@@ -148,6 +168,11 @@ class ExecuteApiProxy:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     ):
+        if not hasattr(urllib3.HTTPResponse, "read1"):
+            raise RuntimeError(
+                f"ExecuteApiProxy needs urllib3>=2.2, which streams responses without buffering them; "
+                f"found {urllib3.__version__}"
+            )
         upstream = urlsplit(upstream_url)
         if upstream.scheme not in ("http", "https") or not upstream.hostname:
             raise ValueError(f"upstream_url must be an http(s) URL, not {upstream_url!r}")
@@ -159,8 +184,10 @@ class ExecuteApiProxy:
         self.pool = urllib3.PoolManager(
             retries=False, timeout=urllib3.Timeout(connect=connect_timeout, read=timeout), maxsize=64, block=False
         )
-        self._server = ThreadingHTTPServer((host, port), _handler_class(self))
-        self._server.daemon_threads = True
+        self._lock = threading.Lock()  # guards _closed and the handlers' busy flags
+        self._closed = False
+        self._connections: set[_ProxyHandler] = set()
+        self._server = _Server((host, port), _handler_class(self))
         bound_host, bound_port = self._server.server_address[:2]
         self.origin = f"http://{bound_host}:{bound_port}"
         self.base_url = self.origin + upstream.path.rstrip("/")
@@ -173,7 +200,20 @@ class ExecuteApiProxy:
         self._thread.start()
 
     def close(self) -> None:
-        """Stops accepting connections; requests in flight on their own threads may finish."""
+        """Stops serving without waiting for requests in flight.
+
+        New connections are refused and idle kept-alive connections are closed. A request
+        already being handled finishes on its own thread, and its connection then closes;
+        any later request that still arrives gets a 503 and isn't forwarded.
+        """
+        with self._lock:
+            self._closed = True
+            idle = [handler.connection for handler in self._connections if not handler.busy]
+        for connection in idle:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)  # wakes its handler, which then sees EOF
+            except OSError:  # already closed by the client
+                pass
         self._server.shutdown()
         self._server.server_close()
         self._thread.join()
@@ -184,6 +224,14 @@ class ExecuteApiProxy:
 
     def __exit__(self, *exc_info: object) -> None:
         self.close()
+
+
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        # A connection that close() shuts down mid-request fails here; the default prints a traceback.
+        logger.debug("connection from %s failed", client_address, exc_info=True)
 
 
 def _handler_class(proxy: ExecuteApiProxy) -> type[BaseHTTPRequestHandler]:
@@ -197,8 +245,34 @@ def _handler_class(proxy: ExecuteApiProxy) -> type[BaseHTTPRequestHandler]:
 class _ProxyHandler(BaseHTTPRequestHandler):
     proxy: ExecuteApiProxy
     protocol_version = "HTTP/1.1"  # keep-alive, so clients pool their connections to the proxy
+    busy = False  # handling a request, as opposed to waiting for the connection's next one
+
+    def setup(self) -> None:
+        super().setup()
+        with self.proxy._lock:
+            self.proxy._connections.add(self)
+
+    def finish(self) -> None:
+        with self.proxy._lock:
+            self.proxy._connections.discard(self)
+        super().finish()
 
     def do_proxy(self) -> None:
+        with self.proxy._lock:
+            closed = self.proxy._closed
+            self.busy = not closed
+        if closed:
+            self._send_error(503, "the proxy is closed")
+            return
+        try:
+            self._forward()
+        finally:
+            with self.proxy._lock:
+                self.busy = False
+                if self.proxy._closed:
+                    self.close_connection = True
+
+    def _forward(self) -> None:
         if not self._authorized():
             self._send_error(401, "missing or wrong proxy api key")
             return
@@ -207,7 +281,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_error(400, str(exc))
             return
-        url = self.proxy.upstream_origin + self.path
+        url = canonical_url(self.proxy.upstream_origin + self.path)  # the URL signed is the URL sent
         headers = self._upstream_headers()
         headers.update(signed_headers(self.command, url, body, session=self.proxy.session, region=self.proxy.region))
         try:
@@ -291,6 +365,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", length)
         if chunked:
             self.send_header("Transfer-Encoding", "chunked")
+        if self.proxy._closed:
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.end_headers()
         if not has_body:
             return True
@@ -329,8 +406,7 @@ def _upstream_chunks(response: urllib3.BaseHTTPResponse) -> Iterator[bytes]:
     """The raw body in pieces as they arrive, so streamed (SSE) responses aren't held back."""
     if response.chunked and response.supports_chunked_reads():
         yield from response.read_chunked(decode_content=False)
-    elif hasattr(response, "read1"):  # urllib3>=2.3: returns what's available instead of waiting for a full chunk
+    else:
+        # read1 (urllib3>=2.2) returns what has arrived; read(amt) would wait for amt bytes or EOF.
         while chunk := response.read1(_STREAM_CHUNK_BYTES, decode_content=False):
             yield chunk
-    else:
-        yield from response.stream(_STREAM_CHUNK_BYTES, decode_content=False)
