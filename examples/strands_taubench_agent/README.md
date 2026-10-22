@@ -64,14 +64,18 @@ vLLM server:
 ```bash
 npm install -g @aws/agentcore
 
-agentcore create --name taubench --no-agent --output-dir ./deploy --skip-git
-cd deploy/taubench
-agentcore add agent --name strands_taubench_agent_rl --type byo \
-  --code-location ../.. --entrypoint rl_app.py \
-  --build Container --language Python \
-  --framework Strands --model-provider Bedrock --protocol HTTP \
-  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
-  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
+mkdir -p deploy
+cd deploy
+agentcore create --name taubench --skip-git
+cd taubench
+agentcore add runtime --name strands_taubench_agent_rl --language python \
+  --network-mode VPC \
+  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
+```
+
+In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
+
+```bash
 agentcore deploy --yes
 agentcore status --json
 cd ../..

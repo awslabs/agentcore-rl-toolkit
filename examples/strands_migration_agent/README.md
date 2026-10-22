@@ -199,15 +199,16 @@ host running your inference server:
 ```bash
 npm install -g @aws/agentcore
 
-agentcore create --name migration --no-agent --output-dir ./deploy --skip-git
-cd deploy/migration
-agentcore add agent --name strands_migration_agent --type byo \
-  --code-location ../.. --entrypoint rl_app.py \
-  --build Container --language Python \
-  --framework Strands --model-provider Bedrock --protocol HTTP \
-  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
-  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
+mkdir -p deploy
+cd deploy
+agentcore create --name migration --skip-git
+cd migration
+agentcore add runtime --name strands_migration_agent --language python \
+  --network-mode VPC \
+  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
 ```
+
+In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`.
 
 For a publicly reachable inference server, replace the VPC flags with
 `--network-mode PUBLIC`.

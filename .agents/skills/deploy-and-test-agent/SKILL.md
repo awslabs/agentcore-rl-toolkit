@@ -84,9 +84,13 @@ project; inspect `agentcore/aws-targets.json` before updating one.
 
 Keep reusable CLI projects under the example's ignored `deploy/` directory.
 For a temporary deployment test, keep the project beside the staged source and
-give it a distinct project name. `--code-location` is relative to the CLI
-project root; `../..` in the example recipes points back to the example.
-The project references that source directory, so retain both for redeployment.
+give it a distinct project name. In `agentcore/agentcore.json`, set the runtime's
+`codeLocation` relative to the CLI project root; `../..` in the example recipes
+points back to the example. Retain both directories for redeployment.
+
+The CLI detects `Dockerfile` and selects a container build automatically. For a
+custom filename, set both `build: "Container"` and `dockerfile`. The image's CMD
+controls startup; the CLI removes the CodeZip-only `runtimeVersion` itself.
 
 Container deployment builds on ARM64 CodeBuild. In VPC mode, check both the
 Runtime's route to the model or gateway and the build infrastructure's access
@@ -94,19 +98,16 @@ to AWS services and dependency sources. Use existing suitable subnets and
 security groups. The CLI provisions build roles; the caller still needs
 deployment permissions, and the Runtime role needs the example's data and
 model permissions. Consult the official
-[IAM guide](https://github.com/aws/agentcore-cli/blob/main/docs/PERMISSIONS.md)
-and [configuration reference](https://github.com/aws/agentcore-cli/blob/main/docs/configuration.md)
-for bootstrap, execution roles, and networking options.
-
-For BYO code, `--framework` and `--model-provider` are CLI metadata. The RL app
-receives its model settings through the invocation's `_config`.
+[CLI documentation](https://github.com/aws/agentcore-cli#readme) and
+[command reference](https://github.com/aws/agentcore-cli/blob/refactor/command.md)
+for execution roles and networking options.
 
 ## Verify and finish
 
 Wait for the Runtime and endpoint to be ready, then run a small real task with
-the example's evaluator or HTTP client. The CLI's `agentcore invoke` wraps its
-input in `prompt`; use the evaluator or `AgentCoreHttpSession` for structured
-task payloads containing `_config`.
+the example's evaluator, HTTP client, or `agentcore invoke --runtime <name>
+--payload '<JSON>'`. `--payload` forwards the full task JSON, including `_config`,
+to the Runtime.
 
 Check the task result and expected reward, not just deployment status or HTTP
 200. For SDK scripts that create and update a Runtime, exercise both paths and

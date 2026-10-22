@@ -122,11 +122,10 @@ The Runtime must be able to reach the inference server or rollout gateway.
 For a private endpoint, deploy into a VPC that routes to it and allows traffic
 on its TCP port. Container builds also need access to dependency sources.
 
-Each example README includes its deployment commands. For CLI setup, IAM, and
+Each example README includes its deployment commands. For CLI setup and
 configuration options, see the official
-[CLI documentation](https://github.com/aws/agentcore-cli#readme),
-[IAM guide](https://github.com/aws/agentcore-cli/blob/main/docs/PERMISSIONS.md), and
-[configuration reference](https://github.com/aws/agentcore-cli/blob/main/docs/configuration.md).
+[CLI documentation](https://github.com/aws/agentcore-cli#readme) and
+[command reference](https://github.com/aws/agentcore-cli/blob/refactor/command.md).
 
 A successful deploy prints the **agent runtime ARN** — that's the
 identifier the training backend uses to invoke the agent. For verl and slime,

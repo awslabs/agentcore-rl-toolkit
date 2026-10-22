@@ -14,7 +14,7 @@ uv pip install -e .
 ```
 
 Install the [AgentCore CLI](https://github.com/aws/agentcore-cli) on the deployment
-machine (Node.js 20+ required):
+machine (Node.js 20.12+ required):
 
 ```bash
 npm install -g @aws/agentcore
@@ -55,17 +55,16 @@ curl -X POST http://localhost:8080/invocations \
 Run from `examples/strands_math_agent`:
 
 ```bash
-agentcore create --name mathbasic --no-agent --output-dir ./deploy --skip-git
-cd deploy/mathbasic
-agentcore add agent --name strands_math_agent_basic --type byo \
-  --code-location ../.. --entrypoint basic_app.py \
-  --build Container --language Python \
-  --framework Strands --model-provider Bedrock --protocol HTTP \
+mkdir -p deploy
+cd deploy
+agentcore create --name mathbasic --skip-git
+cd mathbasic
+agentcore add runtime --name strands_math_agent_basic --language python \
   --network-mode PUBLIC
 ```
 
-Set `"dockerfile": "Dockerfile.basic"` on the runtime in
-`agentcore/agentcore.json`, then deploy:
+On `runtimes[0]` in `agentcore/agentcore.json`, set `codeLocation` to `"../.."`,
+`build` to `"Container"`, and `dockerfile` to `"Dockerfile.basic"`. Then deploy:
 
 ```bash
 agentcore deploy --yes
@@ -77,7 +76,8 @@ agentcore status --json
 Invoke the deployed endpoint with a prompt:
 
 ```bash
-agentcore invoke --runtime strands_math_agent_basic 'Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?'
+agentcore invoke --runtime strands_math_agent_basic \
+  --payload '{"prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?"}'
 cd ../..
 ```
 
@@ -125,14 +125,18 @@ Run from `examples/strands_math_agent`. Set the VPC IDs for the host
 running your inference server or rollout gateway:
 
 ```bash
-agentcore create --name math --no-agent --output-dir ./deploy --skip-git
-cd deploy/math
-agentcore add agent --name strands_math_agent_rl --type byo \
-  --code-location ../.. --entrypoint rl_app.py \
-  --build Container --language Python \
-  --framework Strands --model-provider Bedrock --protocol HTTP \
-  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
-  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
+mkdir -p deploy
+cd deploy
+agentcore create --name math --skip-git
+cd math
+agentcore add runtime --name strands_math_agent_rl --language python \
+  --network-mode VPC \
+  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
+```
+
+In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
+
+```bash
 agentcore deploy --yes
 agentcore status --json
 cd ../..

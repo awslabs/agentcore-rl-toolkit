@@ -50,12 +50,14 @@ hero:
       <span class="ln">npm install -g @aws/agentcore</span>
       <span class="ln"></span>
       <span class="ln"><span style="color:#6a9955"># Create a deployment project</span></span>
-      <span class="ln">agentcore create --name agent --no-agent \</span>
-      <span class="ln">    --output-dir deploy --skip-git</span>
-      <span class="ln">cd deploy/agent</span>
+      <span class="ln">mkdir -p deploy</span>
+      <span class="ln">cd deploy</span>
+      <span class="ln">agentcore create --name agent --skip-git</span>
+      <span class="ln">cd agent</span>
       <span class="ln"></span>
-      <span class="ln"><span style="color:#6a9955"># Add your existing agent interactively</span></span>
-      <span class="ln">agentcore add agent</span>
+      <span class="ln">agentcore add runtime --name agent --language python</span>
+      <span class="ln"></span>
+      <span class="ln"><span style="color:#6a9955"># In agentcore/agentcore.json, set runtimes[0].codeLocation to "../.."</span></span>
       <span class="ln"></span>
       <span class="ln">agentcore deploy</span>
       <span class="ln"></span>

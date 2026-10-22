@@ -3,7 +3,7 @@
 > **Networking:** this loop hosts the rollout gateway on the machine you run it on
 > and hands the agent an `http://<private-ip>:<gateway_port>/v1` `base_url`, so every
 > model call is an inbound connection from ACR to this host. Run it on an EC2 instance
-> in a VPC, deploy the ACR runtime into that same VPC (`--vpc --subnets --security-groups`),
+> in a VPC, deploy the ACR runtime into that same VPC,
 > and allow inbound TCP on `gateway_port`. **Running from a laptop does not work** — the
 > runtime has no route to it, and rollouts silently score `0.0`. See the "Networking"
 > section of the [SageMaker backend setup guide](../../../../../docs/site/src/content/docs/guides/sagemaker-backend-setup.md).

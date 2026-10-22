@@ -67,13 +67,17 @@ Run from `examples/strands_officebench_agent`:
 ```bash
 npm install -g @aws/agentcore
 
-agentcore create --name officebench --no-agent --output-dir ./deploy --skip-git
-cd deploy/officebench
-agentcore add agent --name strands_officebench_agent --type byo \
-  --code-location ../.. --entrypoint rl_app.py \
-  --build Container --language Python \
-  --framework Strands --model-provider Bedrock --protocol HTTP \
+mkdir -p deploy
+cd deploy
+agentcore create --name officebench --skip-git
+cd officebench
+agentcore add runtime --name strands_officebench_agent --language python \
   --network-mode PUBLIC
+```
+
+In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
+
+```bash
 agentcore deploy --yes
 agentcore status --json
 cd ../..
@@ -82,8 +86,8 @@ cd ../..
 For a private vLLM server, replace `--network-mode PUBLIC` with its VPC settings:
 
 ```bash
-  --network-mode VPC --vpc-id vpc-xxxxxxxxxxxxxxxxx \
-  --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
+  --network-mode VPC \
+  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
 ```
 
 Run `agentcore deploy --yes` from `deploy/officebench` for subsequent deployments.

@@ -294,8 +294,8 @@ concurrency, not by local hardware.
 "No GPU cluster" is not "runs anywhere": `train_grpo.py` binds the gateway to
 `local_ip()` and hands the agent `http://<private-ip>:<gateway_port>/v1`, so every
 sampling call is an *inbound* connection from the ACR runtime to the loop host. The
-host must be an EC2 instance in a VPC, the runtime must be deployed into that VPC
-(`--vpc --subnets --security-groups`), and the security group must allow inbound TCP on
+host must be an EC2 instance in a VPC, the runtime must be deployed into that VPC,
+and the security group must allow inbound TCP on
 `gateway_port` (default `0` = ephemeral, so pin it to write a narrow rule). A laptop
 cannot work; failures surface as rollouts scored `0.0`, not as a crash, because
 `run_one_rollout()` logs and returns a zero reward. Documented under "Networking" in
