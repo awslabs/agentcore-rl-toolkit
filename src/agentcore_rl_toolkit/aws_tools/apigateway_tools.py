@@ -9,6 +9,27 @@ and an API key::
         client = openai.OpenAI(base_url=proxy.base_url, api_key=proxy.api_key)
         model = OpenAIModel(client_args={"base_url": proxy.base_url, "api_key": proxy.api_key}, model_id=...)
 
+Any other HTTP operation works the same way. With ``requests``, through the proxy,
+which does the signing::
+
+    with ExecuteApiProxy(base_url, region="us-east-2") as proxy:
+        response = requests.post(
+            proxy.base_url + "/chat/completions",
+            json={"model": model_id, "messages": messages},
+            headers={"Authorization": f"Bearer {proxy.api_key}"},
+        )
+
+Or without the proxy, signing each request with ``signed_headers``. Send exactly the
+signed URL and body bytes, sign every retry again, and don't follow redirects::
+
+    url = base_url + "/chat/completions"
+    body = json.dumps({"model": model_id, "messages": messages}).encode()
+    headers = {"Content-Type": "application/json", **signed_headers("POST", url, body, region="us-east-2")}
+    response = requests.post(url, data=body, headers=headers, allow_redirects=False)
+
+The signing Region defaults to the boto3 session's; pass ``region=`` for an endpoint
+on a custom domain, whose hostname doesn't name its Region.
+
 The proxy listens on loopback and only forwards requests carrying its random
 ``api_key`` as a bearer token, so other local processes can't use it to sign their
 own requests. The token is removed before forwarding. Redirects are returned to the
@@ -71,6 +92,18 @@ def sigv4_headers(method: str, url: str, body: bytes, credentials: Credentials, 
     signed = AWSRequest(method=method, url=url, data=body)
     SigV4Auth(credentials.get_frozen_credentials(), SERVICE, region).add_auth(signed)
     return {name: signed.headers[name] for name in _SIGV4_HEADERS if name in signed.headers}
+
+
+def signed_headers(
+    method: str, url: str, body: bytes = b"", *, session: boto3.Session | None = None, region: str | None = None
+) -> dict[str, str]:
+    """``sigv4_headers`` with credentials and Region resolved as by ``resolve_credentials``.
+
+    Without ``session``, each call creates a ``boto3.Session()`` and resolves its
+    credentials again; pass one session to reuse them across requests.
+    """
+    credentials, region = resolve_credentials(session, region)
+    return sigv4_headers(method, url, body, credentials, region)
 
 
 # --- Proxy -----------------------------------------------------------------------------

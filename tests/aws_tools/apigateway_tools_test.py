@@ -86,14 +86,16 @@ def expected_signature(method: str, url: str, headers, body: bytes, signed_heade
     return hmac.new(key, string_to_sign.encode(), hashlib.sha256).hexdigest()
 
 
-def assert_valid_signature(test: unittest.TestCase, method: str, url: str, headers, body: bytes) -> None:
+def assert_valid_signature(
+    test: unittest.TestCase, method: str, url: str, headers, body: bytes, region: str = REGION
+) -> None:
     """Asserts ``headers`` carry a SigV4 ``execute-api`` signature that verifies for this request."""
     headers = {name.lower(): value for name, value in headers.items()}
     match = _AUTHORIZATION.fullmatch(headers.get("authorization", ""))
     test.assertIsNotNone(match, headers.get("authorization"))
-    test.assertEqual((match["key"], match["region"], match["service"]), ("AKIDEXAMPLE", REGION, "execute-api"))
+    test.assertEqual((match["key"], match["region"], match["service"]), ("AKIDEXAMPLE", region, "execute-api"))
     test.assertIn("host", match["signed"].split(";"))
-    scope = f"{match['date']}/{REGION}/execute-api/aws4_request"
+    scope = f"{match['date']}/{region}/execute-api/aws4_request"
     test.assertEqual(match["signature"], expected_signature(method, url, headers, body, match["signed"], scope))
 
 
@@ -129,6 +131,22 @@ class SigV4HeadersTest(unittest.TestCase):
         self.assertEqual(headers["X-Amz-Security-Token"], "tok")
         self.assertIn("x-amz-security-token", _AUTHORIZATION.match(headers["Authorization"])["signed"])
         assert_valid_signature(self, "POST", self.URL, headers, b'{"a": 1}')
+
+
+class SignedHeadersTest(unittest.TestCase):
+    URL = SigV4HeadersTest.URL
+
+    def test_resolves_credentials_and_region(self):
+        headers = apigateway_tools.signed_headers("POST", self.URL, b"{}", session=session(), region="eu-west-1")
+        headers["Host"] = urlsplit(self.URL).netloc
+        assert_valid_signature(self, "POST", self.URL, headers, b"{}", region="eu-west-1")
+
+    def test_signs_an_empty_body_by_default(self):
+        headers = {
+            "Host": urlsplit(self.URL).netloc,
+            **apigateway_tools.signed_headers("GET", self.URL, session=session()),
+        }
+        assert_valid_signature(self, "GET", self.URL, headers, b"")
 
 
 class ResolveCredentialsTest(unittest.TestCase):
