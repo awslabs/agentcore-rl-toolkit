@@ -116,16 +116,14 @@ The container must implement the Runtime's
 [HTTP contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html):
 serve `/invocations` and `/ping` on port 8080. `AgentCoreRuntimeApp` provides
 these endpoints. The examples use ARM64 images built through the
-[AgentCore CLI](https://github.com/aws/agentcore-cli) and CodeBuild.
+[Python AgentCore CLI](https://github.com/aws/bedrock-agentcore-starter-toolkit) and CodeBuild.
 
 The Runtime must be able to reach the inference server or rollout gateway.
 For a private endpoint, deploy into a VPC that routes to it and allows traffic
 on its TCP port. Container builds also need access to dependency sources.
 
-Each example README includes its deployment commands. For CLI setup and
-configuration options, see the official
-[CLI documentation](https://github.com/aws/agentcore-cli#readme) and
-[command reference](https://github.com/aws/agentcore-cli/blob/refactor/command.md).
+Each example README includes its deployment commands. For CLI setup, see
+[installation](/agentcore-rl-toolkit/guides/installation/#install-the-deployment-cli).
 
 A successful deploy prints the **agent runtime ARN** — that's the
 identifier the training backend uses to invoke the agent. For verl and slime,

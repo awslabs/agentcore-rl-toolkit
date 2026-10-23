@@ -435,18 +435,6 @@ Use `examples/strands_migration_agent/evaluate.py` as the reference.
 
 ---
 
-## Environment Variables
-
-| Variable | Description | When Required |
-|----------|-------------|---------------|
-| `AWS_REGION` | AWS region | Build-and-push script |
-| `AWS_ACCOUNT` | AWS account ID | Deployment |
-| `ECR_REPO_NAME` | ECR repository name | Deployment |
-
-See `.env.example` for template. The build script sources `.env` for deployment values.
-
----
-
 ## Common Tasks
 
 ### Adding a New Example Agent
@@ -525,5 +513,6 @@ the LLM server client is the faked seam, so no inference engine is needed).
 - **ACR Documentation**: https://docs.aws.amazon.com/bedrock-agentcore/
 - **ACR Runtime Guide**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html
 - **bedrock-agentcore-sdk-python** (provides `BedrockAgentCoreApp`): https://github.com/aws/bedrock-agentcore-sdk-python
-- **AgentCore CLI**: https://github.com/aws/agentcore-cli
+- **bedrock-agentcore-starter-toolkit** (Python CLI): https://github.com/aws/bedrock-agentcore-starter-toolkit
+- **Runtime SDK Overview**: https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/overview.html
 - **HTTP Protocol Contract**: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http

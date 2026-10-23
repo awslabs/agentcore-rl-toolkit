@@ -2,8 +2,10 @@ FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 WORKDIR /app
 
 ENV UV_SYSTEM_PYTHON=1 \
+    UV_COMPILE_BYTECODE=1 \
     UV_NO_PROGRESS=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DOCKER_CONTAINER=1
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \

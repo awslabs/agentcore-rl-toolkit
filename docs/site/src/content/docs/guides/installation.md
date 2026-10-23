@@ -53,16 +53,15 @@ and the SkyRL service require Python 3.12.
 
 ## Install the deployment CLI
 
-To configure and deploy an agent to AgentCore Runtime, install the `agentcore` CLI
-separately:
+The example deployment recipes use the Python `agentcore` CLI, installed
+separately from agent dependencies:
 
 ```bash
-npm install -g @aws/agentcore
+uv tool install bedrock-agentcore-starter-toolkit
 ```
 
-If `agentcore` still resolves to the old Python CLI, uninstall
-`bedrock-agentcore-starter-toolkit` with the tool that installed it.
-Keep the separate `bedrock-agentcore` Runtime SDK.
+The Python CLI is no longer supported upstream. Migration to the recommended
+npm CLI is tracked in [aws/agentcore-cli#2671](https://github.com/aws/agentcore-cli/issues/2671).
 
 To try deploying the Math example, use the commands in its
 [README](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_math_agent/README.md#deploy-with-the-agentcore-cli).

@@ -193,47 +193,31 @@ When these environment variables are not set, the agent uses Maven Central direc
 
 ## Deploy to AgentCore
 
-Run from `examples/strands_migration_agent`. Set the VPC IDs for the
+Run from `examples/strands_migration_agent`. Set the subnet and security group IDs for the
 host running your inference server:
 
 ```bash
-npm install -g @aws/agentcore
+uv tool install bedrock-agentcore-starter-toolkit
 
-mkdir -p deploy
-cd deploy
-agentcore create --name migration --skip-git
-cd migration
-agentcore add runtime --name strands_migration_agent --language python \
-  --network-mode VPC \
-  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
+agentcore configure --entrypoint rl_app.py --name strands_migration_agent \
+  --requirements-file pyproject.toml --deployment-type container --protocol HTTP \
+  --vpc --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx \
+  --disable-memory --non-interactive
+agentcore deploy --agent strands_migration_agent
 ```
 
-In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`.
-
-For a publicly reachable inference server, replace the VPC flags with
-`--network-mode PUBLIC`.
-
-If using the CodeArtifact mirror, set `envVars` on the runtime in
-`agentcore/agentcore.json` before deploying:
-
-```json
-"envVars": [
-  {"name": "CODEARTIFACT_DOMAIN", "value": "migration-aws-maven-mirror"},
-  {"name": "CODEARTIFACT_OWNER", "value": "123456789012"},
-  {"name": "CODEARTIFACT_REPO", "value": "maven-central-cache"}
-]
-```
-
-Deploy:
+For a publicly reachable inference server, omit the VPC flags.
+If using the CodeArtifact mirror, pass its settings to the deploy command:
 
 ```bash
-agentcore deploy --yes
-agentcore status --json
-cd ../..
+agentcore deploy --agent strands_migration_agent \
+  --env CODEARTIFACT_DOMAIN=migration-aws-maven-mirror \
+  --env CODEARTIFACT_OWNER=123456789012 \
+  --env CODEARTIFACT_REPO=maven-central-cache
 ```
 
 Set `AGENT_RUNTIME_ARN` to the ARN printed by the deployment. Run
-`agentcore deploy --yes` from `deploy/migration` to redeploy after source changes.
+the deploy command again to redeploy after source changes.
 
 ### Runtime permissions
 

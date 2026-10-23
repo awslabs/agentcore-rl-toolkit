@@ -44,8 +44,8 @@ For a container or cloud test of unpublished changes:
    distinguish it from a PyPI release with the same version. Retain the wheel
    digest and build log with the test result.
 
-Use the staged directory as the CLI's code location. Keep this test override
-out of the example's release dependencies. The
+Run the CLI from the staged directory. Keep this test override out of the
+example's release dependencies. The
 [Runtime test agents](../../../tests/runtime/agents/math/README.md) already
 provide a Dockerfile that installs a toolkit wheel.
 
@@ -58,15 +58,18 @@ model settings and request payload.
 For container debugging, use the example directory as the build context, or
 the staged directory when testing a wheel. Use `--platform linux/arm64` when
 checking the Runtime image; running that image locally needs an ARM64 host or
-working emulation. For example:
+working emulation.
+
+Select the Dockerfile for the entrypoint being tested. Math keeps separate
+files under `.bedrock_agentcore/<agent_name>/Dockerfile`; pass that path with
+`docker buildx build -f`. Other container examples use their root Dockerfile.
 
 ```bash
-docker buildx build --platform linux/arm64 -t agent-test --load .
+docker buildx build --platform linux/arm64 -f Dockerfile -t agent-test --load .
 docker run --rm -p 8080:8080 agent-test
 ```
 
-Select the Dockerfile for the entrypoint being tested, such as `Dockerfile.basic`
-for Math's basic app. Pass required environment variables or AWS credentials
+Pass required environment variables or AWS credentials
 at runtime using an untracked env file or an appropriate credential mount.
 Keep credential files out of the build context.
 
@@ -77,37 +80,38 @@ when testing the background invocation lifecycle.
 
 ## Deploy to AWS
 
-Use the npm `@aws/agentcore` CLI and the example's deployment commands. Confirm
-the AWS account with `aws sts get-caller-identity`. The CLI uses configured
-region defaults for a new deployment and the saved target for an existing
-project; inspect `agentcore/aws-targets.json` before updating one.
+Use the Python `bedrock-agentcore-starter-toolkit` CLI, installed separately
+from agent dependencies, and the example's deployment commands. Both Python
+and npm CLIs use the command name `agentcore`; check which one is on PATH.
+Confirm the AWS account with `aws sts get-caller-identity` and inspect
+`.bedrock_agentcore.yaml` before updating an existing deployment.
 
-Keep reusable CLI projects under the example's ignored `deploy/` directory.
-For a temporary deployment test, keep the project beside the staged source and
-give it a distinct project name. In `agentcore/agentcore.json`, set the runtime's
-`codeLocation` relative to the CLI project root; `../..` in the example recipes
-points back to the example. Retain both directories for redeployment.
+Run `agentcore configure` and `agentcore deploy` from the example or staged
+source directory. Keep `.bedrock_agentcore.yaml` for redeployment; it records
+the source path, account, region, and created resources.
 
-The CLI detects `Dockerfile` and selects a container build automatically. For a
-custom filename, set both `build: "Container"` and `dockerfile`. The image's CMD
-controls startup; the CLI removes the CodeZip-only `runtimeVersion` itself.
+The CLI reuses an existing source-root `Dockerfile` first, otherwise
+`.bedrock_agentcore/<agent_name>/Dockerfile`. It generates one only when
+neither exists. The Dockerfile's CMD controls startup, even if `--entrypoint`
+names another file. Preserve the selected Dockerfile when staging a test;
+if changing Math's agent name, place its Dockerfile under that name too.
 
-Container deployment builds on ARM64 CodeBuild. In VPC mode, check both the
-Runtime's route to the model or gateway and the build infrastructure's access
-to AWS services and dependency sources. Use existing suitable subnets and
-security groups. The CLI provisions build roles; the caller still needs
-deployment permissions, and the Runtime role needs the example's data and
-model permissions. Consult the official
-[CLI documentation](https://github.com/aws/agentcore-cli#readme) and
-[command reference](https://github.com/aws/agentcore-cli/blob/refactor/command.md)
-for execution roles and networking options.
+For Sandbox Quickstart, compile `sandboxd` first and pass the resulting binary
+as `--entrypoint`. The CLI accepts it without a Python placeholder, but still
+requires the example's `pyproject.toml` as `--requirements-file`.
+
+Container deployment builds on ARM64 CodeBuild by default; `--local-build`
+builds locally before pushing and deploying. The CLI creates ECR and execution
+roles automatically. The caller needs deployment permissions, and the Runtime
+role needs the example's data and model permissions. For a private model or
+gateway, configure VPC subnets and security groups that allow the Runtime to
+reach it. Build dependencies must also be accessible from CodeBuild.
 
 ## Verify and finish
 
 Wait for the Runtime and endpoint to be ready, then run a small real task with
-the example's evaluator, HTTP client, or `agentcore invoke --runtime <name>
---payload '<JSON>'`. `--payload` forwards the full task JSON, including `_config`,
-to the Runtime.
+the example's evaluator or HTTP client, preserving the full task payload and
+`_config`. Use `SandboxClient` for Sandbox commands.
 
 Check the task result and expected reward, not just deployment status or HTTP
 200. For SDK scripts that create and update a Runtime, exercise both paths and
@@ -117,9 +121,10 @@ Retain the tested source or wheel, Runtime ARN, invocation result, and cleanup
 status locally.
 
 Stop the test sessions and local processes. Keep deployments requested for
-reuse. For a disposable CLI project, run `agentcore remove all --yes` followed
-by `agentcore deploy --yes` from that project's directory, then verify removal.
+reuse. For a disposable CLI deployment, preview `agentcore destroy --agent <name>
+--delete-ecr-repo --dry-run`, then use `--force` instead of `--dry-run` to
+remove its resources and verify removal.
 Clean up separately created test fixtures and SDK-managed test resources too.
-Limit cleanup to resources created for the test; shared bootstrap resources and
+Limit cleanup to resources created for the test; shared source buckets and
 pre-existing deployments stay in place. Delete temporary project state only
 after its cloud resources have been removed.

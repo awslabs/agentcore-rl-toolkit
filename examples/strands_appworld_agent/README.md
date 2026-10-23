@@ -70,32 +70,21 @@ The request returns `{"reward": ...}`.
 
 ## Deploy
 
-Run from `examples/strands_appworld_agent`. Set the VPC IDs for the
+Run from `examples/strands_appworld_agent`. Set the subnet and security group IDs for the
 host running your inference server:
 
 ```bash
-npm install -g @aws/agentcore
+uv tool install bedrock-agentcore-starter-toolkit
 
-mkdir -p deploy
-cd deploy
-agentcore create --name appworld --skip-git
-cd appworld
-agentcore add runtime --name strands_appworld_agent --language python \
-  --network-mode VPC \
-  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
+agentcore configure --entrypoint rl_app.py --name strands_appworld_agent \
+  --requirements-file pyproject.toml --deployment-type container --protocol HTTP \
+  --vpc --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx \
+  --disable-memory --non-interactive
+agentcore deploy --agent strands_appworld_agent
 ```
 
-In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
-
-```bash
-agentcore deploy --yes
-agentcore status --json
-cd ../..
-```
-
-For a publicly reachable inference server, replace the VPC flags with
-`--network-mode PUBLIC`. To redeploy after editing the agent, run
-`agentcore deploy --yes` from `deploy/appworld`.
+For a publicly reachable inference server, omit the VPC flags.
+To redeploy after editing the agent, run `agentcore deploy --agent strands_appworld_agent`.
 
 ## Evaluate
 

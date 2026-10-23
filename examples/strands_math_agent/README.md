@@ -13,11 +13,11 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-Install the [AgentCore CLI](https://github.com/aws/agentcore-cli) on the deployment
-machine (Node.js 20.12+ required):
+Install the Python [AgentCore CLI](https://github.com/aws/bedrock-agentcore-starter-toolkit)
+separately on the deployment machine:
 
 ```bash
-npm install -g @aws/agentcore
+uv tool install bedrock-agentcore-starter-toolkit
 ```
 
 ## Setup AWS Credentials
@@ -55,30 +55,21 @@ curl -X POST http://localhost:8080/invocations \
 Run from `examples/strands_math_agent`:
 
 ```bash
-mkdir -p deploy
-cd deploy
-agentcore create --name mathbasic --skip-git
-cd mathbasic
-agentcore add runtime --name strands_math_agent_basic --language python \
-  --network-mode PUBLIC
+agentcore configure --entrypoint basic_app.py --name strands_math_agent_basic \
+  --requirements-file pyproject.toml --deployment-type container --protocol HTTP \
+  --disable-memory --non-interactive
+agentcore deploy --agent strands_math_agent_basic
 ```
 
-On `runtimes[0]` in `agentcore/agentcore.json`, set `codeLocation` to `"../.."`,
-`build` to `"Container"`, and `dockerfile` to `"Dockerfile.basic"`. Then deploy:
-
-```bash
-agentcore deploy --yes
-agentcore status --json
-```
+The CLI uses the [basic Dockerfile](.bedrock_agentcore/strands_math_agent_basic/Dockerfile).
 
 ### Invoke
 
 Invoke the deployed endpoint with a prompt:
 
 ```bash
-agentcore invoke --runtime strands_math_agent_basic \
-  --payload '{"prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?"}'
-cd ../..
+agentcore invoke --agent strands_math_agent_basic \
+  '{"prompt": "Toula went to the bakery and bought various types of pastries. She bought 3 dozen donuts which cost $68 per dozen, 2 dozen mini cupcakes which cost $80 per dozen, and 6 dozen mini cheesecakes for $55 per dozen. How much was the total cost?"}'
 ```
 
 ## Run RL App Locally with a vLLM Server
@@ -121,30 +112,21 @@ curl -X POST http://localhost:8080/invocations -H "Content-Type: application/jso
 
 ### Deploy with the AgentCore CLI
 
-Run from `examples/strands_math_agent`. Set the VPC IDs for the host
+Run from `examples/strands_math_agent`. Set the subnet and security group IDs for the host
 running your inference server or rollout gateway:
 
 ```bash
-mkdir -p deploy
-cd deploy
-agentcore create --name math --skip-git
-cd math
-agentcore add runtime --name strands_math_agent_rl --language python \
-  --network-mode VPC \
-  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
+agentcore configure --entrypoint rl_app.py --name strands_math_agent_rl \
+  --requirements-file pyproject.toml --deployment-type container --protocol HTTP \
+  --vpc --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx \
+  --disable-memory --non-interactive
+agentcore deploy --agent strands_math_agent_rl
 ```
 
-In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
-
-```bash
-agentcore deploy --yes
-agentcore status --json
-cd ../..
-```
-
+The CLI uses the [RL Dockerfile](.bedrock_agentcore/strands_math_agent_rl/Dockerfile).
 Set `AGENT_RUNTIME_ARN` to the ARN printed by the deployment. For a publicly
-reachable model endpoint, replace the VPC flags with `--network-mode PUBLIC`.
-Run `agentcore deploy --yes` from `deploy/math` for subsequent deployments.
+reachable model endpoint, omit the VPC flags.
+Run `agentcore deploy --agent strands_math_agent_rl` for subsequent deployments.
 
 ### Evaluate
 

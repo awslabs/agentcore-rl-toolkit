@@ -17,55 +17,36 @@ For shell syntax, use `sb.exec(["/bin/sh", "-c", "ls | head"])`.
 The image must contain the requested executables; a shell is needed only when
 explicitly invoked.
 
-## 1. Build the binary and push the image to ECR
+## 1. Build the binary
 
-With `.env` configured at the repo root (`ECR_REPO_NAME`, `AWS_REGION`,
-`AWS_ACCOUNT` — see `.env.example`), one command does both steps:
-
-```bash
-./build_and_push.sh              # optional: pass a tag (default: sandbox-quickstart)
-```
-
-Note the sandbox image does **not** contain `agentcore-rl-toolkit` (unlike the agent
-examples) — the SDK runs client-side; the image needs sandboxd and the workload's programs.
-
-<details>
-<summary>What the wrapper runs (manual steps)</summary>
-
-Build the sandboxd binary and stage it into this folder for the Docker build:
+Run from `examples/sandbox_quickstart`:
 
 ```bash
 ../../sandboxd/build.sh --stage .
 ```
 
-This cross-compiles a static arm64 Linux binary (AgentCore Runtime is arm64-only
-today). Works on x86 hosts — Go cross-compiles natively; if you have no Go
-toolchain the script builds inside a `golang` container instead (no qemu needed).
+This cross-compiles a static ARM64 Linux binary. If Go is not installed, the
+script uses a `golang` container. The sandbox image contains the daemon and
+the workload's programs; `agentcore-rl-toolkit` runs client-side.
 
-Then build and push the image from the repo root:
-
-```bash
-./scripts/build_docker_image_and_push_to_ecr.sh \
-  --dockerfile=examples/sandbox_quickstart/Dockerfile \
-  --tag=sandbox-quickstart \
-  --context=examples/sandbox_quickstart
-```
-
-The script builds with `--platform linux/arm64`. Since this Dockerfile only COPYs
-the prebuilt binary (no RUN of arm64 tools), the build needs no qemu emulation.
-
-</details>
-
-## 2. Create the AgentCore runtime
+## 2. Deploy
 
 ```bash
-uv sync                                   # installs example deps into ./.venv
-cp config.example.toml config.toml        # fill in image_uri and execution_role_arn
-uv run python deploy.py
+uv tool install bedrock-agentcore-starter-toolkit
+
+agentcore configure --entrypoint agentcore-sandboxd-linux-arm64 \
+  --name sandbox_quickstart --requirements-file pyproject.toml \
+  --deployment-type container --protocol HTTP \
+  --disable-memory --disable-otel --non-interactive
+agentcore deploy --agent sandbox_quickstart
 ```
 
-`deploy.py` creates or updates the runtime from the pushed image and prints the
-runtime ARN when the endpoint is ready.
+The [Dockerfile](Dockerfile) starts the Go binary. The CLI requires
+`pyproject.toml` for configuration; it does not install those Python
+dependencies in the image.
+
+Set `SANDBOX_RUNTIME_ARN` to the ARN returned by deployment. After changing
+`sandboxd`, rebuild the binary and rerun `agentcore deploy --agent sandbox_quickstart`.
 
 The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`,
 `bedrock-agentcore:StopRuntimeSession` on the runtime.
@@ -73,6 +54,7 @@ The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`
 ## 3. Run the demo
 
 ```bash
+uv sync
 SANDBOX_RUNTIME_ARN=arn:aws:bedrock-agentcore:...:runtime/... uv run python run_sandbox.py
 ```
 

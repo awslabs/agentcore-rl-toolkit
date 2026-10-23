@@ -62,7 +62,6 @@ tests/
 .bedrock_agentcore.yaml
 .dockerignore
 .bedrock_agentcore/
-deploy/
 config.toml
 .env.*
 

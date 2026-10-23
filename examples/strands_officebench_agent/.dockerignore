@@ -7,6 +7,5 @@ run_local_eval.py
 .env
 config.toml
 uv.lock
-deploy/
 .env.*
 .git/

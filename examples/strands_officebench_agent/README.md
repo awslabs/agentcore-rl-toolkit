@@ -65,32 +65,21 @@ s3://your-bucket/officebench/
 Run from `examples/strands_officebench_agent`:
 
 ```bash
-npm install -g @aws/agentcore
+uv tool install bedrock-agentcore-starter-toolkit
 
-mkdir -p deploy
-cd deploy
-agentcore create --name officebench --skip-git
-cd officebench
-agentcore add runtime --name strands_officebench_agent --language python \
-  --network-mode PUBLIC
+agentcore configure --entrypoint rl_app.py --name strands_officebench_agent \
+  --requirements-file pyproject.toml --deployment-type container --protocol HTTP \
+  --disable-memory --non-interactive
+agentcore deploy --agent strands_officebench_agent
 ```
 
-In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
+For a private vLLM server, add its VPC settings to `agentcore configure`:
 
 ```bash
-agentcore deploy --yes
-agentcore status --json
-cd ../..
+  --vpc --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx
 ```
 
-For a private vLLM server, replace `--network-mode PUBLIC` with its VPC settings:
-
-```bash
-  --network-mode VPC \
-  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
-```
-
-Run `agentcore deploy --yes` from `deploy/officebench` for subsequent deployments.
+Run `agentcore deploy --agent strands_officebench_agent` for subsequent deployments.
 
 The runtime execution role needs `s3:GetObject` on the task objects uploaded in
 step 1, and Bedrock model access when evaluating with Bedrock.

@@ -58,32 +58,22 @@ agent to ACR.
 
 ### 1. Deploy
 
-Run from `examples/strands_taubench_agent`. Set the VPC IDs for your
+Run from `examples/strands_taubench_agent`. Set the subnet and security group IDs for your
 vLLM server:
 
 ```bash
-npm install -g @aws/agentcore
+uv tool install bedrock-agentcore-starter-toolkit
 
-mkdir -p deploy
-cd deploy
-agentcore create --name taubench --skip-git
-cd taubench
-agentcore add runtime --name strands_taubench_agent_rl --language python \
-  --network-mode VPC \
-  --network-config '{"vpcId":"vpc-xxxxxxxxxxxxxxxxx","subnets":["subnet-xxxxxxxxxxxxxxxxx"],"securityGroups":["sg-xxxxxxxxxxxxxxxxx"]}'
-```
-
-In `agentcore/agentcore.json`, set `runtimes[0].codeLocation` to `"../.."`. Then deploy:
-
-```bash
-agentcore deploy --yes
-agentcore status --json
-cd ../..
+agentcore configure --entrypoint rl_app.py --name strands_taubench_agent_rl \
+  --requirements-file pyproject.toml --deployment-type container --protocol HTTP \
+  --vpc --subnets subnet-xxxxxxxxxxxxxxxxx --security-groups sg-xxxxxxxxxxxxxxxxx \
+  --disable-memory --non-interactive
+agentcore deploy --agent strands_taubench_agent_rl
 ```
 
 Set `AGENT_RUNTIME_ARN` to the ARN printed by the deployment. For a publicly
-reachable vLLM server, replace the VPC flags with `--network-mode PUBLIC`.
-Run `agentcore deploy --yes` from `deploy/taubench` for subsequent deployments.
+reachable vLLM server, omit the VPC flags.
+Run `agentcore deploy --agent strands_taubench_agent_rl` for subsequent deployments.
 
 The user simulator uses Bedrock (`USER_MODEL_CONFIG` in `constants.py`), so the
 runtime execution role needs `bedrock:InvokeModel` access to that model.

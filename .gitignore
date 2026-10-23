@@ -49,6 +49,3 @@ CLAUDE.local.md
 
 .bedrock_agentcore.yaml
 .bedrock_agentcore/
-
-# Generated AgentCore CLI deployment projects
-examples/*/deploy/
