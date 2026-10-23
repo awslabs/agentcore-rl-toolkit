@@ -1,0 +1,748 @@
+{
+  "models": {
+    "assistant": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "108ce25bbcff6f03a874dd374017fbbefdd65eec211e5966a32c20ea7ef1068e",
+          "tool_choice": null,
+          "tool_names": [
+            "calculate",
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_name_zip",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_all_product_types",
+            "modify_pending_order_address",
+            "modify_pending_order_items",
+            "modify_pending_order_payment",
+            "modify_user_address",
+            "return_delivered_order_items",
+            "transfer_to_human_agents"
+          ],
+          "tool_specs_sha256": "96d3fae13660238ae0171b066d94bc42dc8603d44019201bf97540ca33524932"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "email": "fatima.wilson5721@example.com"
+                    },
+                    "name": "find_user_id_by_email",
+                    "toolUseId": "r-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "fatima_wilson_7472"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "r-1"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "108ce25bbcff6f03a874dd374017fbbefdd65eec211e5966a32c20ea7ef1068e",
+          "tool_choice": null,
+          "tool_names": [
+            "calculate",
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_name_zip",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_all_product_types",
+            "modify_pending_order_address",
+            "modify_pending_order_items",
+            "modify_pending_order_payment",
+            "modify_user_address",
+            "return_delivered_order_items",
+            "transfer_to_human_agents"
+          ],
+          "tool_specs_sha256": "96d3fae13660238ae0171b066d94bc42dc8603d44019201bf97540ca33524932"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "email": "fatima.wilson5721@example.com"
+                    },
+                    "name": "find_user_id_by_email",
+                    "toolUseId": "r-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "fatima_wilson_7472"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "r-1"
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Thanks Fatima. Which order and items?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Order #W5272531, all but the coffee machine, to my card."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "108ce25bbcff6f03a874dd374017fbbefdd65eec211e5966a32c20ea7ef1068e",
+          "tool_choice": null,
+          "tool_names": [
+            "calculate",
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_name_zip",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_all_product_types",
+            "modify_pending_order_address",
+            "modify_pending_order_items",
+            "modify_pending_order_payment",
+            "modify_user_address",
+            "return_delivered_order_items",
+            "transfer_to_human_agents"
+          ],
+          "tool_specs_sha256": "96d3fae13660238ae0171b066d94bc42dc8603d44019201bf97540ca33524932"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "email": "fatima.wilson5721@example.com"
+                    },
+                    "name": "find_user_id_by_email",
+                    "toolUseId": "r-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "fatima_wilson_7472"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "r-1"
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Thanks Fatima. Which order and items?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Order #W5272531, all but the coffee machine, to my card."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "item_ids": [
+                        "7228247242",
+                        "2698416822",
+                        "8098621301",
+                        "3320557165"
+                      ],
+                      "order_id": "#W5272531",
+                      "payment_method_id": "credit_card_6824399"
+                    },
+                    "name": "return_delivered_order_items",
+                    "toolUseId": "r-2"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "{\"order_id\": \"#W5272531\", \"user_id\": \"fatima_wilson_7472\", \"address\": {\"address1\": \"167 Willow Lane\", \"address2\": \"Suite 624\", \"city\": \"San Diego\", \"country\": \"USA\", \"state\": \"CA\", \"zip\": \"92183\"}, \"items\": [{\"name\": \"Electric Toothbrush\", \"product_id\": \"7352963235\", \"item_id\": \"3320557165\", \"price\": 188.67, \"options\": {\"color\": \"blue\", \"speed settings\": \"high\", \"battery type\": \"AA batteries\"}}, {\"name\": \"Electric Kettle\", \"product_id\": \"1075968781\", \"item_id\": \"2698416822\", \"price\": 149.45, \"options\": {\"capacity\": \"1.5L\", \"material\": \"plastic\", \"color\": \"white\"}}, {\"name\": \"Electric Toothbrush\", \"product_id\": \"7352963235\", \"item_id\": \"8098621301\", \"price\": 192.15, \"options\": {\"color\": \"black\", \"speed settings\": \"high\", \"battery type\": \"rechargeable\"}}, {\"name\": \"Hiking Boots\", \"product_id\": \"7363354090\", \"item_id\": \"7228247242\", \"price\": 251.38, \"options\": {\"size\": \"10\", \"material\": \"leather\", \"waterproof\": \"yes\"}}, {\"name\": \"Espresso Machine\", \"product_id\": \"4354588079\", \"item_id\": \"7441167885\", \"price\": 2866.37, \"options\": {\"pressure\": \"15 bar\", \"capacity\": \"1.5L\", \"type\": \"capsule\"}}], \"status\": \"return requested\", \"fulfillments\": [{\"tracking_id\": [\"848454071657\"], \"item_ids\": [\"3320557165\", \"2698416822\", \"8098621301\", \"7228247242\", \"7441167885\"]}], \"payment_history\": [{\"transaction_type\": \"payment\", \"amount\": 3648.02, \"payment_method_id\": \"credit_card_6824399\"}], \"cancel_reason\": null, \"exchange_items\": null, \"exchange_new_items\": null, \"exchange_payment_method_id\": null, \"exchange_price_difference\": null, \"return_items\": [\"2698416822\", \"3320557165\", \"7228247242\", \"8098621301\"], \"return_payment_method_id\": \"credit_card_6824399\"}"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "r-2"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "108ce25bbcff6f03a874dd374017fbbefdd65eec211e5966a32c20ea7ef1068e",
+          "tool_choice": null,
+          "tool_names": [
+            "calculate",
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_name_zip",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_all_product_types",
+            "modify_pending_order_address",
+            "modify_pending_order_items",
+            "modify_pending_order_payment",
+            "modify_user_address",
+            "return_delivered_order_items",
+            "transfer_to_human_agents"
+          ],
+          "tool_specs_sha256": "96d3fae13660238ae0171b066d94bc42dc8603d44019201bf97540ca33524932"
+        }
+      ],
+      "init_kwargs": {
+        "client_args": {
+          "api_key": "EMPTY",
+          "base_url": "http://assistant.test:4000/v1"
+        },
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 4096
+        }
+      }
+    },
+    "user": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "08d93693a264f82117fd1540eb69257bdfe3c7824e4e30925ad5c48d59ae422d",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Thanks Fatima. Which order and items?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "08d93693a264f82117fd1540eb69257bdfe3c7824e4e30925ad5c48d59ae422d",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Thanks Fatima. Which order and items?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Order #W5272531, all but the coffee machine, to my card."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Your return has been requested."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "08d93693a264f82117fd1540eb69257bdfe3c7824e4e30925ad5c48d59ae422d",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      ],
+      "init_kwargs": {
+        "additional_request_fields": {
+          "thinking": {
+            "type": "disabled"
+          }
+        },
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "temperature": 1.0
+      }
+    }
+  },
+  "result": {
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Hello! How can I help you?"
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "State my email."
+              }
+            }
+          },
+          {
+            "text": "Hi, I'm Fatima Wilson, fatima.wilson5721@example.com. I want a return."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolUse": {
+              "input": {
+                "email": "fatima.wilson5721@example.com"
+              },
+              "name": "find_user_id_by_email",
+              "toolUseId": "r-1"
+            }
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolResult": {
+              "content": [
+                {
+                  "text": "fatima_wilson_7472"
+                }
+              ],
+              "status": "success",
+              "toolUseId": "r-1"
+            }
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "User found."
+              }
+            }
+          },
+          {
+            "text": "Thanks Fatima. Which order and items?"
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "Exclude the coffee machine."
+              }
+            }
+          },
+          {
+            "text": "Order #W5272531, all but the coffee machine, to my card."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolUse": {
+              "input": {
+                "item_ids": [
+                  "7228247242",
+                  "2698416822",
+                  "8098621301",
+                  "3320557165"
+                ],
+                "order_id": "#W5272531",
+                "payment_method_id": "credit_card_6824399"
+              },
+              "name": "return_delivered_order_items",
+              "toolUseId": "r-2"
+            }
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolResult": {
+              "content": [
+                {
+                  "text": "{\"order_id\": \"#W5272531\", \"user_id\": \"fatima_wilson_7472\", \"address\": {\"address1\": \"167 Willow Lane\", \"address2\": \"Suite 624\", \"city\": \"San Diego\", \"country\": \"USA\", \"state\": \"CA\", \"zip\": \"92183\"}, \"items\": [{\"name\": \"Electric Toothbrush\", \"product_id\": \"7352963235\", \"item_id\": \"3320557165\", \"price\": 188.67, \"options\": {\"color\": \"blue\", \"speed settings\": \"high\", \"battery type\": \"AA batteries\"}}, {\"name\": \"Electric Kettle\", \"product_id\": \"1075968781\", \"item_id\": \"2698416822\", \"price\": 149.45, \"options\": {\"capacity\": \"1.5L\", \"material\": \"plastic\", \"color\": \"white\"}}, {\"name\": \"Electric Toothbrush\", \"product_id\": \"7352963235\", \"item_id\": \"8098621301\", \"price\": 192.15, \"options\": {\"color\": \"black\", \"speed settings\": \"high\", \"battery type\": \"rechargeable\"}}, {\"name\": \"Hiking Boots\", \"product_id\": \"7363354090\", \"item_id\": \"7228247242\", \"price\": 251.38, \"options\": {\"size\": \"10\", \"material\": \"leather\", \"waterproof\": \"yes\"}}, {\"name\": \"Espresso Machine\", \"product_id\": \"4354588079\", \"item_id\": \"7441167885\", \"price\": 2866.37, \"options\": {\"pressure\": \"15 bar\", \"capacity\": \"1.5L\", \"type\": \"capsule\"}}], \"status\": \"return requested\", \"fulfillments\": [{\"tracking_id\": [\"848454071657\"], \"item_ids\": [\"3320557165\", \"2698416822\", \"8098621301\", \"7228247242\", \"7441167885\"]}], \"payment_history\": [{\"transaction_type\": \"payment\", \"amount\": 3648.02, \"payment_method_id\": \"credit_card_6824399\"}], \"cancel_reason\": null, \"exchange_items\": null, \"exchange_new_items\": null, \"exchange_payment_method_id\": null, \"exchange_price_difference\": null, \"return_items\": [\"2698416822\", \"3320557165\", \"7228247242\", \"8098621301\"], \"return_payment_method_id\": \"credit_card_6824399\"}"
+                }
+              ],
+              "status": "success",
+              "toolUseId": "r-2"
+            }
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "Done."
+              }
+            }
+          },
+          {
+            "text": "Your return has been requested."
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "###TRANSFER###"
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      }
+    ],
+    "meta": {
+      "assistant_model": {
+        "base_url": "http://assistant.test:4000/v1",
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 4096
+        }
+      },
+      "terminated_reason": "###TRANSFER###",
+      "user_model": {
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "source": "bedrock",
+        "temperature": 1.0,
+        "thinking_budget": 1024,
+        "thinking_enabled": false
+      }
+    },
+    "reward_info": {
+      "action_checks": [
+        {
+          "action": {
+            "action_id": "73_0",
+            "arguments": {
+              "item_ids": [
+                "7228247242",
+                "2698416822",
+                "8098621301",
+                "3320557165"
+              ],
+              "order_id": "#W5272531",
+              "payment_method_id": "credit_card_6824399"
+            },
+            "info": null,
+            "name": "return_delivered_order_items"
+          },
+          "action_match": true,
+          "action_reward": 1.0
+        }
+      ],
+      "db_check": {
+        "agent_db_match": true,
+        "db_match": true,
+        "db_reward": 1.0,
+        "user_db_match": true
+      },
+      "reward": 1.0,
+      "reward_basis": [
+        "DB"
+      ],
+      "reward_breakdown": {
+        "DB": 1.0
+      }
+    },
+    "rewards": 1.0
+  }
+}
