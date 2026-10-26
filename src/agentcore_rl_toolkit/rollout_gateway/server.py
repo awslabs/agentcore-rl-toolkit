@@ -1,17 +1,12 @@
-"""Run a :class:`RolloutGateway` on a background thread, for synchronous trainers.
+"""HTTP serving and loop dispatch for an assembled rollout gateway.
 
-A sync trainer (slime, verl) blocks its thread waiting for episode results, but the
-gateway must keep answering the agent's LLM calls the whole time. Served on the same
-thread, the block would freeze the event loop and deadlock the episode — so this
-class serves ``gateway.app`` on its own daemon thread with a long-lived loop. The
-session API (``create_session`` / ``finish_session`` / ``drop_session``) stays safe
-to call from the trainer thread. Async trainers don't need this: mount
-``gateway.app`` on your own loop and ``await`` instead.
+``GatewayServer`` owns aiohttp resources on its caller's loop.
+``ThreadedGatewayServer`` supplies a separate loop for deployments that keep
+HTTP serving independent of rollout orchestration. Its synchronous start and
+shutdown interface remains available to existing integrations.
 
-The serving mechanics are adapted from slime's ``slime/agent/aiohttp_threaded.py``
+The threaded serving mechanics originate from slime's aiohttp_threaded.py
 (baseline commit ``fa3c990a``; see NOTICE).
-
-Requires ``aiohttp`` (the ``[gateway]`` extra), like :class:`RolloutGateway` itself.
 """
 
 from __future__ import annotations
@@ -19,11 +14,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from aiohttp import web
 from aiohttp.web_log import AccessLogger
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
+
+
+def url_host(host: str) -> str:
+    """Bracket IPv6 literals in an advertised HTTP authority."""
+    return f"[{host.strip('[]')}]" if ":" in host else host
 
 
 class FilteredAccessLogger(AccessLogger):
@@ -39,31 +42,58 @@ class FilteredAccessLogger(AccessLogger):
         super().log(request, response, time)
 
 
-class ThreadedGatewayServer:
-    """Serve an assembled :class:`RolloutGateway` on a background thread.
+class GatewayServer:
+    """Own an aiohttp listener on one loop; construction only stores configuration."""
 
-    ``start()`` blocks until the server is bound (or raises if binding fails),
-    so callers can hand out :attr:`base_url` immediately afterwards. ``port=0``
-    binds an OS-assigned port, reflected in :attr:`port`/:attr:`base_url` after
-    ``start()``.
-
-    Session identity rides in the api-key / Bearer slot of each request, so all
-    sessions share the single fixed :attr:`base_url`.
-    """
-
-    def __init__(self, gateway, *, host: str, port: int = 0, startup_timeout: float = 120.0):
+    def __init__(self, gateway, *, host: str, port: int = 0, public_host: str | None = None):
         self.gateway = gateway
         self.host = host
         self.port = port
-        self.startup_timeout = startup_timeout
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._thread: threading.Thread | None = None
+        self.public_host = public_host or host
         self._runner: web.AppRunner | None = None
 
     @property
     def base_url(self) -> str:
-        """Fixed OpenAI-compatible ``base_url`` shared by all sessions."""
-        return f"http://{self.host}:{self.port}/v1"
+        return f"http://{url_host(self.public_host)}:{self.port}/v1"
+
+    async def start(self) -> None:
+        self._runner = web.AppRunner(self.gateway.app, handler_cancellation=True, access_log_class=FilteredAccessLogger)
+        await self._runner.setup()
+        await web.TCPSite(self._runner, self.host, self.port).start()
+        self.port = self._runner.addresses[0][1]
+
+    async def close(self) -> None:
+        if self._runner is not None:
+            await self._runner.cleanup()
+
+
+class ThreadedGatewayServer:
+    """Supply a serving thread, with synchronous startup and shutdown.
+
+    ``base_url`` includes ``/v1`` for compatibility with existing integrations.
+    ``call`` submits lifecycle operations without blocking the caller's loop.
+    """
+
+    def __init__(
+        self,
+        gateway,
+        *,
+        host: str,
+        port: int = 0,
+        startup_timeout: float = 120.0,
+        public_host: str | None = None,
+    ):
+        self.gateway = gateway
+        self.host = host
+        self.port = port
+        self.startup_timeout = startup_timeout
+        self._server = GatewayServer(gateway, host=host, port=port, public_host=public_host)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def base_url(self) -> str:
+        return self._server.base_url
 
     def start(self) -> None:
         started = threading.Event()
@@ -73,26 +103,13 @@ class ThreadedGatewayServer:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                # handler_cancellation=True: a client disconnect cancels the
-                # in-flight handler coroutine, so an agent that dies mid-request
-                # doesn't leave an orphaned generate call in the sampling backend.
-                runner = web.AppRunner(
-                    self.gateway.app,
-                    handler_cancellation=True,
-                    access_log_class=FilteredAccessLogger,
-                )
-                loop.run_until_complete(runner.setup())
-                site = web.TCPSite(runner, host=self.host, port=self.port)
-                loop.run_until_complete(site.start())
-                for sock in site._server.sockets:  # resolve OS-assigned port when port=0
-                    self.port = sock.getsockname()[1]
-                    break
+                loop.run_until_complete(self._server.start())
+                self.port = self._server.port
                 self._loop = loop
-                self._runner = runner
-                started.set()
+                loop.call_soon(started.set)
                 loop.run_forever()
-            except BaseException as e:  # surface bind/setup failures to the caller
-                startup_error.append(e)
+            except BaseException as exc:
+                startup_error.append(exc)
                 started.set()
 
         self._thread = threading.Thread(target=_serve, name="rollout-gateway", daemon=True)
@@ -103,16 +120,29 @@ class ThreadedGatewayServer:
             raise RuntimeError(f"Rollout gateway failed to start on {self.host}:{self.port}") from startup_error[0]
         logger.info("Rollout gateway serving at %s", self.base_url)
 
-    def shutdown(self) -> None:
+    async def call(self, operation: Callable[[], Awaitable[T]]) -> T:
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            raise RuntimeError("gateway server is not ready")
+        if asyncio.get_running_loop() is loop:
+            return await operation()
+        coroutine = operation()
+        try:
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except BaseException:
+            coroutine.close()
+            raise
+        return await asyncio.wrap_future(future)
+
+    def shutdown(self, *, join_timeout: float = 10.0) -> None:
+        """Close HTTP serving with the existing best-effort shutdown behavior."""
         if self._loop is None:
             return
-        # Clean up on the live loop first (graceful connection shutdown +
-        # release of the listening socket), then stop the loop.
         try:
-            fut = asyncio.run_coroutine_threadsafe(self._runner.cleanup(), self._loop)
-            fut.result(timeout=10)
+            future = asyncio.run_coroutine_threadsafe(self._server.close(), self._loop)
+            future.result(timeout=10)
         except Exception:
             pass
         self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=10)
+        self._thread.join(timeout=join_timeout)
         self._loop = None

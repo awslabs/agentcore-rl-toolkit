@@ -1,82 +1,69 @@
-"""Process-level rollout gateway host for verl AgentLoopWorker processes.
+"""One gateway handle per verl AgentLoopWorker, with loop-owned capture state."""
 
-verl instantiates agent loop classes per trajectory (``hydra.utils.instantiate``
-in ``AgentLoopWorker._run_agent_loop``), so the gateway — an aiohttp server plus
-its ``VerlSamplingBackend`` — must live at process scope: created lazily by the
-first ``AgentCoreAgentLoop.__init__`` in the process, then shared by every
-subsequent instantiation.
+from __future__ import annotations
 
-The serving shape is slime's ``aiohttp_threaded.run_app_in_thread`` (the same
-code family this gateway's adapters were vendored from): a daemon thread with
-its own event loop running ``web.AppRunner`` + ``web.TCPSite`` — NOT
-``web.run_app``, which blocks and installs main-thread-only signal handlers.
-``handler_cancellation=True`` makes a client disconnect cancel the in-flight
-handler coroutine so the backend's abort path fires instead of leaving an
-orphaned generate racing the engine.
-
-The advertised base_url uses the Ray node IP (uni-agent's GatewayActor pattern);
-ACR containers must be able to reach trainer CPU nodes on the gateway port.
-"""
-
-import asyncio
-import logging
 import threading
 from dataclasses import dataclass
 from typing import Any
 
-from aiohttp import web
-from aiohttp.web_log import AccessLogger
-from verl.utils.net_utils import is_valid_ipv6_address
+import ray.util
 
-from agentcore_rl_toolkit.rollout_gateway import HfTemplateRenderer
+from agentcore_rl_toolkit.rollout_gateway import HfTemplateRenderer, TraceRecord
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway
+from agentcore_rl_toolkit.rollout_gateway.server import ThreadedGatewayServer
 
 from .sampling_backend import VerlSamplingBackend
 
-logger = logging.getLogger(__name__)
 
-
-class FilteredAccessLogger(AccessLogger):
-    """Log only errors and slow requests; suppress HEAD and fast-200 noise."""
-
-    SLOW_THRESHOLD_SEC = 120.0
-
-    def log(self, request, response, time):
-        if request.method == "HEAD":
-            return
-        if response.status == 200 and time <= self.SLOW_THRESHOLD_SEC:
-            return
-        super().log(request, response, time)
+@dataclass(frozen=True)
+class GatewayResult:
+    records: list[TraceRecord]
+    num_turns: int
+    extra_fields: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class GatewayHandle:
-    """The per-process gateway singleton: the gateway, its verl-backed sampling
-    backend, and the base_url ACR agents should dial."""
+    """Own serving and dispatch complete session operations to its loop."""
 
     gateway: RolloutGateway
-    # Same object as gateway.backend, but narrowed: that one is typed as the
-    # SamplingBackend protocol, which has no pop_extra_fields (VerlSamplingBackend
-    # only, for verl's staleness tags).
     backend: VerlSamplingBackend
-    base_url: str
-    _loop: asyncio.AbstractEventLoop
-    _runner: web.AppRunner
-    _thread: threading.Thread
+    _server: ThreadedGatewayServer
+
+    @property
+    def base_url(self) -> str:
+        # verl adds /v1 when building the agent payload.
+        return self._server.base_url.removesuffix("/v1")
+
+    async def create_session(self, sid: str, **kwargs) -> None:
+        async def create():
+            self.gateway.create_session(sid, **kwargs)
+
+        await self._server.call(create)
+
+    async def finish_session(self, sid: str, **kwargs) -> GatewayResult:
+        async def finish():
+            num_turns = self.gateway.manager.turn_count(sid)
+            records = await self.gateway.finish_session(sid, **kwargs)
+            extra = self.backend.pop_extra_fields(sid)
+            return GatewayResult(records, num_turns, extra)
+
+        return await self._server.call(finish)
+
+    async def drop_session(self, sid: str) -> None:
+        async def drop():
+            await self.gateway.drop_session(sid)
+
+        await self._server.call(drop)
+
+    async def session_turn_counts(self, sids) -> dict[str, int]:
+        async def snapshot():
+            return {sid: self.gateway.manager.turn_count(sid) for sid in sids}
+
+        return await self._server.call(snapshot)
 
     def stop(self) -> None:
-        """Tear down the serving thread (tests only; in production the daemon
-        thread dies with the worker process)."""
-
-        async def _shutdown() -> None:
-            await self._runner.cleanup()
-
-        try:
-            asyncio.run_coroutine_threadsafe(_shutdown(), self._loop).result(timeout=10)
-        except Exception:
-            pass
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=5)
+        self._server.shutdown(join_timeout=5.0)
 
 
 _LOCK = threading.Lock()
@@ -84,62 +71,7 @@ _HANDLE: GatewayHandle | None = None
 
 
 def _node_ip() -> str:
-    """The Ray node IP when inside a Ray worker; localhost otherwise (tests).
-
-    Returned bare (unbracketed), the form ``bind()`` wants; ``_url_host`` puts it
-    in URL form. Same split as uni-agent's GatewayActor."""
-    try:
-        import ray.util  # type: ignore[import-not-found]
-
-        ip = ray.util.get_node_ip_address()
-        # bracket-strip mirrors uni-agent's IPv6 handling
-        return ip.strip("[]")
-    except Exception:
-        return "127.0.0.1"
-
-
-def _url_host(host: str) -> str:
-    """``host`` in the authority form a URL needs: an IPv6 literal must be
-    bracketed, or its own colons make the ``:port`` suffix ambiguous and parsers
-    reject the address (``http://2001:db8::1:8080``). Mirrors verl's own
-    convention for advertised server addresses (see sglang/vllm rollout servers)."""
-    return f"[{host}]" if is_valid_ipv6_address(host) else host
-
-
-def _serve_in_thread(app: web.Application, host: str, port: int, start_timeout: float = 15.0):
-    """Start ``app`` on a daemon thread with its own event loop; block until it
-    is listening. Returns (loop, runner, bound_port, thread)."""
-    started = threading.Event()
-    box: dict[str, Any] = {}
-    err_box: list[BaseException] = []
-
-    def _run() -> None:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            runner = web.AppRunner(app, handler_cancellation=True, access_log_class=FilteredAccessLogger)
-            loop.run_until_complete(runner.setup())
-            site = web.TCPSite(runner, host, port)
-            loop.run_until_complete(site.start())
-            bound_port = port
-            for sock in site._server.sockets:  # type: ignore[union-attr]
-                bound_port = sock.getsockname()[1]
-                break
-            box["loop"], box["runner"], box["port"] = loop, runner, bound_port
-            started.set()
-            loop.run_forever()
-        except BaseException as e:  # pragma: no cover
-            err_box.append(e)
-            started.set()
-            raise
-
-    thread = threading.Thread(target=_run, name="agentcore-rollout-gateway", daemon=True)
-    thread.start()
-    if not started.wait(timeout=start_timeout):
-        raise RuntimeError("rollout gateway server did not start within timeout")
-    if err_box:
-        raise err_box[0]
-    return box["loop"], box["runner"], box["port"], thread
+    return ray.util.get_node_ip_address().strip("[]")
 
 
 def get_or_start_gateway(
@@ -155,12 +87,7 @@ def get_or_start_gateway(
     chat_template_kwargs: dict | None = None,
     linear_on_nonlinear: str = "reset",
 ) -> GatewayHandle:
-    """Lazily create (or return) this process's RolloutGateway singleton.
-
-    ``port=0`` auto-assigns — required when verl round-robins multiple
-    AgentLoopWorkers onto one node. ``public_host`` overrides the advertised
-    host for NAT setups where the Ray node IP is not ACR-reachable.
-    """
+    """Lazily create or return this process's gateway singleton."""
     global _HANDLE
     with _LOCK:
         if _HANDLE is not None:
@@ -177,17 +104,15 @@ def get_or_start_gateway(
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
         )
-        loop, runner, bound_port, thread = _serve_in_thread(gateway.app, host, port)
-        base_url = f"http://{_url_host(public_host or _node_ip())}:{bound_port}"
-        _HANDLE = GatewayHandle(
-            gateway=gateway,
-            backend=backend,
-            base_url=base_url,
-            _loop=loop,
-            _runner=runner,
-            _thread=thread,
+        server = ThreadedGatewayServer(
+            gateway,
+            host=host,
+            port=port,
+            public_host=public_host or _node_ip(),
+            startup_timeout=15.0,
         )
-        logger.info("rollout gateway serving at %s (adapters=%s)", base_url, adapters or ["openai", "anthropic"])
+        server.start()
+        _HANDLE = GatewayHandle(gateway, backend, server)
         return _HANDLE
 
 

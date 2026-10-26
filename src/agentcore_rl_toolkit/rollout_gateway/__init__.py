@@ -26,6 +26,7 @@ from .trajectory import MessageNode, TrajectoryManager, TurnRecord
 
 __all__ = [
     "BaseTrace",
+    "GatewayServer",
     "HfTemplateRenderer",
     "LinearHealer",
     "MessageNode",
@@ -47,8 +48,8 @@ def __getattr__(name: str):
         from .gateway import RolloutGateway
 
         return RolloutGateway
-    if name == "ThreadedGatewayServer":
-        from .server import ThreadedGatewayServer
+    if name in ("GatewayServer", "ThreadedGatewayServer"):
+        from . import server
 
-        return ThreadedGatewayServer
+        return getattr(server, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

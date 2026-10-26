@@ -1,7 +1,7 @@
-# verl backend (rollout gateway)
+# Training AgentCore agents with verl
 
 Train agents deployed on Bedrock AgentCore Runtime (ACR) with [verl](https://github.com/volcengine/verl),
-using the in-repo [rollout gateway](../../rollout_gateway/) for token-level trajectory
+using the [rollout gateway](../../rollout_gateway/) for token-level trajectory
 capture.
 
 The integration uses verl's public v1 agent-loop interface. Replay buffering,
@@ -76,7 +76,7 @@ each step remain stable. See the
 [variable-row batching design](../../../../designs/verl_variable_trajectory_batching.md)
 for the derivation.
 
-## How it works
+## Rollouts and trajectory capture
 
 ```
 verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
@@ -89,21 +89,21 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
                                              │  4. finish_session -> TraceRecords -> AgentLoopOutputs
 ```
 
-- The **capture session key travels in the payload**: the loop generates one sid per
-  rollout, passes it as both the ACR `runtimeSessionId` and `_config.api_key`; the
-  agent container puts `payload["_config"]["api_key"]` in its LLM client's api-key
-  slot; the gateway reads it back from the Bearer/`X-Api-Key` slot.
+- Each rollout uses one session ID for ACR's `runtimeSessionId` and `_config.api_key`.
+  The agent forwards this key through its LLM client; the gateway reads it from
+  the Bearer/`X-Api-Key` header to identify the capture session.
 - The advertised `base_url` follows the OpenAI-SDK convention and **includes `/v1`**
   (the SDK appends `/chat/completions`) — pass it to an OpenAI-compatible client
   verbatim. TODO: it is not directly usable by Anthropic-SDK agents (that SDK
   appends `/v1/messages` and does not normalize an existing `/v1`, yielding
   `/v1/v1/messages`); how to serve both SDK families cleanly is unresolved.
-- One gateway per AgentLoopWorker process, serving on an auto-assigned port.
-  **ACR containers must be able to reach the trainer's CPU nodes on that port.**
-  Use `gateway_public_host` if the Ray node IP is not what ACR can reach.
-- A session's trajectory tree can fork (sub-agents, context compaction); every leaf
-  becomes its own training row (`run()` returns `list[AgentLoopOutput]`) — hence the
-  hard `trainer.use_v1=true` requirement.
+- Each `AgentLoopWorker` hosts one gateway on a background thread and an
+  auto-assigned port. Its [handle](../../../../designs/gateway_serving_and_workers.md)
+  dispatches session operations to the gateway's event loop.
+  **ACR containers must be able to reach that port.** Set `gateway_public_host`
+  if the Ray node IP is not reachable from ACR.
+- A trajectory tree can fork; each leaf becomes a training row.
+  `run()` returns `list[AgentLoopOutput]`, requiring `trainer.use_v1=true`.
 
 The agent must forward the trainer-supplied key when it constructs its model client:
 

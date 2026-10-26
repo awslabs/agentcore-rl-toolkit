@@ -193,7 +193,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
             },
         }
 
-        self._gateway.gateway.create_session(
+        await self._gateway.create_session(
             sid,
             sampling_defaults=self._sampling_defaults(sampling_params),
             max_context_tokens=self.max_context_tokens,
@@ -220,14 +220,14 @@ class AgentCoreAgentLoop(AgentLoopBase):
         if error:
             logger.warning("ACR rollout failed (sid=%s): %s", sid, error)
 
-        num_turns = self._gateway.gateway.manager.turn_count(sid)
-        records = await self._gateway.gateway.finish_session(sid, base_sample=BaseTrace(rollout_id=sid), reward=0.0)
-        records = [r for r in records if r.token_ids]
-        engine_extra = self._gateway.backend.pop_extra_fields(sid)
+        capture = await self._gateway.finish_session(sid, base_sample=BaseTrace(rollout_id=sid), reward=0.0)
+        num_turns = capture.num_turns
+        records = [r for r in capture.records if r.token_ids]
+        engine_extra = capture.extra_fields
         elapsed = time.monotonic() - start
 
         if not records:
-            self._warn_if_static_session_capture(sid)
+            await self._warn_if_static_session_capture(sid)
             reason = error or "no model turns were captured"
             raise RuntimeError(f"ACR rollout produced no trainable trajectory (sid={sid}): {reason}")
 
@@ -297,15 +297,15 @@ class AgentCoreAgentLoop(AgentLoopBase):
             return 0.0
         return _extract_agent_reward(result)
 
-    def _warn_if_static_session_capture(self, sid: str) -> None:
+    async def _warn_if_static_session_capture(self, sid: str) -> None:
         """Diagnose the stale-agent-image failure mode (see the warning below).
 
         Warn only, never drop the session: the adapters accept unseen keys by design
         (that is how local runs work) and "EMPTY" is legitimate for local/eval traffic.
         Without this, the misconfiguration trains nothing, silently."""
-        manager = self._gateway.gateway.manager
-        for static_sid in ("EMPTY", "default"):
-            if manager.turn_count(static_sid):
+        counts = await self._gateway.session_turn_counts(("EMPTY", "default"))
+        for static_sid, count in counts.items():
+            if count:
                 logger.warning(
                     "Rollout %s captured no trace, but turns are accumulating under the "
                     "static session %r — the deployed agent is likely sending a fixed "

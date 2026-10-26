@@ -24,6 +24,7 @@ changes.
 
 | Design | Status | Implementation |
 | --- | --- | --- |
+| [Rollout gateway: serving and integration boundaries](./gateway_serving_and_workers.md) | Accepted | In progress |
 | [Linear-history mode for the rollout gateway](./gateway_linear.md) | Accepted | Shipped |
 | [Stable optimizer-step batching for variable-row verl rollouts](./verl_variable_trajectory_batching.md) | Accepted | Shipped |
 | [Runtime Invocation Protocol](./runtime_invocation_protocol.md) | Proposed | In progress |
