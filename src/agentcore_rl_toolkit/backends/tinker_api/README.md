@@ -98,6 +98,15 @@ Each dataset row is an agent invocation payload, for example
 rollouts with no training tokens are excluded from scoring and training.
 Groups with no reward variation are skipped.
 
+`rollout_concurrency` optionally limits the number of active training agents without
+changing `batch_size * group_size`, rollout grouping, or the single synchronous
+policy update. Its default (`null`) launches the whole batch concurrently.
+`evaluation_batch_size` is a rolling concurrency limit: each completed evaluation
+agent immediately frees a slot for another task, without waiting for a batch's
+slowest agent. The evaluation helper accepts verified completed rows for callers
+that resume an interrupted evaluation of the same policy and dataset; failed rows
+are retained too, rather than resampled.
+
 The output directory contains rollout records, metrics, evaluation results
 when enabled, and checkpoint paths on the endpoint. Set `wandb_project` to
 publish metrics to W&B. Use `--log-level DEBUG` for detailed client logs.

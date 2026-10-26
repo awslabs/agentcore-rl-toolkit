@@ -55,6 +55,7 @@ class Config:
     max_new_tokens: int = 2048
     max_context_tokens: int = 16384
     rollout_timeout: float = 180.0
+    rollout_concurrency: int | None = None
     tps_limit: int = 4  # New Runtime sessions per second.
     evaluation_dataset: str | None = None
     evaluation_batch_size: int = 256
@@ -74,6 +75,10 @@ class Config:
             raise ValueError("Require 0 < max_new_tokens < max_context_tokens")
         if self.tps_limit < 1:
             raise ValueError("tps_limit must be positive")
+        if self.rollout_concurrency is not None and (
+            type(self.rollout_concurrency) is not int or self.rollout_concurrency < 1
+        ):
+            raise ValueError("rollout_concurrency must be a positive integer or None")
         if self.history_mode not in ("tree", "linear"):
             raise ValueError("history_mode must be 'tree' or 'linear'")
         if min(self.evaluation_batch_size, self.evaluation_interval, self.checkpoint_interval) < 1:
@@ -172,18 +177,25 @@ async def collect_batch(
     base_url: str,
     session_rate_limiter: RateLimiter,
 ):
-    results = await drain_rollouts(
-        [
-            rollout(
+    limit = getattr(config, "rollout_concurrency", None) or len(payloads) * config.group_size
+    semaphore = asyncio.Semaphore(max(1, limit))
+
+    async def collect_one(payload, group_index, sample_index):
+        async with semaphore:
+            return await rollout(
                 config,
                 gateway,
                 client,
                 payload,
                 group_index,
-                group_index * config.group_size + i,
+                sample_index,
                 base_url=base_url,
                 session_rate_limiter=session_rate_limiter,
             )
+
+    results = await drain_rollouts(
+        [
+            collect_one(payload, group_index, group_index * config.group_size + i)
             for group_index, payload in enumerate(payloads)
             for i in range(config.group_size)
         ]
@@ -200,25 +212,41 @@ async def evaluate(
     *,
     base_url: str,
     session_rate_limiter: RateLimiter,
+    completed: list[dict] | None = None,
 ):
-    """Evaluate each held-out prompt once without constructing training data."""
+    """Evaluate once per prompt with a rolling concurrency limit.
+
+    The caller may supply completed results from the same policy, dataset and
+    evaluation settings. Those rows, including failures, are retained without
+    resampling; the caller is responsible for verifying their provenance.
+    """
     start = time.monotonic()
-    summaries = []
+    summaries = list(completed or [])
+    completed_indices = {row["input_index"] for row in summaries}
+    if len(completed_indices) != len(summaries) or any(
+        type(index) is not int or not 0 <= index < len(payloads) for index in completed_indices
+    ):
+        raise ValueError("Completed evaluation indices must be unique and within the dataset")
+    semaphore = asyncio.Semaphore(config.evaluation_batch_size)
     path = Path(config.output_dir) / f"evaluation-{step:04d}.jsonl"
     with path.open("w") as stream:
+        for summary in summaries:
+            stream.write(json.dumps(summary) + "\n")
+        stream.flush()
 
         async def evaluate_one(index, payload):
-            episode = await rollout(
-                config,
-                gateway,
-                client,
-                payload,
-                index,
-                index,
-                base_url=base_url,
-                session_rate_limiter=session_rate_limiter,
-                temperature=config.evaluation_temperature,
-            )
+            async with semaphore:
+                episode = await rollout(
+                    config,
+                    gateway,
+                    client,
+                    payload,
+                    index,
+                    index,
+                    base_url=base_url,
+                    session_rate_limiter=session_rate_limiter,
+                    temperature=config.evaluation_temperature,
+                )
             summary = {
                 "input_index": index,
                 "rollout_id": episode.rollout_id,
@@ -229,15 +257,11 @@ async def evaluate(
             summaries.append(summary)
             stream.write(json.dumps(summary) + "\n")
             stream.flush()
-
-        for offset in range(0, len(payloads), config.evaluation_batch_size):
-            await drain_rollouts(
-                [
-                    evaluate_one(offset + i, payload)
-                    for i, payload in enumerate(payloads[offset : offset + config.evaluation_batch_size])
-                ]
-            )
             logger.info("Evaluation step=%d completed=%d/%d", step, len(summaries), len(payloads))
+
+        await drain_rollouts(
+            [evaluate_one(i, payload) for i, payload in enumerate(payloads) if i not in completed_indices]
+        )
     rewards = [summary["reward"] for summary in summaries if summary["reward"] is not None]
     failed_episodes = sum(summary["error"] is not None for summary in summaries)
     metrics = {
@@ -250,6 +274,7 @@ async def evaluate(
         "eval/failed_episodes": failed_episodes,
         "eval/failure_rate": failed_episodes / len(summaries) if summaries else 0.0,
         "eval/seconds": time.monotonic() - start,
+        "eval/reused_episodes": len(completed_indices),
     }
     path.with_suffix(".json").write_text(json.dumps({"step": step, **metrics}) + "\n")
     return metrics
