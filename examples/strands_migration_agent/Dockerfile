@@ -22,12 +22,6 @@ RUN echo "=== Java Installation Verification ===" && \
     java --version && \
     which java
 
-# Set JAVA_HOME (apt's openjdk does not). maven-javadoc-plugin 2.9.1-3.2.0
-# cannot locate javadoc on JDK 17 without it. Resolve the path at build time
-# since the JDK directory name is arch-specific (amd64 vs arm64).
-RUN ln -s "$(dirname "$(dirname "$(readlink -f "$(which javac)")")")" /opt/java-home
-ENV JAVA_HOME=/opt/java-home
-
 # 2. Install maven
 # install tools needed for Maven first
 RUN apt-get update && \
