@@ -1,0 +1,715 @@
+{
+  "models": {
+    "assistant": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "269d6daeabc9bb7d6a8384dc22a78e6c1dd12e22d675f59f3d736510807ebcc0",
+          "tool_choice": null,
+          "tool_names": [
+            "book_reservation",
+            "calculate",
+            "cancel_reservation",
+            "get_reservation_details",
+            "get_user_details",
+            "list_all_airports",
+            "search_direct_flight",
+            "search_onestop_flight",
+            "send_certificate",
+            "transfer_to_human_agents",
+            "update_reservation_baggages",
+            "update_reservation_flights",
+            "update_reservation_passengers",
+            "get_flight_status"
+          ],
+          "tool_specs_sha256": "26d3b49a517c8b82e11c1bfb0945084daaf9dc6c798b0b4b30882c7c5cbf093d"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "<think>Look the user up first.</think>"
+                },
+                {
+                  "toolUse": {
+                    "input": {
+                      "user_id": "olivia_gonzalez_2305"
+                    },
+                    "name": "get_user_details",
+                    "toolUseId": "a-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "{\"user_id\": \"olivia_gonzalez_2305\", \"name\": {\"first_name\": \"Olivia\", \"last_name\": \"Gonzalez\"}, \"address\": {\"address1\": \"334 Laurel Lane\", \"address2\": \"Suite 970\", \"city\": \"Los Angeles\", \"country\": \"USA\", \"state\": \"CA\", \"zip\": \"90504\"}, \"email\": \"olivia.gonzalez4421@example.com\", \"dob\": \"1988-06-13\", \"payment_methods\": {\"gift_card_2200803\": {\"source\": \"gift_card\", \"id\": \"gift_card_2200803\", \"amount\": 123.0}, \"credit_card_9969263\": {\"source\": \"credit_card\", \"id\": \"credit_card_9969263\", \"brand\": \"mastercard\", \"last_four\": \"9475\"}}, \"saved_passengers\": [{\"first_name\": \"Mei\", \"last_name\": \"Johansson\", \"dob\": \"1981-09-25\"}, {\"first_name\": \"Yara\", \"last_name\": \"Lopez\", \"dob\": \"1975-09-15\"}], \"membership\": \"regular\", \"reservations\": [\"Z7GOZK\", \"K67C4W\", \"THY2DG\"]}"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "a-1"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "269d6daeabc9bb7d6a8384dc22a78e6c1dd12e22d675f59f3d736510807ebcc0",
+          "tool_choice": null,
+          "tool_names": [
+            "book_reservation",
+            "calculate",
+            "cancel_reservation",
+            "get_reservation_details",
+            "get_user_details",
+            "list_all_airports",
+            "search_direct_flight",
+            "search_onestop_flight",
+            "send_certificate",
+            "transfer_to_human_agents",
+            "update_reservation_baggages",
+            "update_reservation_flights",
+            "update_reservation_passengers",
+            "get_flight_status"
+          ],
+          "tool_specs_sha256": "26d3b49a517c8b82e11c1bfb0945084daaf9dc6c798b0b4b30882c7c5cbf093d"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "user_id": "olivia_gonzalez_2305"
+                    },
+                    "name": "get_user_details",
+                    "toolUseId": "a-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "{\"user_id\": \"olivia_gonzalez_2305\", \"name\": {\"first_name\": \"Olivia\", \"last_name\": \"Gonzalez\"}, \"address\": {\"address1\": \"334 Laurel Lane\", \"address2\": \"Suite 970\", \"city\": \"Los Angeles\", \"country\": \"USA\", \"state\": \"CA\", \"zip\": \"90504\"}, \"email\": \"olivia.gonzalez4421@example.com\", \"dob\": \"1988-06-13\", \"payment_methods\": {\"gift_card_2200803\": {\"source\": \"gift_card\", \"id\": \"gift_card_2200803\", \"amount\": 123.0}, \"credit_card_9969263\": {\"source\": \"credit_card\", \"id\": \"credit_card_9969263\", \"brand\": \"mastercard\", \"last_four\": \"9475\"}}, \"saved_passengers\": [{\"first_name\": \"Mei\", \"last_name\": \"Johansson\", \"dob\": \"1981-09-25\"}, {\"first_name\": \"Yara\", \"last_name\": \"Lopez\", \"dob\": \"1975-09-15\"}], \"membership\": \"regular\", \"reservations\": [\"Z7GOZK\", \"K67C4W\", \"THY2DG\"]}"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "a-1"
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "I found your profile. Which reservation should I change?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Actually, please just cancel reservation Z7GOZK."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "269d6daeabc9bb7d6a8384dc22a78e6c1dd12e22d675f59f3d736510807ebcc0",
+          "tool_choice": null,
+          "tool_names": [
+            "book_reservation",
+            "calculate",
+            "cancel_reservation",
+            "get_reservation_details",
+            "get_user_details",
+            "list_all_airports",
+            "search_direct_flight",
+            "search_onestop_flight",
+            "send_certificate",
+            "transfer_to_human_agents",
+            "update_reservation_baggages",
+            "update_reservation_flights",
+            "update_reservation_passengers",
+            "get_flight_status"
+          ],
+          "tool_specs_sha256": "26d3b49a517c8b82e11c1bfb0945084daaf9dc6c798b0b4b30882c7c5cbf093d"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "user_id": "olivia_gonzalez_2305"
+                    },
+                    "name": "get_user_details",
+                    "toolUseId": "a-1"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "{\"user_id\": \"olivia_gonzalez_2305\", \"name\": {\"first_name\": \"Olivia\", \"last_name\": \"Gonzalez\"}, \"address\": {\"address1\": \"334 Laurel Lane\", \"address2\": \"Suite 970\", \"city\": \"Los Angeles\", \"country\": \"USA\", \"state\": \"CA\", \"zip\": \"90504\"}, \"email\": \"olivia.gonzalez4421@example.com\", \"dob\": \"1988-06-13\", \"payment_methods\": {\"gift_card_2200803\": {\"source\": \"gift_card\", \"id\": \"gift_card_2200803\", \"amount\": 123.0}, \"credit_card_9969263\": {\"source\": \"credit_card\", \"id\": \"credit_card_9969263\", \"brand\": \"mastercard\", \"last_four\": \"9475\"}}, \"saved_passengers\": [{\"first_name\": \"Mei\", \"last_name\": \"Johansson\", \"dob\": \"1981-09-25\"}, {\"first_name\": \"Yara\", \"last_name\": \"Lopez\", \"dob\": \"1975-09-15\"}], \"membership\": \"regular\", \"reservations\": [\"Z7GOZK\", \"K67C4W\", \"THY2DG\"]}"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "a-1"
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "I found your profile. Which reservation should I change?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Actually, please just cancel reservation Z7GOZK."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "toolUse": {
+                    "input": {
+                      "reservation_id": "Z7GOZK"
+                    },
+                    "name": "cancel_reservation",
+                    "toolUseId": "a-2"
+                  }
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "toolResult": {
+                    "content": [
+                      {
+                        "text": "{\"reservation_id\": \"Z7GOZK\", \"user_id\": \"olivia_gonzalez_2305\", \"origin\": \"EWR\", \"destination\": \"IAH\", \"flight_type\": \"round_trip\", \"cabin\": \"basic_economy\", \"flights\": [{\"flight_number\": \"HAT188\", \"origin\": \"EWR\", \"destination\": \"IAH\", \"date\": \"2024-05-28\", \"price\": 52}, {\"flight_number\": \"HAT207\", \"origin\": \"IAH\", \"destination\": \"EWR\", \"date\": \"2024-05-28\", \"price\": 87}], \"passengers\": [{\"first_name\": \"Olivia\", \"last_name\": \"Gonzalez\", \"dob\": \"1988-06-13\"}], \"payment_history\": [{\"payment_id\": \"gift_card_2200803\", \"amount\": 169}, {\"payment_id\": \"gift_card_2200803\", \"amount\": -169}], \"created_at\": \"2024-05-13T19:41:32\", \"total_baggages\": 0, \"nonfree_baggages\": 0, \"insurance\": \"yes\", \"status\": \"cancelled\"}"
+                      }
+                    ],
+                    "status": "success",
+                    "toolUseId": "a-2"
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "269d6daeabc9bb7d6a8384dc22a78e6c1dd12e22d675f59f3d736510807ebcc0",
+          "tool_choice": null,
+          "tool_names": [
+            "book_reservation",
+            "calculate",
+            "cancel_reservation",
+            "get_reservation_details",
+            "get_user_details",
+            "list_all_airports",
+            "search_direct_flight",
+            "search_onestop_flight",
+            "send_certificate",
+            "transfer_to_human_agents",
+            "update_reservation_baggages",
+            "update_reservation_flights",
+            "update_reservation_passengers",
+            "get_flight_status"
+          ],
+          "tool_specs_sha256": "26d3b49a517c8b82e11c1bfb0945084daaf9dc6c798b0b4b30882c7c5cbf093d"
+        }
+      ],
+      "init_kwargs": {
+        "client_args": {
+          "api_key": "EMPTY",
+          "base_url": "http://assistant.test:4000/v1"
+        },
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      }
+    },
+    "user": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "61320bd715a98c075481eedb1db9d880f0e60432c306f15845b4730468a24ac0",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "I found your profile. Which reservation should I change?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "61320bd715a98c075481eedb1db9d880f0e60432c306f15845b4730468a24ac0",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "I found your profile. Which reservation should I change?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Actually, please just cancel reservation Z7GOZK."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Reservation Z7GOZK has been cancelled."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "61320bd715a98c075481eedb1db9d880f0e60432c306f15845b4730468a24ac0",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      ],
+      "init_kwargs": {
+        "additional_request_fields": {
+          "thinking": {
+            "type": "disabled"
+          }
+        },
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "temperature": 1.0
+      }
+    }
+  },
+  "result": {
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Hello! How can I help you?"
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Hi, I'm Olivia Gonzalez, user id olivia_gonzalez_2305. I need help with my Texas trip."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "Look the user up first."
+              }
+            }
+          },
+          {
+            "toolUse": {
+              "input": {
+                "user_id": "olivia_gonzalez_2305"
+              },
+              "name": "get_user_details",
+              "toolUseId": "a-1"
+            }
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolResult": {
+              "content": [
+                {
+                  "text": "{\"user_id\": \"olivia_gonzalez_2305\", \"name\": {\"first_name\": \"Olivia\", \"last_name\": \"Gonzalez\"}, \"address\": {\"address1\": \"334 Laurel Lane\", \"address2\": \"Suite 970\", \"city\": \"Los Angeles\", \"country\": \"USA\", \"state\": \"CA\", \"zip\": \"90504\"}, \"email\": \"olivia.gonzalez4421@example.com\", \"dob\": \"1988-06-13\", \"payment_methods\": {\"gift_card_2200803\": {\"source\": \"gift_card\", \"id\": \"gift_card_2200803\", \"amount\": 123.0}, \"credit_card_9969263\": {\"source\": \"credit_card\", \"id\": \"credit_card_9969263\", \"brand\": \"mastercard\", \"last_four\": \"9475\"}}, \"saved_passengers\": [{\"first_name\": \"Mei\", \"last_name\": \"Johansson\", \"dob\": \"1981-09-25\"}, {\"first_name\": \"Yara\", \"last_name\": \"Lopez\", \"dob\": \"1975-09-15\"}], \"membership\": \"regular\", \"reservations\": [\"Z7GOZK\", \"K67C4W\", \"THY2DG\"]}"
+                }
+              ],
+              "status": "success",
+              "toolUseId": "a-1"
+            }
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "Found the profile."
+              }
+            }
+          },
+          {
+            "text": "I found your profile. Which reservation should I change?"
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "Actually, please just cancel reservation Z7GOZK."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolUse": {
+              "input": {
+                "reservation_id": "Z7GOZK"
+              },
+              "name": "cancel_reservation",
+              "toolUseId": "a-2"
+            }
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "toolResult": {
+              "content": [
+                {
+                  "text": "{\"reservation_id\": \"Z7GOZK\", \"user_id\": \"olivia_gonzalez_2305\", \"origin\": \"EWR\", \"destination\": \"IAH\", \"flight_type\": \"round_trip\", \"cabin\": \"basic_economy\", \"flights\": [{\"flight_number\": \"HAT188\", \"origin\": \"EWR\", \"destination\": \"IAH\", \"date\": \"2024-05-28\", \"price\": 52}, {\"flight_number\": \"HAT207\", \"origin\": \"IAH\", \"destination\": \"EWR\", \"date\": \"2024-05-28\", \"price\": 87}], \"passengers\": [{\"first_name\": \"Olivia\", \"last_name\": \"Gonzalez\", \"dob\": \"1988-06-13\"}], \"payment_history\": [{\"payment_id\": \"gift_card_2200803\", \"amount\": 169}, {\"payment_id\": \"gift_card_2200803\", \"amount\": -169}], \"created_at\": \"2024-05-13T19:41:32\", \"total_baggages\": 0, \"nonfree_baggages\": 0, \"insurance\": \"yes\", \"status\": \"cancelled\"}"
+                }
+              ],
+              "status": "success",
+              "toolUseId": "a-2"
+            }
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "Reservation Z7GOZK has been cancelled."
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "Thanks, that's all. ###STOP###"
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      }
+    ],
+    "meta": {
+      "assistant_model": {
+        "base_url": "http://assistant.test:4000/v1",
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      },
+      "terminated_reason": "###STOP###",
+      "user_model": {
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "source": "bedrock",
+        "temperature": 1.0,
+        "thinking_budget": 1024,
+        "thinking_enabled": false
+      }
+    },
+    "reward_info": {
+      "action_checks": [
+        {
+          "action": {
+            "action_id": "19_0",
+            "arguments": {
+              "reservation_id": "Z7GOZK"
+            },
+            "info": null,
+            "name": "cancel_reservation"
+          },
+          "action_match": true,
+          "action_reward": 1.0
+        }
+      ],
+      "communicate_checks": [],
+      "db_check": {
+        "agent_db_match": true,
+        "db_match": true,
+        "db_reward": 1.0,
+        "user_db_match": true
+      },
+      "reward": 1.0,
+      "reward_basis": [
+        "DB",
+        "COMMUNICATE"
+      ],
+      "reward_breakdown": {
+        "COMMUNICATE": 1.0,
+        "DB": 1.0
+      }
+    },
+    "rewards": 1.0
+  }
+}

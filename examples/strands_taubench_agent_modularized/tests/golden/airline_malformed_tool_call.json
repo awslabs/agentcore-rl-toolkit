@@ -1,0 +1,180 @@
+{
+  "models": {
+    "assistant": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Hi, I'm Olivia Gonzalez. I need to change a flight."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "269d6daeabc9bb7d6a8384dc22a78e6c1dd12e22d675f59f3d736510807ebcc0",
+          "tool_choice": null,
+          "tool_names": [
+            "book_reservation",
+            "calculate",
+            "cancel_reservation",
+            "get_reservation_details",
+            "get_user_details",
+            "list_all_airports",
+            "search_direct_flight",
+            "search_onestop_flight",
+            "send_certificate",
+            "transfer_to_human_agents",
+            "update_reservation_baggages",
+            "update_reservation_flights",
+            "update_reservation_passengers",
+            "get_flight_status"
+          ],
+          "tool_specs_sha256": "26d3b49a517c8b82e11c1bfb0945084daaf9dc6c798b0b4b30882c7c5cbf093d"
+        }
+      ],
+      "init_kwargs": {
+        "client_args": {
+          "api_key": "EMPTY",
+          "base_url": "http://assistant.test:4000/v1"
+        },
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      }
+    },
+    "user": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "61320bd715a98c075481eedb1db9d880f0e60432c306f15845b4730468a24ac0",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      ],
+      "init_kwargs": {
+        "additional_request_fields": {
+          "thinking": {
+            "type": "disabled"
+          }
+        },
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "temperature": 1.0
+      }
+    }
+  },
+  "result": {
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Hello! How can I help you?"
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Hi, I'm Olivia Gonzalez. I need to change a flight."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "reasoningContent": {
+              "reasoningText": {
+                "text": "Call a tool."
+              }
+            }
+          },
+          {
+            "text": "<tool_call>{\"name\": \"get_user_details\"}</tool_call>"
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      }
+    ],
+    "meta": {
+      "assistant_model": {
+        "base_url": "http://assistant.test:4000/v1",
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      },
+      "terminated_reason": "malformed_tool_call",
+      "user_model": {
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "source": "bedrock",
+        "temperature": 1.0,
+        "thinking_budget": 1024,
+        "thinking_enabled": false
+      }
+    },
+    "reward_info": {
+      "forced": true,
+      "terminated_reason": "malformed_tool_call"
+    },
+    "rewards": 0.0
+  }
+}

@@ -1,0 +1,334 @@
+{
+  "models": {
+    "assistant": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "I want to return some things."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "108ce25bbcff6f03a874dd374017fbbefdd65eec211e5966a32c20ea7ef1068e",
+          "tool_choice": null,
+          "tool_names": [
+            "calculate",
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_name_zip",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_all_product_types",
+            "modify_pending_order_address",
+            "modify_pending_order_items",
+            "modify_pending_order_payment",
+            "modify_user_address",
+            "return_delivered_order_items",
+            "transfer_to_human_agents"
+          ],
+          "tool_specs_sha256": "96d3fae13660238ae0171b066d94bc42dc8603d44019201bf97540ca33524932"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "I want to return some things."
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "Sure, what is your email?"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Still waiting on that return."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "108ce25bbcff6f03a874dd374017fbbefdd65eec211e5966a32c20ea7ef1068e",
+          "tool_choice": null,
+          "tool_names": [
+            "calculate",
+            "cancel_pending_order",
+            "exchange_delivered_order_items",
+            "find_user_id_by_name_zip",
+            "find_user_id_by_email",
+            "get_order_details",
+            "get_product_details",
+            "get_user_details",
+            "list_all_product_types",
+            "modify_pending_order_address",
+            "modify_pending_order_items",
+            "modify_pending_order_payment",
+            "modify_user_address",
+            "return_delivered_order_items",
+            "transfer_to_human_agents"
+          ],
+          "tool_specs_sha256": "96d3fae13660238ae0171b066d94bc42dc8603d44019201bf97540ca33524932"
+        }
+      ],
+      "init_kwargs": {
+        "client_args": {
+          "api_key": "EMPTY",
+          "base_url": "http://assistant.test:4000/v1"
+        },
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      }
+    },
+    "user": {
+      "calls": [
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "08d93693a264f82117fd1540eb69257bdfe3c7824e4e30925ad5c48d59ae422d",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "messages": [
+            {
+              "content": [
+                {
+                  "text": "Hello! How can I help you?"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "I want to return some things."
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "text": "Sure, what is your email?"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "system_prompt_sha256": "08d93693a264f82117fd1540eb69257bdfe3c7824e4e30925ad5c48d59ae422d",
+          "tool_choice": null,
+          "tool_names": [],
+          "tool_specs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      ],
+      "init_kwargs": {
+        "additional_request_fields": {
+          "thinking": {
+            "type": "disabled"
+          }
+        },
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "temperature": 1.0
+      }
+    }
+  },
+  "result": {
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "Hello! How can I help you?"
+          }
+        ],
+        "from": "assistant",
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "I want to return some things."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "Sure, what is your email?"
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "Still waiting on that return."
+          }
+        ],
+        "from": "user",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "user",
+        "tracking_id": "<tracking_id>"
+      },
+      {
+        "content": [
+          {
+            "text": "I need your email to continue."
+          }
+        ],
+        "from": "assistant",
+        "metadata": {
+          "metrics": {
+            "latencyMs": 0
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "role": "assistant",
+        "tracking_id": "<tracking_id>"
+      }
+    ],
+    "meta": {
+      "assistant_model": {
+        "base_url": "http://assistant.test:4000/v1",
+        "model_id": "test/assistant",
+        "params": {
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            }
+          },
+          "max_tokens": 2048
+        }
+      },
+      "terminated_reason": null,
+      "user_model": {
+        "max_tokens": 2048,
+        "model_id": "global.anthropic.claude-opus-4-6-v1",
+        "source": "bedrock",
+        "temperature": 1.0,
+        "thinking_budget": 1024,
+        "thinking_enabled": false
+      }
+    },
+    "reward_info": {
+      "action_checks": [
+        {
+          "action": {
+            "action_id": "73_0",
+            "arguments": {
+              "item_ids": [
+                "7228247242",
+                "2698416822",
+                "8098621301",
+                "3320557165"
+              ],
+              "order_id": "#W5272531",
+              "payment_method_id": "credit_card_6824399"
+            },
+            "info": null,
+            "name": "return_delivered_order_items"
+          },
+          "action_match": false,
+          "action_reward": 0.0
+        }
+      ],
+      "db_check": {
+        "agent_db_match": false,
+        "db_match": false,
+        "db_reward": 0.0,
+        "user_db_match": true
+      },
+      "reward": 0.0,
+      "reward_basis": [
+        "DB"
+      ],
+      "reward_breakdown": {
+        "DB": 0.0
+      }
+    },
+    "rewards": 0.0
+  }
+}
