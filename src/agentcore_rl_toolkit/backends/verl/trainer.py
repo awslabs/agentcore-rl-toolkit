@@ -10,8 +10,7 @@ Must stay importable by any verl worker: no driver-only imports at module scope.
 """
 
 import ray
-from omegaconf import DictConfig, OmegaConf, open_dict
-from verl.experimental.agent_loop.utils import resolve_config_path
+from omegaconf import DictConfig, open_dict
 from verl.trainer.ppo.v1 import (
     PPOTrainerColocateAsync,
     PPOTrainerSeparateAsync,
@@ -22,12 +21,19 @@ from verl.trainer.ppo.v1 import (
 from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 from agentcore_rl_toolkit.concurrency.ray_adapters import make_priority_semaphore
 
+from . import score_centering
 from .trainer_mixins import (
     AdvantageZeroMetricsMixin,
     AgentLoopMetricsMixin,
     RoundRobinAgentLoopDispatchMixin,
+    ScoreCenteringMixin,
     VariableRowBatchingMixin,
 )
+from .trainer_mixins.base import agentcore_agent_loop_entries
+
+# Every verl process imports this module via VERL_USE_EXTERNAL_MODULES, including the
+# rollout server and vLLM's GPU workers; see score_centering.install for what it patches.
+score_centering.install()
 
 __all__ = [
     "AgentCorePPOTrainerColocateAsync",
@@ -56,16 +62,12 @@ class _AgentCoreTrainerBase:
         super().__init__(config)
 
     def init(self):
-        path = self.config.actor_rollout_ref.rollout.agent.agent_loop_config_path
         budgets = set()
-        if path:
-            for entry in OmegaConf.load(resolve_config_path(path)):
-                if entry.get("_target_") != "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop":
-                    continue
-                limits = (entry.get("rollout_concurrency", 128), entry.get("tps_limit", 5))
-                if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 for value in limits):
-                    raise ValueError("rollout_concurrency and tps_limit must be positive integers")
-                budgets.add(limits)
+        for entry in agentcore_agent_loop_entries(self.config):
+            limits = (entry.get("rollout_concurrency", 128), entry.get("tps_limit", 5))
+            if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 for value in limits):
+                raise ValueError("rollout_concurrency and tps_limit must be positive integers")
+            budgets.add(limits)
         if len(budgets) > 1:
             raise ValueError("AgentCore agent loops must agree on the training job's concurrency and TPS limits")
 
@@ -89,6 +91,7 @@ class AgentCorePPOTrainerSync(
     RoundRobinAgentLoopDispatchMixin,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
+    ScoreCenteringMixin,
     VariableRowBatchingMixin,
     PPOTrainerSync,
 ):
@@ -101,6 +104,7 @@ class AgentCorePPOTrainerColocateAsync(
     RoundRobinAgentLoopDispatchMixin,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
+    ScoreCenteringMixin,
     VariableRowBatchingMixin,
     PPOTrainerColocateAsync,
 ):
@@ -113,6 +117,7 @@ class AgentCorePPOTrainerSeparateAsync(
     RoundRobinAgentLoopDispatchMixin,
     AgentLoopMetricsMixin,
     AdvantageZeroMetricsMixin,
+    ScoreCenteringMixin,
     VariableRowBatchingMixin,
     PPOTrainerSeparateAsync,
 ):

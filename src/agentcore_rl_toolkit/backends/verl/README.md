@@ -289,6 +289,20 @@ The `training/rollout_failure/total_missing_sessions` metric reports
 `data.train_batch_size / parameter_sync_step * rollout.n` minus the number of
 materialized rollout sessions in each actor update, summed over a step's updates.
 
+## Score function centering
+
+Pass `+score_centering.num_auxiliary_token_samples=K` and export
+`AGENTCORE_VLLM_TOKEN_SAMPLES=1` to replace the policy loss with a ratio-free,
+score-centered REINFORCE plus a sampler-learner KL weighted by token age
+(`+score_centering.kl_beta=β₀`). vLLM draws `K` tokens per generated token from the sampling
+distribution through the gateway's `vllm_token_samples` plugin, which this package
+registers as a `vllm.general_plugins` entry point. See
+[`score_centering.py`](score_centering.py) for the loss and its references. The trainer checks the required settings at startup,
+including `algorithm.rollout_correction.rollout_is=null` and one optimizer step
+per local update. Separate-async training needs `cupy` for the NCCL checkpoint
+engine. [`examples/math_agent/fsdp_fft_separate_async_sfc.sh`](examples/math_agent/fsdp_fft_separate_async_sfc.sh)
+is a separate-async recipe with stale rollouts.
+
 ## Troubleshooting
 
 - **Every rollout fails, warning about "static session 'EMPTY'"**: the deployed agent

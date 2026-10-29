@@ -7,11 +7,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     # Static-analysis-only base so mixins can reference the concrete trainer's members;
     # at runtime the real base comes from the recipe's trainer class.
+    from omegaconf import DictConfig
     from verl.trainer.ppo.v1 import PPOTrainer
 
     TrainerMixinBase = PPOTrainer
 else:
     TrainerMixinBase = object
+
+AGENT_LOOP_TARGET = "agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop"
+
+
+def agentcore_agent_loop_entries(config: DictConfig) -> list:
+    """The ``AgentCoreAgentLoop`` entries of the run's ``agent_loop_config_path`` YAML."""
+    from omegaconf import OmegaConf
+    from verl.experimental.agent_loop.utils import resolve_config_path
+
+    path = config.actor_rollout_ref.rollout.agent.agent_loop_config_path
+    if not path:
+        return []
+    return [entry for entry in OmegaConf.load(resolve_config_path(path)) if entry.get("_target_") == AGENT_LOOP_TARGET]
 
 
 def rollout_server_addresses(trainer: PPOTrainer) -> list[str]:

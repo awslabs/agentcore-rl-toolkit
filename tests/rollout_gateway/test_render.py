@@ -68,8 +68,9 @@ def test_xml_tool_calls_parsed_dependency_free():
 
     r = HfTemplateRenderer(XmlTok(), tool_parser=parse_tool_uses)
     tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
-    out = r.parse([1], tools_schema=tools)
-    assert "sglang" not in sys.modules and "vllm" not in sys.modules
+    # Block the engines rather than check sys.modules, which earlier tests may have populated.
+    with patch.dict(sys.modules, {"sglang": None, "vllm": None}):
+        out = r.parse([1], tools_schema=tools)
     assert len(out.tool_uses) == 1
     assert out.tool_uses[0]["name"] == "search"
     assert out.tool_uses[0]["input"] == {"q": "cats"}

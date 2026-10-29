@@ -1,6 +1,7 @@
 """VerlSamplingBackend unit tests: the TokenOutput -> TurnRecord mapping and
 the sampling-params whitelist, against scripted verl ``TokenOutput`` responses."""
 
+import numpy as np
 import pytest
 from verl.workers.rollout.replica import TokenOutput
 
@@ -127,3 +128,48 @@ async def test_extra_fields_folding():
     assert backend.pop_extra_fields("s") == {}
     # unknown sid is empty, not an error
     assert backend.pop_extra_fields("nope") == {}
+
+
+def _sampled_output(token_ids, k=2, **extra):
+    n = len(token_ids)
+    return TokenOutput(
+        token_ids=token_ids,
+        log_probs=[-0.5] * n,
+        stop_reason="completed",
+        extra_fields={
+            "response_sample_ids": np.arange(n * k, dtype=np.int32).reshape(n, k),
+            "response_sample_versions": np.full(n, 3),
+            **extra,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_maps_token_samples():
+    client = FakeLLMServerClient([_sampled_output([5, 6], global_steps=3)])
+    backend = VerlSamplingBackend(client)
+    turn = await backend.generate(prompt_ids=[1], sampling_params={}, session_id="s", num_auxiliary_token_samples=2)
+
+    assert client.calls[0]["sampling_params"]["num_auxiliary_token_samples"] == 2
+    assert turn.output_auxiliary_token_samples.ids.tolist() == [[0, 1], [2, 3]]
+    assert turn.output_auxiliary_token_samples.versions.tolist() == [3, 3]
+    # samples are per-turn data, not folded into the per-session extra fields
+    assert backend.pop_extra_fields("s") == {"global_steps": 3}
+
+
+@pytest.mark.asyncio
+async def test_generate_without_token_samples():
+    client = FakeLLMServerClient([TokenOutput(token_ids=[5], stop_reason="completed")])
+    turn = await VerlSamplingBackend(client).generate(prompt_ids=[1], sampling_params={}, session_id="s")
+    assert turn.output_auxiliary_token_samples is None
+    assert "num_auxiliary_token_samples" not in client.calls[0]["sampling_params"]
+
+
+@pytest.mark.asyncio
+async def test_generate_rejects_misaligned_token_samples():
+    output = _sampled_output([5, 6])
+    for key in ("response_sample_ids", "response_sample_versions"):
+        output.extra_fields[key] = output.extra_fields[key][:1]
+    backend = VerlSamplingBackend(FakeLLMServerClient([output]))
+    with pytest.raises(RuntimeError, match="token samples for 1 of 2 generated tokens"):
+        await backend.generate(prompt_ids=[1], sampling_params={}, session_id="s", num_auxiliary_token_samples=2)

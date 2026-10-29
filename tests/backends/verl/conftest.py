@@ -40,12 +40,14 @@ def make_trainer_config(
     prompt_length: int = 64,
     response_length: int = 32,
     max_model_len: int | None = 128,
+    score_centering: dict | None = None,
 ) -> DictConfigWrap:
     """The slice of verl's trainer config AgentLoopBase + AgentCoreAgentLoop read."""
     return DictConfigWrap(
         OmegaConf.create(
             {
                 "trainer": {"use_v1": use_v1},
+                **({"score_centering": score_centering} if score_centering else {}),
                 "actor_rollout_ref": {
                     "model": {"path": "test/model"},
                     "rollout": {
