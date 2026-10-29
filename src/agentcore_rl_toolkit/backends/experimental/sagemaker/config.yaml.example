@@ -36,7 +36,7 @@ eval_temperature: 0.0
 
 # --- Gateway ---
 gateway_port: 0    # 0 = OS-assigned
-history_mode: linear # tree | linear (linear: one record per append-only rollout)
+history_mode: linear # tree | linear | tree_healed (linear: one record per append-only rollout)
 chat_template_kwargs: {enable_thinking: false}  # e.g. {enable_thinking: false}
 
 # --- Checkpointing ---

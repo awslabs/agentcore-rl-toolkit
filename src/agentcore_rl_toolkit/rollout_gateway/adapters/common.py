@@ -32,6 +32,7 @@ from ..render import Renderer
 from ..sampling_backends.base import SamplingBackend
 from ..trace import BaseTrace, TraceRecord
 from ..trajectory import TrajectoryManager
+from ..tree_healer import make_healer
 
 __all__ = ["BaseAdapter", "Reply", "Session", "sid_from_bearer", "sid_from_body"]
 
@@ -169,16 +170,13 @@ class BaseAdapter:
         else:
             self.manager = TrajectoryManager()
 
-        # linear-history mode: heal re-tokenization drift at generation time so the
-        # manager stays permanently CLEAN (one sample per session). See linear.py.
+        # linear / tree_healed modes: heal re-tokenization drift at generation time so
+        # the manager stays CLEAN. See linear.py and tree_healer.py.
         # A shared healer may be injected (co-mounted adapters
         # share canonical state, like the manager); else built here when requested.
-        if healer is not None:
-            self.healer: LinearHealer | None = healer
-        elif history_mode == "linear":
-            self.healer = LinearHealer(renderer, on_nonlinear=linear_on_nonlinear)
-        else:
-            self.healer = None
+        self.healer: LinearHealer | None = (
+            healer if healer is not None else make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
+        )
 
         self.debug_callback: Callable[..., None] | None = debug_callback
         # per-sid turn cap: return 429 to kill the run once exceeded
@@ -289,7 +287,7 @@ class BaseAdapter:
             # then drop per-sid state. pop_stats must precede drop, which clears it.
             stats = self.healer.pop_stats(sid)
             if stats:
-                extra_metadata = {**(extra_metadata or {}), "linear_healer": stats}
+                extra_metadata = {**(extra_metadata or {}), self.healer.STATS_KEY: stats}
             self.healer.drop(sid)
         base_sample = base_sample if base_sample is not None else BaseTrace()
         max_sample_tokens = int(getattr(session, "max_context_tokens", 0) or 0) if session is not None else 0
@@ -480,6 +478,7 @@ class BaseAdapter:
                 prompt_messages=translated,
                 response_message=reply.manager_message,
                 metadata={"sid": sid},
+                tools=tools_schema,
             )
             return response
         finally:

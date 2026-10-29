@@ -161,7 +161,8 @@ eval_temperature: 0.0
 # --- Gateway ---
 gateway_port: 0              # 0 = OS-assigned; pin it to open a narrow inbound
                              # security-group rule (see Networking)
-history_mode: tree           # tree | linear; linear keeps an append-only rollout in one record
+history_mode: tree           # tree | linear | tree_healed; linear keeps an append-only rollout in one record,
+                             # tree_healed keeps each branch in one record
 chat_template_kwargs: {}     # passed to apply_chat_template, e.g. {enable_thinking: false}
 
 # --- Checkpointing ---

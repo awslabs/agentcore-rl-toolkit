@@ -74,8 +74,8 @@ class Config:
             raise ValueError("Require 0 < max_new_tokens < max_context_tokens")
         if self.tps_limit < 1:
             raise ValueError("tps_limit must be positive")
-        if self.history_mode not in ("tree", "linear"):
-            raise ValueError("history_mode must be 'tree' or 'linear'")
+        if self.history_mode not in ("tree", "linear", "tree_healed"):
+            raise ValueError("history_mode must be 'tree', 'linear', or 'tree_healed'")
         if min(self.evaluation_batch_size, self.evaluation_interval, self.checkpoint_interval) < 1:
             raise ValueError("Evaluation batch size and evaluation/checkpoint intervals must be positive")
         if not math.isfinite(self.evaluation_temperature) or self.evaluation_temperature < 0:

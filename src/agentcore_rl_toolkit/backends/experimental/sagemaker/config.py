@@ -24,7 +24,8 @@ class Config:
     gateway_port: int = 0
     # "tree": re-tokenization drift forks a rollout into multiple records.
     # "linear": reuse served token ids for append-only histories; one record per rollout.
-    history_mode: Literal["tree", "linear"] = "tree"
+    # "tree_healed": reuse served token ids on every branch; one record per branch.
+    history_mode: Literal["tree", "linear", "tree_healed"] = "tree"
     # Passed to the gateway renderer's apply_chat_template, e.g. {"enable_thinking": false}.
     chat_template_kwargs: dict = field(default_factory=dict)
 

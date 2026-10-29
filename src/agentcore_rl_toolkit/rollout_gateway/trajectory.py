@@ -41,6 +41,16 @@ class TurnRecord:
     ill_formed: bool = False
 
 
+@dataclasses.dataclass(frozen=True)
+class HealAnchor:
+    """A generated turn a later request can extend: its served token ids, the stored
+    messages from the root through its assistant message, and its tools schema."""
+
+    served_ids: list[int]
+    messages: list[dict[str, Any]]
+    tools: list[dict[str, Any]] | None
+
+
 # ===========================================================================
 # MessageNode
 # ===========================================================================
@@ -78,6 +88,7 @@ class MessageNode:
         self.parent: MessageNode | None = parent
         self.children: list[MessageNode] = []
         self.turn: TurnRecord | None = None  # the generated TurnRecord, else None (routing-only)
+        self.tools: list[dict[str, Any]] | None = None  # tools schema of the generated turn
         self.turn_index: int | None = None
         # Shared by sibling leaf paths; the first to reach it trains on it, the rest
         # re-emit it as loss_mask=0 context -- so each response is trained exactly once.
@@ -266,6 +277,7 @@ class TrajectoryManager:
         prompt_messages: list[dict[str, Any]],
         response_message: dict[str, Any] | None,
         metadata: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> None:
         if not prompt_messages:
             logger.warning("record_turn(sid=%s): empty prompt_messages; skipping", sid)
@@ -279,7 +291,30 @@ class TrajectoryManager:
 
         node, depth = self._find_mount_point(root, prompt_messages)
         node = self._mount_prompt_messages(node, prompt_messages[depth:])
-        self._attach_assistant_leaf(sid, node, turn=turn, response_message=response_message, metadata=metadata)
+        self._attach_assistant_leaf(
+            sid, node, turn=turn, response_message=response_message, metadata=metadata, tools=tools
+        )
+
+    def heal_anchor(self, sid: str, messages: list[dict[str, Any]]) -> HealAnchor | None:
+        """The deepest generated turn whose root path is a message-level prefix of ``messages``.
+
+        Matching is the walk ``record_turn`` mounts by, so a turn generated on the
+        anchor's served ids is recorded below the anchor. ``None`` when no generated
+        turn matches.
+        """
+        root = self._trees.get(sid)
+        if root is None:
+            return None
+        node: MessageNode | None = self._find_mount_point(root, messages)[0]
+        while node is not None and node.turn is None:
+            node = node.parent
+        if node is None:
+            return None
+        return HealAnchor(
+            served_ids=node.turn.prompt_ids + node.turn.output_ids,
+            messages=[n.message for n in node.path_from_root()],
+            tools=node.tools,
+        )
 
     def get_trajectory(
         self,
@@ -361,6 +396,7 @@ class TrajectoryManager:
         turn: TurnRecord,
         response_message: dict[str, Any] | None,
         metadata: dict[str, Any] | None,
+        tools: list[dict[str, Any]] | None,
     ) -> None:
         asst = MessageNode(
             role="assistant",
@@ -368,6 +404,7 @@ class TrajectoryManager:
             metadata=dict(metadata or {}),
         )
         asst.turn = turn
+        asst.tools = list(tools) if tools else None
         asst.turn_index = self._turn_count.get(sid, 0) + 1
         node.add_child(asst)
         self._turn_count[sid] = asst.turn_index
@@ -421,6 +458,7 @@ class TrajectoryManager:
 
 
 __all__ = [
+    "HealAnchor",
     "MessageNode",
     "TrajectoryManager",
     "TurnRecord",
