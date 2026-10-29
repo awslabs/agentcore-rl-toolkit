@@ -7,10 +7,30 @@ from typing import Any
 from uuid import uuid4
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from starlette.datastructures import MutableHeaders
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .protocol import ENVELOPE_KEY, InvocationRequest, InvocationState, state
 from .store import InvocationStore
+
+
+class _ServerSDKHeaderMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] != "/ping":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_sdk_header(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["X-AgentCore-Server-SDK"] = "agentcore-rl-toolkit"
+            await send(message)
+
+        await self.app(scope, receive, send_with_sdk_header)
 
 
 class AgentCoreRuntimeApp(BedrockAgentCoreApp):
@@ -30,7 +50,8 @@ class AgentCoreRuntimeApp(BedrockAgentCoreApp):
     """
 
     def __init__(self, *, background: bool = False, state_dir: str | Path | None = None, **kwargs):
-        super().__init__(**kwargs)
+        middleware = [Middleware(_ServerSDKHeaderMiddleware), *(kwargs.pop("middleware", None) or [])]
+        super().__init__(middleware=middleware, **kwargs)
         self._background = background
         self._store = InvocationStore(state_dir)
         self._lock = asyncio.Lock()
