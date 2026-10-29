@@ -71,9 +71,12 @@ def _tokens_and_logprobs_from_choice(choice: dict) -> tuple[list[int], list[floa
 class VllmHttpBackend:
     """``SamplingBackend`` over a vLLM ``/inference/v1/generate`` endpoint."""
 
-    def __init__(self, url: str, *, sock_read_timeout: float = 900.0) -> None:
+    def __init__(self, url: str, *, sock_read_timeout: float = 900.0, model: str | None = None) -> None:
         self.url = url.rstrip("/")
         self._sock_read_timeout = sock_read_timeout
+        # Name of a LoRA adapter registered with vLLM's --lora-modules, sent as each request's
+        # `model`. vLLM selects adapters only by this field, so None samples the base weights.
+        self.model = model
 
     async def generate(
         self,
@@ -88,6 +91,8 @@ class VllmHttpBackend:
             "token_ids": list(prompt_ids),
             "sampling_params": _vllm_sampling_body(sampling_params),
         }
+        if self.model:
+            payload["model"] = self.model
         if image_data:
             payload["images"] = image_data
         # session_id routes via vllm-router's consistent_hash policy (x-session-id
