@@ -36,7 +36,9 @@ async def test_processing_error_drains_other_rollouts_before_raising(rollout_kwa
 
     with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
         with pytest.raises(ValueError, match="broken processing code"):
-            await collect_batch(SimpleNamespace(group_size=2), None, None, [{}], **rollout_kwargs)
+            await collect_batch(
+                SimpleNamespace(group_size=2, rollout_concurrency=None), None, None, [{}], **rollout_kwargs
+            )
     assert finished == [1]
 
 
@@ -165,3 +167,59 @@ async def test_evaluation_persists_completed_results_while_other_requests_are_pe
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     assert rows[1]["reward"] is None
     assert rows[1]["input_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_evaluation_refills_capacity_before_slowest_finishes(tmp_path, rollout_kwargs):
+    release_slow, third_started = asyncio.Event(), asyncio.Event()
+    active = peak = 0
+
+    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, *, temperature, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            if sample_index == 0:
+                await release_slow.wait()
+            if sample_index == 2:
+                third_started.set()
+            await asyncio.sleep(0)
+            return Episode(str(sample_index), 1, [])
+        finally:
+            active -= 1
+
+    cfg = SimpleNamespace(output_dir=str(tmp_path), evaluation_batch_size=2, evaluation_temperature=1)
+    with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
+        task = asyncio.create_task(evaluate(cfg, None, None, [{}] * 4, 0, **rollout_kwargs))
+        try:
+            await asyncio.wait_for(third_started.wait(), 2)
+            assert not task.done()
+            assert peak == 2
+        finally:
+            release_slow.set()
+            metrics = await task
+    assert metrics["eval/episodes"] == 4
+
+
+@pytest.mark.asyncio
+async def test_training_concurrency_preserves_groups_and_drains_failures(rollout_kwargs):
+    active = peak = 0
+    seen = []
+
+    async def fake_rollout(config, gateway, client, payload, group_index, sample_index, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.001 * (6 - sample_index))
+            seen.append(sample_index)
+            return (group_index, sample_index)
+        finally:
+            active -= 1
+
+    cfg = SimpleNamespace(group_size=3, rollout_concurrency=2)
+    with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
+        groups = await collect_batch(cfg, None, None, [{}, {}], **rollout_kwargs)
+    assert peak == 2
+    assert groups == [[(0, 0), (0, 1), (0, 2)], [(1, 3), (1, 4), (1, 5)]]
+    assert sorted(seen) == list(range(6))

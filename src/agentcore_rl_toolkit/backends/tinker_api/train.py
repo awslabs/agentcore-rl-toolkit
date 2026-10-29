@@ -55,6 +55,7 @@ class Config:
     max_new_tokens: int = 2048
     max_context_tokens: int = 16384
     rollout_timeout: float = 180.0
+    rollout_concurrency: int | None = None
     tps_limit: int = 4  # New Runtime sessions per second.
     evaluation_dataset: str | None = None
     evaluation_batch_size: int = 256
@@ -74,6 +75,8 @@ class Config:
             raise ValueError("Require 0 < max_new_tokens < max_context_tokens")
         if self.tps_limit < 1:
             raise ValueError("tps_limit must be positive")
+        if self.rollout_concurrency is not None and self.rollout_concurrency < 1:
+            raise ValueError("rollout_concurrency must be positive or None")
         if self.history_mode not in ("tree", "linear"):
             raise ValueError("history_mode must be 'tree' or 'linear'")
         if min(self.evaluation_batch_size, self.evaluation_interval, self.checkpoint_interval) < 1:
@@ -152,10 +155,19 @@ async def rollout(
         await gateway.drop_session(sid)
 
 
-async def drain_rollouts(coroutines):
-    # Wait for all sibling rollout tasks before advancing training.
+async def drain_rollouts(coroutines, limit: int | None = None):
+    # Wait for all sibling rollout tasks before advancing training, running at most
+    # `limit` at once (None = all); each finished rollout frees its slot immediately.
     # Invocation failures are Episode data;
     # unexpected processing errors and cancellation still propagate after draining.
+    if limit is not None:
+        semaphore = asyncio.Semaphore(limit)
+
+        async def bounded(coroutine):
+            async with semaphore:
+                return await coroutine
+
+        coroutines = [bounded(coroutine) for coroutine in coroutines]
     results = await asyncio.gather(*coroutines, return_exceptions=True)
     failures = [result for result in results if isinstance(result, BaseException)]
     if failures:
@@ -186,7 +198,8 @@ async def collect_batch(
             )
             for group_index, payload in enumerate(payloads)
             for i in range(config.group_size)
-        ]
+        ],
+        limit=config.rollout_concurrency,
     )
     return [results[i : i + config.group_size] for i in range(0, len(results), config.group_size)]
 
@@ -229,15 +242,12 @@ async def evaluate(
             summaries.append(summary)
             stream.write(json.dumps(summary) + "\n")
             stream.flush()
-
-        for offset in range(0, len(payloads), config.evaluation_batch_size):
-            await drain_rollouts(
-                [
-                    evaluate_one(offset + i, payload)
-                    for i, payload in enumerate(payloads[offset : offset + config.evaluation_batch_size])
-                ]
-            )
             logger.info("Evaluation step=%d completed=%d/%d", step, len(summaries), len(payloads))
+
+        await drain_rollouts(
+            [evaluate_one(i, payload) for i, payload in enumerate(payloads)],
+            limit=config.evaluation_batch_size,
+        )
     rewards = [summary["reward"] for summary in summaries if summary["reward"] is not None]
     failed_episodes = sum(summary["error"] is not None for summary in summaries)
     metrics = {
