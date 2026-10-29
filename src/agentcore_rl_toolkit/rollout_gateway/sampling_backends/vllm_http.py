@@ -74,7 +74,8 @@ class VllmHttpBackend:
     def __init__(self, url: str, *, sock_read_timeout: float = 900.0, model: str | None = None) -> None:
         self.url = url.rstrip("/")
         self._sock_read_timeout = sock_read_timeout
-        # A served LoRA adapter (vLLM --lora-modules); without it the endpoint samples the base model.
+        # Name of a LoRA adapter registered with vLLM's --lora-modules, sent as each request's
+        # `model`. vLLM selects adapters only by this field, so None samples the base weights.
         self.model = model
 
     async def generate(
