@@ -146,13 +146,14 @@ correctly not treated as closer.
   `backend.generate` in `_run_turn`; the healer handles rendering and encoding internally.
   The adapter feeds the healed ids to both `generate` and `TurnRecord`, and calls `commit`
   before `record_turn`. Session teardown drops per-sid healer state.
-  The existing `TrajectoryManager` is unchanged.
-- `rollout_gateway/__init__.py` — exports `LinearHealer`.
+  Linear mode does not change `TrajectoryManager`.
+- `rollout_gateway/__init__.py` — exports `LinearHealer` (and `TreeHealer`, see
+  [Tree-healed mode](#tree-healed-mode)).
 
 ### Config surface
 
-- `history_mode`: `"tree"` (default, current behavior) | `"linear"`. Gateway-global; linear and tree
-  sessions do not coexist within a run.
+- `history_mode`: `"tree"` (default, current behavior) | `"linear"` | `"tree_healed"`.
+  Gateway-global; sessions of different modes do not coexist within a run.
 - `linear_on_nonlinear`: `"reset"` (default) | `"error"` | `"passthrough"` — behavior when a
   turn breaks the append-only assumption.
 
@@ -236,6 +237,43 @@ of the served token prefix across a BPE merge boundary.
   targeting a template family whose between-message glue could differ after tool-call vs text
   turns (the `close_unresolved` fallback keeps such a case correct, just unhealed).
 
+## Tree-healed mode
+
+`history_mode="tree_healed"` applies the same splice to every branch of the session tree,
+so retries, edits, parallel branches, and sub-agent forks that reuse the session id are
+healed too. `TreeHealer` (`rollout_gateway/tree_healer.py`) subclasses `LinearHealer` and
+reuses its splice, closer probe, and overlap trim; only the source of the prior state
+differs.
+
+Instead of one per-sid `served_prefix`, each request is anchored on the session tree:
+
+```
+anchor     = manager.heal_anchor(sid, messages)   # deepest generated turn whose root path matches
+fed        = anchor.served_ids + close + delta_tail(messages[len(anchor.messages):])
+```
+
+`TrajectoryManager.heal_anchor` walks the tree with the same message matching
+`record_turn` mounts by, then moves up to the nearest generated assistant node.
+`served_ids` is that node's `prompt_ids + output_ids`. Because those prompt ids were
+themselves healed, every branch carries the served ids of all generated turns on its path,
+and a turn generated on an anchor is recorded below it, CLEAN. The manager's existing
+tree linearization emits one record per branch and trains a shared turn on one branch only.
+
+`record_turn` stores the tools schema on each generated node so the anchor can be checked
+against the request. The healer keeps no per-session history; `commit` is a no-op.
+
+A request is rendered in full, and the manager handles drift as in tree mode, when:
+
+- no generated turn matches (`unanchored`: the first turn, or a new root such as a
+  sub-agent with its own first message);
+- the anchor's tools schema differs from the request's (`tools_changed`);
+- the splice fails for the template (`unhealable`, plus `close_unresolved` when the
+  closer probe fails).
+
+These counters and `healed_turns` / `healed_prefix_tokens` ride on record metadata under
+`tree_healer`. Unlike linear mode, tree-healed mode never resets, raises, or disables
+healing for a session; `linear_on_nonlinear` does not apply.
+
 ## Non-goals
 
 - Message-level rewrites where a prior message's **dict** changes *semantically* (not just
@@ -243,5 +281,5 @@ of the served token prefix across a BPE merge boundary.
   `linear_on_nonlinear`. Cosmetic re-serialization that keeps the dict `==` is handled — the
   linearity check matches at dict equality — but an actual content change is out of scope for
   healing.
-- Sub-agent / parallel-branch capture: that is what tree mode is for; linear mode re-anchors
-  or falls back rather than trying to represent it.
+- Sub-agent / parallel-branch capture in linear mode: it re-anchors or falls back rather
+  than trying to represent it. Use tree or tree-healed mode.

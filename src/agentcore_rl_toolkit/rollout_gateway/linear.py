@@ -149,7 +149,14 @@ class LinearHealer:
             # genuine edit/drop/branch/compaction (or a tools change): re-anchor
             r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
             return self._handle_nonlinear(sid, r_full)
+        return await self._extend(sid, st, new)
 
+    async def _extend(self, sid: str, st: _State, new: list[dict]) -> list[int]:
+        """Splice ``st.served_prefix`` with the closer and the render of ``new``.
+
+        ``new`` is the incoming messages after ``st.prev_messages``. When the template
+        cannot be spliced, :meth:`_handle_nonlinear` receives the full render instead.
+        """
         render_delta = getattr(self.renderer, "render_delta", None)
         if render_delta is not None:
             delta = await render_delta(st.prev_messages, new, tools=st.prev_tools)
@@ -233,6 +240,9 @@ class LinearHealer:
             prev_messages=list(messages) + [asst],
             prev_tools=list(tools) if tools else None,
         )
+
+    #: record-metadata key under which ``finish_session`` attaches ``pop_stats``
+    STATS_KEY = "linear_healer"
 
     #: every counter key this healer can emit; ``pop_stats`` returns all of them (with
     #: zeros for counters that never fired) so per-session stats have a stable schema.

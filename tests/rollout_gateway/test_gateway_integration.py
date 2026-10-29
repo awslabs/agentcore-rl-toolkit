@@ -249,6 +249,44 @@ async def test_linear_mode_attaches_healer_stats_to_metadata():
     assert md["linear_healer"].get("nonlinear", 0) == 0
 
 
+@pytest.mark.asyncio
+async def test_tree_healed_mode_heals_retry_branch():
+    """In tree_healed mode a retried turn anchors on the turn it extends: both attempts
+    become CLEAN branches, and the TreeHealer counters ride out under ``tree_healer``."""
+    gateway, backend = make_gateway(
+        replies=["CALL calculator expr=2+2", "the answer is 4", "it is 4"], history_mode="tree_healed"
+    )
+    tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
+    sid = "ep-tree:solver"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid)
+        body1 = {"model": "m", "messages": [{"role": "user", "content": "two plus two"}], "tools": tools}
+        resp1 = await client.post("/v1/chat/completions", json=body1, headers=bearer(sid))
+        choice1 = (await resp1.json())["choices"][0]
+        call = choice1["message"]["tool_calls"][0]
+        body2 = {
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "two plus two"},
+                {"role": "assistant", "content": None, "tool_calls": choice1["message"]["tool_calls"]},
+                {"role": "tool", "tool_call_id": call["id"], "content": "4"},
+            ],
+            "tools": tools,
+        }
+        await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))
+        await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))  # retry turn 2
+        records = await gateway.finish_session(sid, reward=1.0)
+
+    turn1 = backend.calls[0]["prompt_ids"] + gateway.renderer._encode("CALL calculator expr=2+2")
+    assert backend.calls[1]["prompt_ids"] == backend.calls[2]["prompt_ids"]
+    assert backend.calls[1]["prompt_ids"][: len(turn1)] == turn1
+    assert len(records) == 2  # one CLEAN record per branch
+    stats = records[0].metadata["tree_healer"]
+    assert stats["healed_turns"] == 2
+    assert stats["unanchored"] == 1
+
+
 # ---------------------------------------------------------------------------
 # a mixed text + parallel tool-call turn reaches the client intact
 # ---------------------------------------------------------------------------

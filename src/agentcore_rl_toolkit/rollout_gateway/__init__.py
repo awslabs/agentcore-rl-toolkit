@@ -19,7 +19,8 @@ from .linear import LinearHealer
 from .render import HfTemplateRenderer, ParsedOutput, Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, Status, TraceRecord
-from .trajectory import MessageNode, TrajectoryManager, TurnRecord
+from .trajectory import HealAnchor, MessageNode, TrajectoryManager, TurnRecord
+from .tree_healer import TreeHealer
 
 # RolloutGateway is aiohttp-dependent, so it is NOT imported at module top — it is
 # exposed lazily via __getattr__ below to keep `import ...rollout_gateway` aiohttp-free.
@@ -27,6 +28,7 @@ from .trajectory import MessageNode, TrajectoryManager, TurnRecord
 __all__ = [
     "BaseTrace",
     "GatewayServer",
+    "HealAnchor",
     "HfTemplateRenderer",
     "LinearHealer",
     "MessageNode",
@@ -38,6 +40,7 @@ __all__ = [
     "ThreadedGatewayServer",
     "TraceRecord",
     "TrajectoryManager",
+    "TreeHealer",
     "TurnRecord",
 ]
 

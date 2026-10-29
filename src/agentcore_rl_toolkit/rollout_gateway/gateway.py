@@ -22,6 +22,7 @@ from .render import Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, TraceRecord
 from .trajectory import TrajectoryManager
+from .tree_healer import make_healer
 
 # name -> adapter class for the `adapters=[...]` convenience arg
 _ADAPTER_REGISTRY: dict[str, type[BaseAdapter]] = {
@@ -41,9 +42,11 @@ class RolloutGateway:
         adapters: which wire protocols to mount — names ("openai", "anthropic") or
             ``BaseAdapter`` subclasses. Defaults to both.
         max_turns_per_sid / debug_callback: forwarded to the adapters.
-        history_mode: ``"tree"`` (default) or ``"linear"``. In linear mode the gateway
+        history_mode: ``"tree"`` (default), ``"linear"``, or ``"tree_healed"``. Linear mode
             heals re-tokenization drift at generation time via one shared ``LinearHealer``
             so the manager stays CLEAN (one sample per session). See ``linear.py``.
+            ``"tree_healed"`` applies the same healing to every branch of the session
+            tree via a ``TreeHealer``. See ``tree_healer.py``.
         linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
             behaviour when a turn breaks the append-only assumption (linear mode only).
     """
@@ -66,12 +69,10 @@ class RolloutGateway:
 
         self.manager = TrajectoryManager()
 
-        # In linear mode, one healer is shared across all co-mounted adapters (like the
-        # manager) so a session's canonical served-id state is coherent regardless of
-        # which wire protocol its turns arrive on. See linear.py.
-        self.healer: LinearHealer | None = (
-            LinearHealer(renderer, on_nonlinear=linear_on_nonlinear) if history_mode == "linear" else None
-        )
+        # In the healing modes, one healer is shared across all co-mounted adapters (like
+        # the manager) so a session's canonical served-id state is coherent regardless of
+        # which wire protocol its turns arrive on. See linear.py and tree_healer.py.
+        self.healer: LinearHealer | None = make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
 
         # one aiohttp app shared by all adapters; register health once here.
         self.app = web.Application(client_max_size=64 * 1024 * 1024)
