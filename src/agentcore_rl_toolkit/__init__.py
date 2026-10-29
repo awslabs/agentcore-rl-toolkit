@@ -8,6 +8,7 @@ _EXPORTS = {
     "AgentCoreHttpClient": ".runtime.client",
     "InvocationHandle": ".runtime.client",
     "InvocationError": ".runtime.client",
+    "sagemaker_mtrl": ".runtime.sagemaker_mtrl",
     "RewardFunction": ".reward_function",
     "RolloutClient": ".client",
     "RolloutFuture": ".client",

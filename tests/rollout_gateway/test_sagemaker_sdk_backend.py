@@ -50,14 +50,17 @@ def _install_sagemaker_stub() -> None:
     training_session.SamplingParams = SamplingParams
     training_session.StopReason = StopReason
 
-    train = types.ModuleType("sagemaker.train")
+    # Extend an installed SDK that lacks training sessions rather than replacing it, so other
+    # tests in the same session still import its real modules.
+    try:
+        import sagemaker.train as train
+    except Exception:
+        train = types.ModuleType("sagemaker.train")
+        sagemaker = types.ModuleType("sagemaker")
+        sagemaker.train = train
+        sys.modules["sagemaker"] = sagemaker
+        sys.modules["sagemaker.train"] = train
     train.training_session = training_session
-
-    sagemaker = types.ModuleType("sagemaker")
-    sagemaker.train = train
-
-    sys.modules["sagemaker"] = sagemaker
-    sys.modules["sagemaker.train"] = train
     sys.modules["sagemaker.train.training_session"] = training_session
 
 

@@ -275,6 +275,11 @@ rollout = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
+sagemaker-mtrl = [
+    { name = "aiohttp" },
+    { name = "bedrock-agentcore" },
+    { name = "sagemaker-train" },
+]
 server = [
     { name = "bedrock-agentcore" },
 ]
@@ -385,10 +390,12 @@ requires-dist = [
     { name = "agentcore-rl-toolkit", extras = ["rollout", "gateway"], marker = "extra == 'tinker-skyrl'" },
     { name = "agentcore-rl-toolkit", extras = ["rollout", "gateway"], marker = "extra == 'verl'" },
     { name = "agentcore-rl-toolkit", extras = ["server"], marker = "extra == 'a2a-server'" },
+    { name = "agentcore-rl-toolkit", extras = ["server"], marker = "extra == 'sagemaker-mtrl'" },
     { name = "agentcore-rl-toolkit", extras = ["server", "rollout"], marker = "extra == 'core'" },
     { name = "aiobotocore", marker = "extra == 'rollout'", specifier = ">=3.9.2" },
     { name = "aiohttp", marker = "extra == 'gateway'", specifier = ">=3.9" },
     { name = "aiohttp", marker = "extra == 'rollout'", specifier = ">=3.9" },
+    { name = "aiohttp", marker = "extra == 'sagemaker-mtrl'", specifier = ">=3.9" },
     { name = "aiohttp", marker = "extra == 'verl'", specifier = ">=3.9" },
     { name = "backoff", marker = "extra == 'rollout'" },
     { name = "bedrock-agentcore", marker = "extra == 'server'", specifier = ">=1.23.1" },
@@ -409,6 +416,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "qwen-vl-utils", marker = "extra == 'verl'" },
     { name = "ray", marker = "extra == 'verl'" },
+    { name = "sagemaker-train", marker = "extra == 'sagemaker-mtrl'", specifier = ">=1.27.0,<2" },
     { name = "tinker", marker = "extra == 'tinker-api'", specifier = "==0.30.1" },
     { name = "tinker", marker = "extra == 'tinker-skyrl'", specifier = "==0.24.1" },
     { name = "tokenizers", marker = "extra == 'gateway'", specifier = ">=0.22.2" },
@@ -420,7 +428,7 @@ requires-dist = [
     { name = "verl", marker = "extra == 'verl'", specifier = "==0.9.0" },
     { name = "vllm", marker = "extra == 'verl'", specifier = "==0.24.0" },
 ]
-provides-extras = ["core", "server", "rollout", "dev", "gateway", "tinker-api", "tinker-skyrl", "a2a-server", "a2a", "verl"]
+provides-extras = ["core", "server", "rollout", "dev", "gateway", "tinker-api", "tinker-skyrl", "sagemaker-mtrl", "a2a-server", "a2a", "verl"]
 
 [package.metadata.requires-dev]
 sagemaker-integration = [
@@ -7160,7 +7168,7 @@ wheels = [
 
 [[package]]
 name = "sagemaker-core"
-version = "2.24.0"
+version = "2.27.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -7191,9 +7199,9 @@ dependencies = [
     { name = "tblib" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/87/06/7ebc922acb484ec27374e5d9974fc879545d78d79e51c5b6dacfb7f250d2/sagemaker_core-2.24.0.tar.gz", hash = "sha256:63127df4cbb481f8ca12921e87b429ab3882faec36e388f9d70d49cdd14bc655", size = 1135442, upload-time = "2026-10-07T20:28:11.348Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/14/ee24fd3fde6f6386b41afee8e8562f09678fdfc3dc8d4ee021330008bfb1/sagemaker_core-2.27.0.tar.gz", hash = "sha256:45b29061776f33c5179063e92a0d1123f58b71efecac73d20da42505b1cfd151", size = 1152426, upload-time = "2026-10-21T20:59:40.455Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/ba/4cdf827b0f6267910c096ad6e2b00cd801d3d0102950f1146fb462b210bb/sagemaker_core-2.24.0-py3-none-any.whl", hash = "sha256:df988cb957df5c90fa014d82488071506e1b57d96d147298e1b69f89f0408a6e", size = 1384371, upload-time = "2026-10-07T20:28:09.92Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/fd/1906a96e2f7a622af6e272651fe5c4c6f5b5c033aecc6fc7b5f76de1b49e/sagemaker_core-2.27.0-py3-none-any.whl", hash = "sha256:62e5b4e2296dd26c042f28d26b9292501cdcf0c83a02656e280d61f132114312", size = 1400653, upload-time = "2026-10-21T20:59:38.924Z" },
 ]
 
 [[package]]
@@ -7211,7 +7219,7 @@ wheels = [
 
 [[package]]
 name = "sagemaker-train"
-version = "1.24.0"
+version = "1.27.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "graphene" },
@@ -7227,9 +7235,9 @@ dependencies = [
     { name = "tblib" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/01/e348c7ddb707c32b128b8d018b53c33c03147a02797346349c599fba7f54/sagemaker_train-1.24.0.tar.gz", hash = "sha256:627ce100092bfd2afc6c354f1ef28b11d4faec4014e02239e6fb58a3f526e9ed", size = 382573, upload-time = "2026-10-07T21:03:06.435Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/c6/61c76148c266b4d04b00f21c8891c62084eaa3fc096e71fa68f7d8920039/sagemaker_train-1.27.0.tar.gz", hash = "sha256:53aca8c0b9009ae17a7b2af52eee59e9e5d6b9675964b35f426c1b45cd5cbb79", size = 474588, upload-time = "2026-10-21T21:40:09.764Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f0/51/911166a840f85dfc48419c68e44c5a1ca4a638d11e1922f94119851fac1d/sagemaker_train-1.24.0-py3-none-any.whl", hash = "sha256:75ab696ad79abf112d095ccdce0dec0f157214cf60c95c8a184e6185aecf671a", size = 460894, upload-time = "2026-10-07T21:03:04.861Z" },
+    { url = "https://files.pythonhosted.org/packages/57/28/f3555163870a0f2985e50f2e0d50e184202ef892dbc2d1112510dde1fc7f/sagemaker_train-1.27.0-py3-none-any.whl", hash = "sha256:b5974e537b6436ebac906de81dd3dd7bc49097d9aed8791649bb631a586682de", size = 562826, upload-time = "2026-10-21T21:40:07.884Z" },
 ]
 
 [[package]]
