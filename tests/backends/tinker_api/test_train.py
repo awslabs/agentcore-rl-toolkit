@@ -36,7 +36,9 @@ async def test_processing_error_drains_other_rollouts_before_raising(rollout_kwa
 
     with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake_rollout):
         with pytest.raises(ValueError, match="broken processing code"):
-            await collect_batch(SimpleNamespace(group_size=2), None, None, [{}], **rollout_kwargs)
+            await collect_batch(
+                SimpleNamespace(group_size=2, rollout_concurrency=None), None, None, [{}], **rollout_kwargs
+            )
     assert finished == [1]
 
 
@@ -221,33 +223,3 @@ async def test_training_concurrency_preserves_groups_and_drains_failures(rollout
     assert peak == 2
     assert groups == [[(0, 0), (0, 1), (0, 2)], [(1, 3), (1, 4), (1, 5)]]
     assert sorted(seen) == list(range(6))
-
-
-@pytest.mark.asyncio
-async def test_evaluation_reuses_failures_and_scores_without_resampling(tmp_path, rollout_kwargs):
-    cached = [
-        {"input_index": 0, "rollout_id": "old0", "reward": 0.0, "truncated": False, "error": "failed"},
-        {"input_index": 2, "rollout_id": "old2", "reward": 1.0, "truncated": True, "error": None},
-    ]
-    fake = AsyncMock(return_value=Episode("new1", 0.5, []))
-    cfg = SimpleNamespace(output_dir=str(tmp_path), evaluation_batch_size=2, evaluation_temperature=1)
-    with patch("agentcore_rl_toolkit.backends.tinker_api.train.rollout", fake):
-        metrics = await evaluate(cfg, None, None, [{}, {}, {}], 0, completed=cached, **rollout_kwargs)
-    assert fake.await_count == 1
-    assert fake.await_args.args[-2:] == (1, 1)
-    assert metrics["eval/reward_mean"] == 0.5
-    assert metrics["eval/episodes"] == 3
-    assert metrics["eval/failed_episodes"] == metrics["eval/truncated_episodes"] == 1
-    assert metrics["eval/reused_episodes"] == 2
-    rows = [json.loads(line) for line in (tmp_path / "evaluation-0000.jsonl").read_text().splitlines()]
-    assert sorted(r["input_index"] for r in rows) == [0, 1, 2]
-
-
-@pytest.mark.parametrize("indices", [[0, 0], [-1], [3], [True]])
-@pytest.mark.asyncio
-async def test_evaluation_rejects_invalid_reused_indices(tmp_path, indices, rollout_kwargs):
-    cfg = SimpleNamespace(output_dir=str(tmp_path), evaluation_batch_size=2, evaluation_temperature=1)
-    with pytest.raises(ValueError, match="unique and within"):
-        await evaluate(
-            cfg, None, None, [{}, {}, {}], 0, completed=[{"input_index": i} for i in indices], **rollout_kwargs
-        )
