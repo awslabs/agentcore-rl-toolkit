@@ -26,4 +26,5 @@ The rollout gateway's response-schema registry
 (src/agentcore_rl_toolkit/rollout_gateway/response_schemas.py) vendors the
 response-schema dicts from trl/chat_template_utils.py and derives its
 chat-template hash table from trl/chat_templates/*.jinja (baseline commit
-7073af94).
+7073af94), and its new-style response-template dicts from the same file
+(baseline commit 6d6901c5).

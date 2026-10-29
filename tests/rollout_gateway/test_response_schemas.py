@@ -7,10 +7,14 @@ canned. Template-hash detection is covered by test_template_hashes_live.py, so
 tests assign the schema directly.
 """
 
-from transformers.utils.chat_parsing_utils import recursive_parse
+import pytest
 
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
 from agentcore_rl_toolkit.rollout_gateway.response_schemas import _TEMPLATE_HASHES, RESPONSE_SCHEMAS
+
+recursive_parse = pytest.importorskip(
+    "transformers.utils.chat_parsing_utils", reason="transformers >= 5.15 removed the legacy schema parser"
+).recursive_parse
 
 TOOLS = [{"type": "function", "function": {"name": "calculator", "parameters": {}}}]
 

@@ -14,12 +14,24 @@ A schema is pure data: the parsing engine is transformers'
 ``content``, and ``tool_calls`` in one pass, ordered by the schema's anchored regex —
 so a literal ``<tool_call>`` inside a think block never corrupts the split. Note for
 schema authors: transformers >= 5.13 replaces this legacy ``response_schema`` format
-with the region-based ``response_template`` format (and a ``prefix=`` argument);
-model repos are expected to eventually ship those in ``tokenizer_config.json``, at
-which point this vendored registry becomes a fallback for models that haven't.
+with the region-based ``response_template`` format (and a ``prefix=`` argument), and
+transformers 5.15 removes the legacy engine.
+
+``RESPONSE_TEMPLATES`` holds the new-style templates, vendored from the same TRL file
+at commit ``6d6901c5``. ``HfTemplateRenderer`` uses a tokenizer's own
+``response_template`` when its repo ships one, then these templates on transformers
+>= 5.13, and the legacy schemas only on older versions.
 """
 
 import hashlib
+
+import transformers
+from packaging.version import Version
+
+#: New-style ``response_template`` parsing (with ``parse_response(prefix=...)``).
+SUPPORTS_RESPONSE_TEMPLATE = Version(transformers.__version__) >= Version("5.13.0.dev0")
+#: ``parse_response(tools=...)`` types tool-call arguments from the tool's JSON schema.
+SUPPORTS_PARSE_RESPONSE_TOOLS = Version(transformers.__version__) >= Version("5.15.0")
 
 # --- Schema dicts (vendored verbatim from TRL) -------------------------------------
 
@@ -175,8 +187,146 @@ GPTOSS_SCHEMA = {
 RESPONSE_SCHEMAS: dict[str, dict] = {
     "qwen3": QWEN3_SCHEMA,
     "qwen3_5": QWEN3_5_SCHEMA,
+    "nemotron_3": QWEN3_5_SCHEMA,
     "glm4moe": GLM4MOE_SCHEMA,
     "gptoss": GPTOSS_SCHEMA,
+}
+
+# --- Response templates (vendored from TRL, new-style) ------------------------------
+
+_XML_INLINE_VALUE_PARSER = (
+    {"name": "text"} if SUPPORTS_PARSE_RESPONSE_TOOLS else {"name": "json", "args": {"allow_non_json": True}}
+)
+
+QWEN3_TEMPLATE = {
+    "defaults": {"role": "assistant"},
+    "start_anchor": "<|im_start|>assistant\n",
+    "fields": {
+        "reasoning_content": {
+            "open": "<think>",
+            "close_pattern": r"</think>\s*",
+            "content": "text",
+        },
+        "tool_calls": {
+            "open": "<tool_call>",
+            "close_pattern": r"</tool_call>\s*",
+            "repeats": True,
+            "content": "json",
+            "transform": {"type": "function", "function": "{content}"},
+        },
+        "content": {
+            "close_pattern": r"<\|im_end\|>\s*",
+            "content": "text",
+        },
+    },
+}
+
+QWEN3_5_TEMPLATE = {
+    "defaults": {"role": "assistant"},
+    "start_anchor": "<|im_start|>assistant\n",
+    "fields": {
+        "reasoning_content": {
+            "open": "<think>",
+            "close_pattern": r"</think>\s*",
+            "content": "text",
+        },
+        "tool_calls": {
+            "open_pattern": r"<tool_call>\s*<function=(?P<name>[^\n>]+)>",
+            "close_pattern": r"</tool_call>\s*",
+            "repeats": True,
+            "content": "xml-inline",
+            "content_args": {
+                "tag_pattern": r"<parameter=(?P<key>[^>\n]+)>\s*(?P<value>.*?)\s*</parameter>",
+                "value_parser": _XML_INLINE_VALUE_PARSER,
+            },
+            "transform": {"type": "function", "function": {"name": "{name}", "arguments": "{content}"}},
+        },
+        "content": {
+            "close_pattern": r"<\|im_end\|>\s*",
+            "content": "text",
+        },
+    },
+}
+
+NEMOTRON_3_TEMPLATE = {
+    "defaults": {"role": "assistant"},
+    "start_anchor_pattern": r"<\|im_start\|>assistant\n<think>(?:\n|</think>)?",
+    "fields": {
+        "reasoning_content": {
+            "open_pattern": r"(?=[\s\S]*?</think>)",
+            "close_pattern": r"</think>\s*",
+            "content": "text",
+        },
+        "tool_calls": QWEN3_5_TEMPLATE["fields"]["tool_calls"],
+        "content": {
+            "close_pattern": r"<\|im_end\|>\s*",
+            "content": "text",
+        },
+    },
+}
+
+GLM4MOE_TEMPLATE = {
+    "defaults": {"role": "assistant"},
+    "start_anchor": "<|assistant|>",
+    "fields": {
+        "reasoning_content": {
+            "open": "<think>",
+            "close_pattern": r"</think>\s*",
+            "content": "text",
+        },
+        "tool_calls": {
+            "open_pattern": r"<tool_call>(?P<name>\S+)\n?",
+            "close_pattern": r"</tool_call>\s*",
+            "repeats": True,
+            "content": "xml-inline",
+            "content_args": {
+                "tag_pattern": r"<arg_key>(?P<key>[^<]+)</arg_key>\s*\n<arg_value>(?P<value>.*?)</arg_value>",
+                "value_parser": _XML_INLINE_VALUE_PARSER,
+            },
+            "transform": {"type": "function", "function": {"name": "{name}", "arguments": "{content}"}},
+        },
+        "content": {
+            "close_pattern": r"<\|user\|>\s*|$",
+            "content": "text",
+        },
+    },
+}
+
+GPTOSS_TEMPLATE = {
+    "defaults": {"role": "assistant"},
+    "start_anchor": "<|start|>assistant",
+    "fields": {
+        "thinking": {
+            "open": "<|channel|>analysis<|message|>",
+            "close_pattern": r"<\|end\|>\s*",
+            "content": "text",
+        },
+        "content": {
+            "open": "<|channel|>final<|message|>",
+            "close_pattern": r"<\|return\|>\s*",
+            "content": "text",
+        },
+        "tool_calls": {
+            # Local change: also accept the channel-line recipient the model generates
+            # (see _GPTOSS_TOOLCALL_RENDER_FIXED below), not only the rendered role-header form.
+            "open_pattern": (
+                r"(?|<\|channel\|>(?:commentary|analysis)\s+to=functions\.(?P<name>[a-zA-Z0-9_.-]+)\s+(?:code|json)<\|message\|>"
+                r"|to=functions\.(?P<name>\S+?)<\|channel\|>commentary\s+json<\|message\|>)"
+            ),
+            "close_pattern": r"<\|call\|>\s*",
+            "repeats": True,
+            "content": "json",
+            "transform": {"type": "function", "function": {"name": "{name}", "arguments": "{content}"}},
+        },
+    },
+}
+
+RESPONSE_TEMPLATES: dict[str, dict] = {
+    "qwen3": QWEN3_TEMPLATE,
+    "qwen3_5": QWEN3_5_TEMPLATE,
+    "nemotron_3": NEMOTRON_3_TEMPLATE,
+    "glm4moe": GLM4MOE_TEMPLATE,
+    "gptoss": GPTOSS_TEMPLATE,
 }
 
 # --- Chat-template detection --------------------------------------------------------
@@ -195,9 +345,9 @@ _TEMPLATE_HASHES: dict[str, str] = {
     "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80": "qwen3_5",  # Qwen3.5 (nothink)
     "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715": "qwen3_5",  # Qwen3.5 (think)
     "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259": "qwen3_5",  # Qwen3.6
-    "ab7813c3abdd9cb655905a410728b26c7884eca45ddfab8d9f931553485a7862": "qwen3_5",  # Nemotron-3 Nano
-    "575fb74f54ed264df9047d0ecce3c98938aae953fb4f50356675706264cbb68a": "qwen3_5",  # Nemotron-3 Super
-    "82753bef5cedc4932c1ed509b5c9a12be680fd86d1adb65bc3f7398d11c8eebc": "qwen3_5",  # Nemotron-3 Ultra
+    "ab7813c3abdd9cb655905a410728b26c7884eca45ddfab8d9f931553485a7862": "nemotron_3",  # Nemotron-3 Nano
+    "575fb74f54ed264df9047d0ecce3c98938aae953fb4f50356675706264cbb68a": "nemotron_3",  # Nemotron-3 Super
+    "82753bef5cedc4932c1ed509b5c9a12be680fd86d1adb65bc3f7398d11c8eebc": "nemotron_3",  # Nemotron-3 Ultra
     # Local additions without TRL equivalents; keep below the vendored entries.
     # Qwen3-Coder uses Qwen3.5's XML tool-call syntax.
     "5a38bfa05833266240066aedc497decc9b00cc0d3e3b8cceea98cf530196ab06": "qwen3_5",  # Qwen3-Coder

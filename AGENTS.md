@@ -175,9 +175,12 @@ package exports are loaded on first access. The gateway lives behind extras:
   + `jmespath` + `jinja2`.
 - Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
   lookup in `rollout_gateway/response_schemas.py`), `HfTemplateRenderer` derenders the
-  whole output in one pass via `tokenizer.parse_response(text, schema=...)` — reasoning,
-  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6,
-  GLM4-MoE, GPT-OSS, Nemotron-3; schemas vendored from huggingface/trl, see NOTICE). A
+  whole output in one pass via `tokenizer.parse_response` — reasoning, text, and tool
+  calls in the model family's actual format (Qwen2.5/3/3.5/3.6, GLM4-MoE, GPT-OSS,
+  Nemotron-3; vendored from huggingface/trl, see NOTICE). On transformers >= 5.13 it
+  uses a new-style `response_template` (the tokenizer's own, else the vendored one) with
+  `prefix=` set to the generation prompt and, on >= 5.15, `tools=` to type arguments;
+  older versions use the legacy schemas (transformers 5.15 removed their engine). A
   parse failure degrades to raw text with `ill_formed=True`, never an exception.
   Unrecognized templates fall back to a `</think>` split for tool-free parsing, but
   tool-bearing requests are **rejected** (there is no implicit tool parser — the
@@ -307,11 +310,13 @@ cannot work; failures surface as rollouts scored `0.0`, not as a crash, because
 | This repo | upstream source | Baseline commit |
 |---|---|---|
 | `rollout_gateway/response_schemas.py` | `trl/chat_template_utils.py` (schema dicts) + `trl/chat_templates/*.jinja` (hash table) | `7073af94` |
+| `rollout_gateway/response_schemas.py` (`RESPONSE_TEMPLATES`) | `trl/chat_template_utils.py` (new-style `*_template` dicts) | `6d6901c5` |
 
 For `response_schemas.py`, re-sync means updating the schema dicts and recomputing the
 sha256 hashes of the covered chat templates — preserving the marked local-additions
 block at the end of `_TEMPLATE_HASHES` (templates with no TRL equivalent, e.g.
-Qwen3-Coder → `qwen3_5`). Bump the baseline commit here when you re-sync.
+Qwen3-Coder → `qwen3_5`) and the marked local change in `GPTOSS_TEMPLATE`. Bump the
+baseline commit here when you re-sync.
 
 ### slime backend (`backends/slime/`)
 
