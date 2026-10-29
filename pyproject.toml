@@ -71,6 +71,14 @@ tinker_skyrl = [
     "agentcore-rl-toolkit[rollout,gateway]",
     "tinker==0.24.1",
 ]
+sagemaker_mtrl = [
+    # Agent-side: `runtime.sagemaker_mtrl` serves SageMaker MTRL requests through a loopback forwarder.
+    # Bounded because it mirrors SDK behavior without a public API; tests/runtime/test_sagemaker_rft.py
+    # checks the mirror against the installed SDK before the bound is raised.
+    "agentcore-rl-toolkit[server]",
+    "aiohttp>=3.9",
+    "sagemaker-train>=1.27.0,<2",
+]
 a2a-server = [
     "agentcore-rl-toolkit[server]",
     "a2a-sdk[http-server]>=1.0.1,<2.0",

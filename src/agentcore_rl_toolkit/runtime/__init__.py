@@ -7,6 +7,7 @@ _EXPORTS = {
     "AgentCoreHttpClient": ".client",
     "InvocationHandle": ".client",
     "InvocationError": ".client",
+    "sagemaker_mtrl": ".sagemaker_mtrl",
 }
 
 __all__ = list(_EXPORTS)
