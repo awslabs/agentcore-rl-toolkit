@@ -1,4 +1,5 @@
-# GRPO training — rollout gateway + SageMaker Training Sessions
+# GRPO / DAPO training — rollout gateway + SageMaker Training Sessions
+# Both train_grpo.py and train_dapo.py read this file; each ignores keys it does not use.
 
 # --- AWS resources (required) ---
 role_arn: "arn:aws:iam::<account-id>:role/<your-sagemaker-role>"
@@ -51,3 +52,8 @@ acr_tps_limit: 5
 # --- Logging ---
 wandb_project: ""
 wandb_run_name: ""  # defaults to the SageMaker training session name
+
+# --- DAPO (train_dapo.py only; train_grpo.py ignores these) ---
+clip_low_threshold: 0.8    # PPO ratio lower bound, 1 - eps_low
+clip_high_threshold: 1.28  # PPO ratio upper bound, 1 + eps_high (Clip-Higher)
+max_num_gen_batches: 10    # dynamic sampling: max generation batches per step (0 = no cap)

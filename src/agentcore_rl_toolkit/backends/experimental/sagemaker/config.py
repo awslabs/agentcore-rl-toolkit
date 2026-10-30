@@ -58,9 +58,15 @@ class Config:
     rollout_log_path: str = ""  # JSONL file for per-rollout diagnostics; auto-named if empty
 
 
-def load_config(path: str) -> Config:
+def load_config(path: str, config_cls: type[Config] = Config) -> Config:
+    """Load a YAML file into ``config_cls``: ``Config``, or a recipe's subclass that adds fields.
+
+    Keys that ``config_cls`` does not define are ignored, so one YAML file can serve several
+    recipes (e.g. ``train_grpo`` skips the fields only ``train_dapo`` reads). The return type
+    is annotated as ``Config``; callers passing a subclass narrow it with ``isinstance``.
+    """
     with open(path) as f:
         raw: dict = yaml.safe_load(f) or {}
 
-    fields = Config.__dataclass_fields__
-    return Config(**{k: v for k, v in raw.items() if k in fields})
+    fields = config_cls.__dataclass_fields__
+    return config_cls(**{k: v for k, v in raw.items() if k in fields})

@@ -48,3 +48,15 @@ cp config.yaml.example config.yaml
 cd src/agentcore_rl_toolkit/backends/experimental/sagemaker
 python train_grpo.py --config config.yaml
 ```
+
+To train with DAPO instead, run `train_dapo.py` with the same config:
+
+```bash
+python train_dapo.py --config config.yaml
+```
+
+`train_dapo.py` is the GRPO loop plus dynamic sampling (each step rolls out batches of
+prompts and keeps only groups whose rewards differ, until `batch_size` groups are kept) and
+Clip-Higher (`clip_low_threshold` / `clip_high_threshold`). Its extra settings are in the
+DAPO section of `config.yaml.example`. Each step logs a `sampling:` line with the number of
+generation batches and the filtered fraction.
