@@ -79,6 +79,7 @@ def validate(args: Namespace, *, rollout: bool = False) -> None:
         and args.custom_loss_function_path == LOSS_PATH,
         "--rollout-top-p 1.0 and --rollout-top-k -1": args.rollout_top_p == 1.0 and args.rollout_top_k == -1,
         "no --allgather-cp": not getattr(args, "allgather_cp", False),
+        "--entropy-coef 0": not getattr(args, "entropy_coef", 0.0),
     }
     if rollout:
         checks[f"{SAMPLES_ENV}=1 in the job's runtime environment"] = samples_enabled()
@@ -232,7 +233,7 @@ def score_centering_loss(args: Namespace, batch: dict, logits, sum_of_sample_mea
         unconcat_tokens=batch["unconcat_tokens"],
         total_lengths=batch["total_lengths"],
         response_lengths=batch["response_lengths"],
-        with_entropy=True,
+        with_entropy=False,
     )
     log_probs = torch.cat(out["log_probs"], dim=0)
     score = torch.cat(_centered_scores(args, batch, logits), dim=0)
@@ -241,13 +242,8 @@ def score_centering_loss(args: Namespace, batch: dict, logits, sum_of_sample_mea
 
     # Zero-valued surrogate whose gradient is −A·∇c.
     pg_loss = aggregate(-advantages * (score - score.detach()))
-    entropy_loss = aggregate(torch.cat(out["entropy"], dim=0))
-    loss = pg_loss - args.entropy_coef * entropy_loss
-    metrics = {
-        "pg_loss": pg_loss.detach(),
-        "entropy_loss": entropy_loss.detach(),
-        "sfc_centered_score": sum_of_sample_mean(score.detach()),
-    }
+    loss = pg_loss
+    metrics = {"pg_loss": pg_loss.detach(), "sfc_centered_score": sum_of_sample_mean(score.detach())}
     old_log_probs = batch["rollout_log_probs"] if args.use_rollout_logprobs else batch.get("log_probs")
     if old_log_probs:
         metrics["ppo_kl"] = sum_of_sample_mean(torch.cat(old_log_probs, dim=0) - log_probs.detach())
