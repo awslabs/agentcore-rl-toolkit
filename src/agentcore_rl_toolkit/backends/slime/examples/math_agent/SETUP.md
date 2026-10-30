@@ -42,7 +42,8 @@ bash train.sh
 loss. SGLang draws the samples through the `sglang_token_samples` plugin, registered as a
 `sglang.srt.plugins` entry point (reinstall the package after pulling).
 
-Train with [`train_sfc.sh`](train_sfc.sh) instead of `train.sh`. It launches slime through
+Train with [`train_sfc.sh`](train_sfc.sh) instead of `train.sh`. It runs slime's `train_async.py` (separate
+`TRAINER_GPUS` and `ROLLOUT_GPUS`) through
 `python3 -m agentcore_rl_toolkit.backends.slime.train`, which registers the
 `--sfc-num-auxiliary-token-samples`, `--sfc-kl-beta`, and `--sfc-loss-agg-mode` flags, and
 sets the loss, the init hook, and `AGENTCORE_SGLANG_TOKEN_SAMPLES=1` for the SGLang engines.

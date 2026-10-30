@@ -1,6 +1,7 @@
 #!/bin/bash
 # GSM8K with slime + ACR rollout gateway, trained with score function centering
-# (Tinker's StableReinforce loss; see ../../integration/score_centering.py).
+# (Tinker's StableReinforce loss; see ../../integration/score_centering.py), with
+# train_async.py: SGLang generates rollout r+1 while Megatron trains on rollout r.
 set -euo pipefail
 
 # === Paths (set these via env) ===
@@ -18,7 +19,10 @@ CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.0}"
 CKPTS_DIR="${CKPTS_DIR:-checkpoints/exp_agentcore_sfc}"
 rm -rf "${CKPTS_DIR}"
 
-NUM_GPUS="${NUM_GPUS:-8}"
+# Async training needs separate GPUs for Megatron and SGLang.
+TRAINER_GPUS="${TRAINER_GPUS:-4}"
+ROLLOUT_GPUS="${ROLLOUT_GPUS:-4}"
+NUM_GPUS=$((TRAINER_GPUS + ROLLOUT_GPUS))
 
 pkill -9 sglang 2>/dev/null || true
 ray stop --force 2>/dev/null || true
@@ -69,7 +73,7 @@ TRAIN_ENV_VARS_JSON="{\"CUDA_HOME\": \"${CUDA_HOME}\", \"CUDNN_HOME\": \"${CUDNN
 
 ray job submit --address="http://127.0.0.1:8265" \
   --runtime-env-json="${RUNTIME_ENV_JSON}" \
-  -- python3 -m agentcore_rl_toolkit.backends.slime.train ${SLIME_DIR}/train.py \
+  -- python3 -m agentcore_rl_toolkit.backends.slime.train ${SLIME_DIR}/train_async.py \
   "${MODEL_ARGS[@]}" \
   --hf-checkpoint ${MODEL_DIR} \
   --ref-load ${MODEL_DIR} \
@@ -106,8 +110,8 @@ ray job submit --address="http://127.0.0.1:8265" \
   --attention-dropout 0.0 \
   --hidden-dropout 0.0 \
   --attention-backend fused \
-  --actor-num-gpus-per-node ${NUM_GPUS} \
-  --colocate \
+  --actor-num-gpus-per-node ${TRAINER_GPUS} \
+  --rollout-num-gpus ${ROLLOUT_GPUS} \
   --train-env-vars "${TRAIN_ENV_VARS_JSON}" \
   --custom-generate-function-path \
       agentcore_rl_toolkit.backends.slime.integration.rollout.generate \
