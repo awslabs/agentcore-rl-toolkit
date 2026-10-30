@@ -43,6 +43,8 @@ from agentcore_rl_toolkit.rollout_gateway.sampling_backends.sglang_http import S
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.rollout_session.factory import make_session, resolve_backend
 
+from . import score_centering
+
 logger = logging.getLogger(__name__)
 
 _STATUS = {s.value: Sample.Status(s.value) for s in Sample.Status}
@@ -80,6 +82,10 @@ class AgentCoreRLService(metaclass=SingletonMeta):
     def __init__(self, args: Namespace) -> None:
         self.config = AgentCoreRLConfig.from_args(args)
         self.model_id = self.config.model_id or args.hf_checkpoint
+        self.num_auxiliary_token_samples, kl_beta = score_centering.sfc_settings(args)
+        self.require_sample_versions = kl_beta > 0
+        if self.num_auxiliary_token_samples:
+            score_centering.validate(args, rollout=True)
 
         tokenizer = load_tokenizer(args.hf_checkpoint, trust_remote_code=True)
         router_url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}"
@@ -102,16 +108,19 @@ class AgentCoreRLService(metaclass=SingletonMeta):
         logger.info("[agentcore] gateway=%s sglang=%s model_id=%s", self.base_url, router_url, self.model_id)
 
 
-async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, Any]) -> list[Sample]:
+async def generate(
+    args: Namespace, sample: Sample, sampling_params: dict[str, Any], evaluation: bool = False
+) -> list[Sample]:
     """Run one rollout on an ACR agent, returning one Sample per trajectory leaf."""
     service = AgentCoreRLService(args)
+    num_samples = 0 if evaluation else service.num_auxiliary_token_samples
     payload = _build_payload(sample)
     sid = str(uuid.uuid4())
     sample.session_id = sid
     # The session id doubles as the gateway's trajectory key, carried in the api-key slot.
     task = {**payload, "_config": {"base_url": service.base_url, "model_id": service.model_id, "api_key": sid}}
 
-    service.gateway.create_session(sid, sampling_defaults=sampling_params)
+    service.gateway.create_session(sid, sampling_defaults=sampling_params, num_auxiliary_token_samples=num_samples)
     try:
         result, error = await _run_agent(service, sid, task)
         if error:
@@ -120,10 +129,16 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
         records = await service.gateway.finish_session(sid, base_sample=BaseTrace(index=sample.index))
         records = [r for r in records if r.token_ids and r.response_length]
         if not records:
-            return [_aborted(sample, error or "agent produced no LLM turns")]
+            return [_aborted(sample, error or "agent produced no LLM turns", num_samples)]
 
         reward = _agent_reward(result) if error is None else 0.0
-        return [_to_sample(sample, r, reward) for r in records]
+        samples = [_to_sample(sample, r, reward) for r in records]
+        if num_samples:
+            for s, r in zip(samples, records, strict=True):
+                s.multimodal_train_inputs = score_centering.train_inputs(
+                    r, num_samples, require_versions=service.require_sample_versions
+                )
+        return samples
     finally:
         await service.gateway.drop_session(sid)
 
@@ -193,7 +208,7 @@ def _to_sample(base: Sample, record: TraceRecord, reward: float | None) -> Sampl
     )
 
 
-def _aborted(base: Sample, reason: str) -> Sample:
+def _aborted(base: Sample, reason: str, num_auxiliary_token_samples: int = 0) -> Sample:
     logger.warning("[agentcore] sample %s aborted: %s", base.index, reason)
     base.tokens = [0, 0]
     base.response = ""
@@ -205,4 +220,7 @@ def _aborted(base: Sample, reason: str) -> Sample:
     base.remove_sample = True
     base.status = Sample.Status.ABORTED
     base.metadata = {**(base.metadata or {}), "abort_reason": reason}
+    if num_auxiliary_token_samples:
+        # slime concatenates these across a micro-batch, so every sample needs them.
+        base.multimodal_train_inputs = score_centering.empty_train_inputs(1, num_auxiliary_token_samples)
     return base

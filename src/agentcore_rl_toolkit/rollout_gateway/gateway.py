@@ -19,7 +19,7 @@ from .adapters.common import BaseAdapter, _health
 from .adapters.openai import OpenAIAdapter
 from .linear import LinearHealer
 from .render import Renderer
-from .sampling_backends.base import SamplingBackend
+from .sampling_backends.base import SamplingBackend, supports_auxiliary_token_samples
 from .trace import BaseTrace, TraceRecord
 from .trajectory import TrajectoryManager
 
@@ -102,11 +102,20 @@ class RolloutGateway:
         *,
         sampling_defaults: dict | None = None,
         max_context_tokens: int = 0,
+        num_auxiliary_token_samples: int = 0,
     ) -> None:
         """Register a fresh per-sid session. Registers on every adapter so a turn on
-        any protocol under this sid finds its Session state."""
+        any protocol under this sid finds its Session state. ``num_auxiliary_token_samples > 0``
+        asks the backend for that many draws per output token (see ``SamplingBackend``)."""
+        if num_auxiliary_token_samples and not supports_auxiliary_token_samples(self.backend):
+            raise ValueError(f"{type(self.backend).__name__} cannot draw token samples")
         for adapter in self.adapters:
-            adapter.open_session(sid, sampling_defaults=sampling_defaults, max_context_tokens=max_context_tokens)
+            adapter.open_session(
+                sid,
+                sampling_defaults=sampling_defaults,
+                max_context_tokens=max_context_tokens,
+                num_auxiliary_token_samples=num_auxiliary_token_samples,
+            )
 
     async def finish_session(
         self,

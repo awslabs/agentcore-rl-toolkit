@@ -46,6 +46,7 @@ class Session:
 
     sampling_defaults: dict = dataclasses.field(default_factory=dict)
     max_context_tokens: int = 0
+    num_auxiliary_token_samples: int = 0
 
 
 @dataclasses.dataclass
@@ -236,6 +237,7 @@ class BaseAdapter:
         *,
         sampling_defaults: dict | None = None,
         max_context_tokens: int = 0,
+        num_auxiliary_token_samples: int = 0,
     ) -> None:
         """Register a fresh per-sid Session; sids must be unique."""
         if sid in self.store:
@@ -243,6 +245,7 @@ class BaseAdapter:
         self.store[sid] = Session(
             sampling_defaults=dict(sampling_defaults or {}),
             max_context_tokens=int(max_context_tokens or 0),
+            num_auxiliary_token_samples=num_auxiliary_token_samples,
         )
 
     async def shutdown_session(self, sid: str, *, wait_timeout: float = 5.0) -> None:
@@ -395,6 +398,9 @@ class BaseAdapter:
             if sid in self.closed:
                 return web.Response(status=503, text="session closed")
             sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
+            generate_kwargs = (
+                {"num_auxiliary_token_samples": s.num_auxiliary_token_samples} if s.num_auxiliary_token_samples else {}
+            )
             # Context-budget clamp (backend-neutral): an input that leaves less room
             # than the backend can sample (1 token, or a backend-declared
             # ``min_new_tokens`` floor) is an input-context error, rather than a
@@ -422,11 +428,11 @@ class BaseAdapter:
                         int(sampling_params.get("max_new_tokens", remaining)), remaining
                     )
                     turn = await self.backend.generate(
-                        prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=sid
+                        prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=sid, **generate_kwargs
                     )
             else:
                 turn = await self.backend.generate(
-                    prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=sid
+                    prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=sid, **generate_kwargs
                 )
 
             parsed = self.renderer.parse(turn.output_ids, tools_schema=tools_schema)

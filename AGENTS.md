@@ -136,10 +136,10 @@ sample-only backends like Tinker, which cannot render themselves.
 
 | Component | File | Role |
 |---|---|---|
-| `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`. Each training backend converts this to its native sample type in its own process. |
+| `TraceRecord` | `trace.py` | Torch-free output: `token_ids`, `loss_mask`, `logprobs`, `reward`, `rollout_id`, and per-token sampler draws (`auxiliary_token_samples`) when the backend makes them. Each training backend converts this to its native sample type in its own process. |
 | `TrajectoryManager` | `trajectory.py` | Per-session message **tree**. Handles multi-turn concatenation and parallel tool-call branches; re-tokenization drift splits records while preserving generated tokens (CLEAN / FORK). Tokenizer-free and torch-free. |
 | `Renderer` | `render.py` | Tokenization seam. `HfTemplateRenderer` (HF `apply_chat_template`), shared by all sampling backends. |
-| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`. Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`, `SageMakerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker and SageMaker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
+| `SamplingBackend` | `sampling_backends/` | The one per-engine seam: `token_ids -> token_ids + logprobs` as a `TurnRecord`, optionally with `num_auxiliary_token_samples` sampler draws per output token (`gateway.create_session(sid, num_auxiliary_token_samples=K)`; SGLang draws them through the `sglang_token_samples` plugin). Impls: `VllmHttpBackend`, `SglangHttpBackend`, `TinkerSdkBackend`, `SageMakerSdkBackend`. Placement rule: engine seams for independently reachable inference services (HTTP endpoints, hosted SDKs like Tinker and SageMaker) live here; seams over trainer-internal handles (e.g. `VerlSamplingBackend` over verl's Ray-based `LLMServerClient`) live with that trainer's integration under `backends/`. |
 | Adapters | `adapters/` | Wire-protocol translation: `OpenAIAdapter` (`/v1/chat/completions`), `AnthropicAdapter` (`/v1/messages`). An agent drives the gateway in its *native* protocol unmodified (just point `base_url` at it); both normalize to one canonical message form and share one `TrajectoryManager`. |
 | `RolloutGateway` | `gateway.py` | Assembles tokenizer + renderer + backend + adapters onto one aiohttp app sharing one `TrajectoryManager`. Session identity rides in the api-key / Bearer slot; `base_url` is a fixed gateway address (no per-session URLs). |
 | `GatewayServer` / `ThreadedGatewayServer` | `server.py` | Shared aiohttp lifecycle, optionally hosted on a background thread with its own event loop. Async rollout callers can retain separate serving-loop scheduling; verl uses `GatewayHandle` to submit session operations to that loop. |
@@ -345,6 +345,12 @@ via two hook entry points, requiring no changes to slime itself:
   and normalizes within each group's unique rollouts. Active only when
   `advantage_estimator` is in `(grpo, gspo, cispo, reinforce_plus_plus_baseline)` and
   `rewards_normalization=True`; returns identity otherwise.
+- `integration/score_centering.py` — optional score function centering ([Tinker's
+  StableReinforce](https://tinker-docs.thinkingmachines.ai/tinker/losses/stable-reinforce/))
+  from per-token SGLang draws. The draws ride `Sample.multimodal_train_inputs` to the
+  train actors. Its `--sfc-*` flags need the `backends/slime/train.py` entrypoint, which
+  runs slime's `train.py`/`train_async.py` with them registered. Setup:
+  `examples/math_agent/SETUP.md`.
 - `integration/rollout.py:_agent_reward` — rewards are agent-owned (scalar `{"reward": ...}`
   in the returned dict). `None` is returned when the agent omits it, signalling slime to
   fall back to its own `rm_hub`; a non-numeric reward or non-dict result raises (broken

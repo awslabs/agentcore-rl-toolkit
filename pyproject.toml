@@ -154,6 +154,10 @@ verl-megatron = [
 [project.urls]
 Homepage = "https://github.com/awslabs/agentcore-rl-toolkit"
 
+# Loaded by SGLang in each of its processes; no-op unless AGENTCORE_SGLANG_TOKEN_SAMPLES=1.
+[project.entry-points."sglang.srt.plugins"]
+agentcore_token_samples = "agentcore_rl_toolkit.rollout_gateway.sampling_backends.sglang_token_samples:register"
+
 [tool.uv]
 # Resolve incompatible extras and groups in separate forks of the lockfile.
 conflicts = [
