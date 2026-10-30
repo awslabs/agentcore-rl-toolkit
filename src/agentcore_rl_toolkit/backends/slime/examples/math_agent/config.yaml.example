@@ -18,10 +18,3 @@ rollout_session_backend:
 gateway_port: 9090                  # rollout gateway port
 max_rollout_time: 900               # per-session rollout timeout (s)
 tps_limit: 5                        # new rollout sessions per second
-
-# Score function centering (optional; see SETUP.md). Needs the train.sh flags and
-# environment listed there.
-# score_centering:
-#   num_auxiliary_token_samples: 8    # sampler draws per generated token
-#   kl_beta: 0.3                      # β₀ of the token-age-weighted sampler KL
-#   loss_agg_mode: token-mean         # or token-sum (verl's seq-mean-token-sum)

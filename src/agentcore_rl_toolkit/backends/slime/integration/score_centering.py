@@ -7,7 +7,7 @@ https://tinker-docs.thinkingmachines.ai/tinker/losses/stable-reinforce/
     --custom-megatron-init-path \
         agentcore_rl_toolkit.backends.slime.integration.score_centering.install
 
-    Config YAML keys (``--custom-config-path``):
+    ``--custom-config-path`` keys (``examples/math_agent/train_sfc.sh`` sets them):
         score_centering:
           num_auxiliary_token_samples: 8   # K sampler draws per generated token
           kl_beta: 0.3                     # β₀
