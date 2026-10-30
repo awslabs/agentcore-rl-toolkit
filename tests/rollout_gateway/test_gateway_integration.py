@@ -1,13 +1,14 @@
 """Integration tests for ``RolloutGateway`` — the assembled serving unit."""
 
 import asyncio
+import dataclasses
 import json
 from contextlib import asynccontextmanager
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from agentcore_rl_toolkit.rollout_gateway import BaseTrace, RolloutGateway
+from agentcore_rl_toolkit.rollout_gateway import AuxiliaryTokenSamples, BaseTrace, RolloutGateway
 from agentcore_rl_toolkit.rollout_gateway.render import ParsedOutput
 from agentcore_rl_toolkit.rollout_gateway.trajectory import TurnRecord
 
@@ -86,6 +87,27 @@ class FakeBackend:
             finish_reason="stop",
             output_log_probs=[-0.5] * len(out_ids),
         )
+
+
+class FakeSamplingBackend(FakeBackend):
+    """Also draws K extra tokens per output token when asked: row i = [token] * K."""
+
+    async def generate(
+        self,
+        *,
+        prompt_ids,
+        sampling_params,
+        session_id=None,
+        image_data=None,
+        video_data=None,
+        num_auxiliary_token_samples=0,
+    ):
+        turn = await super().generate(prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=session_id)
+        self.calls[-1]["num_auxiliary_token_samples"] = num_auxiliary_token_samples
+        if not num_auxiliary_token_samples:
+            return turn
+        draws = AuxiliaryTokenSamples(ids=[[t] * num_auxiliary_token_samples for t in turn.output_ids])
+        return dataclasses.replace(turn, output_auxiliary_token_samples=draws)
 
 
 def make_gateway(replies: list[str], **gateway_kwargs) -> tuple[RolloutGateway, FakeBackend]:
@@ -567,3 +589,39 @@ async def test_adapter_subset_mounts_only_requested_routes():
         assert resp.status == 200
         resp = await client.post("/v1/messages", json=body, headers=bearer("s"))
         assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_token_samples_follow_trained_tokens():
+    renderer = FakeRenderer()
+    backend = FakeSamplingBackend(renderer, ["first reply", "second reply"])
+    gateway = RolloutGateway(backend=backend, renderer=renderer, tokenizer=renderer)
+    sid = "ep1"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid, num_auxiliary_token_samples=3)
+        messages = [{"role": "user", "content": "hi"}]
+        for _ in range(2):
+            resp = await client.post(
+                "/v1/chat/completions", json={"model": "m", "messages": messages}, headers=bearer(sid)
+            )
+            assert resp.status == 200
+            reply = (await resp.json())["choices"][0]["message"]
+            messages = messages + [reply, {"role": "user", "content": "more"}]
+        (rec,) = await gateway.finish_session(sid, base_sample=BaseTrace(rollout_id=sid))
+
+    assert [call["num_auxiliary_token_samples"] for call in backend.calls] == [3, 3]
+    response = rec.token_ids[-rec.response_length :]
+    covered = {}
+    for offset, samples in rec.auxiliary_token_samples:
+        for i, row in enumerate(samples.ids):
+            covered[offset + i] = row
+    # exactly the trained tokens carry samples, each drawn at that token's own position
+    assert sorted(covered) == [i for i, m in enumerate(rec.loss_mask) if m]
+    assert all(row == [response[i]] * 3 for i, row in covered.items())
+
+
+def test_token_samples_need_a_capable_backend():
+    gateway, _ = make_gateway(replies=[])
+    with pytest.raises(ValueError, match="FakeBackend cannot draw token samples"):
+        gateway.create_session("s", num_auxiliary_token_samples=2)

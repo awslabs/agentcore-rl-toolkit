@@ -34,3 +34,26 @@ cp config.yaml.example config.yaml
 ```bash
 bash train.sh
 ```
+
+## Score function centering
+
+[`score_centering.py`](../../integration/score_centering.py) implements
+[Tinker's StableReinforce](https://tinker-docs.thinkingmachines.ai/tinker/losses/stable-reinforce/)
+loss. SGLang draws the samples through the `sglang_token_samples` plugin, registered as a
+`sglang.srt.plugins` entry point (reinstall the package after pulling).
+
+1. Uncomment `score_centering` in `config.yaml`.
+2. In `train.sh`, add `"AGENTCORE_SGLANG_TOKEN_SAMPLES": "1"` to `RUNTIME_ENV_JSON`'s
+   `env_vars`, so the SGLang engines load the plugin, and replace the PPO flags
+   (`--eps-clip`, `--eps-clip-high`) with:
+
+   ```bash
+     --loss-type custom_loss \
+     --custom-loss-function-path \
+         agentcore_rl_toolkit.backends.slime.integration.score_centering.score_centering_loss \
+     --custom-megatron-init-path \
+         agentcore_rl_toolkit.backends.slime.integration.score_centering.install \
+   ```
+
+Sampling must be untruncated (`--rollout-top-p 1.0`, `--rollout-top-k -1`, and no
+`top_p`/`top_k` from the agent); the gateway fails turns sampled otherwise.
