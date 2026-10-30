@@ -14,7 +14,6 @@
         max_rollout_time: 1800
         tps_limit: 25                # new rollout sessions per second
         model_id: null               # defaults to args.hf_checkpoint
-        score_centering: {...}       # optional; see score_centering.py
 
 Each rollout runs ``{**metadata.payload, "_config": {base_url, model_id, api_key}}``
 in its own ``RolloutSession`` and reads a scalar ``reward`` from the returned dict.

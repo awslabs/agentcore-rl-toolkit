@@ -1,17 +1,13 @@
 """Score function centering (SFC) for slime, following Tinker's StableReinforce:
 https://tinker-docs.thinkingmachines.ai/tinker/losses/stable-reinforce/
 
-    --loss-type custom_loss \
-    --custom-loss-function-path \
-        agentcore_rl_toolkit.backends.slime.integration.score_centering.score_centering_loss
-    --custom-megatron-init-path \
-        agentcore_rl_toolkit.backends.slime.integration.score_centering.install
-
-    ``--custom-config-path`` keys (``examples/math_agent/train_sfc.sh`` sets them):
-        score_centering:
-          num_auxiliary_token_samples: 8   # K sampler draws per generated token
-          kl_beta: 0.3                     # β₀
-          loss_agg_mode: token-mean        # or token-sum (verl's seq-mean-token-sum)
+    python3 -m agentcore_rl_toolkit.backends.slime.train ${SLIME_DIR}/train.py ... \
+        --loss-type custom_loss \
+        --custom-loss-function-path \
+            agentcore_rl_toolkit.backends.slime.integration.score_centering.score_centering_loss \
+        --custom-megatron-init-path \
+            agentcore_rl_toolkit.backends.slime.integration.score_centering.install \
+        --sfc-num-auxiliary-token-samples 8 --sfc-kl-beta 0.3
 
 For a sampled token ``a`` with ``K`` draws ``v_k`` from the same sampler distribution:
 
@@ -48,24 +44,32 @@ _STATE = _TrainState()
 _ORIGINAL: dict[str, Any] = {}
 
 
+def add_arguments(parser):
+    """slime ``parse_args(add_custom_arguments=...)`` hook; see ``backends/slime/train.py``."""
+    group = parser.add_argument_group("score function centering")
+    group.add_argument("--sfc-num-auxiliary-token-samples", type=int, default=0, help="K sampler draws per token")
+    group.add_argument("--sfc-kl-beta", type=float, default=0.0, help="β₀ of the token-age-weighted sampler KL")
+    group.add_argument(
+        "--sfc-loss-agg-mode",
+        choices=("token-mean", "token-sum"),
+        default="token-mean",
+        help="per-rollout token mean, or token sum (verl's seq-mean-token-sum)",
+    )
+    return parser
+
+
 def sfc_settings(args: Namespace) -> tuple[int, float]:
-    """``(num_auxiliary_token_samples, kl_beta)`` from the ``score_centering`` config node."""
-    node = getattr(args, "score_centering", None) or {}
-    k, beta = node.get("num_auxiliary_token_samples", 0), node.get("kl_beta", 0.0)
-    if type(k) is not int or k < 0:  # noqa: E721 - reject bool
-        raise ValueError(f"score_centering.num_auxiliary_token_samples must be a non-negative integer, got {k!r}")
-    if isinstance(beta, bool) or not isinstance(beta, int | float) or beta < 0:
-        raise ValueError(f"score_centering.kl_beta must be a non-negative number, got {beta!r}")
-    return k, float(beta)
+    """``(num_auxiliary_token_samples, kl_beta)``; zeros when the flags are not registered."""
+    k, beta = getattr(args, "sfc_num_auxiliary_token_samples", 0), getattr(args, "sfc_kl_beta", 0.0)
+    if k < 0 or beta < 0:
+        raise ValueError("--sfc-num-auxiliary-token-samples and --sfc-kl-beta must be non-negative")
+    return k, beta
 
 
 def loss_reducer(args: Namespace, batch: dict, sum_of_sample_mean):
     """slime's per-rollout token mean, or a per-rollout token sum."""
-    mode = (getattr(args, "score_centering", None) or {}).get("loss_agg_mode", "token-mean")
-    if mode == "token-mean":
+    if getattr(args, "sfc_loss_agg_mode", "token-mean") == "token-mean":
         return sum_of_sample_mean
-    if mode != "token-sum":
-        raise ValueError(f"score_centering.loss_agg_mode must be token-mean or token-sum, got {mode!r}")
     from slime.backends.megatron_utils.cp_utils import get_sum_of_sample_mean
 
     return get_sum_of_sample_mean(

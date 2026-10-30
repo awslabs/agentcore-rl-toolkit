@@ -11,15 +11,6 @@ VAL_DATA_PATH="${VAL_DATA_PATH:-${TRAIN_DATA_PATH}}"
 MODEL_TYPE="${MODEL_TYPE:?Set MODEL_TYPE (slime model-arch name, e.g. qwen3-0.6B)}"
 CONFIG="${CONFIG:-$(dirname "$0")/config.yaml}"
 
-# Score centering settings, appended to a copy of the deployment config.
-SFC_CONFIG="$(mktemp --suffix=.yaml)"
-{ cat "${CONFIG}"; echo; cat; } > "${SFC_CONFIG}" <<'YAML'
-score_centering:
-  num_auxiliary_token_samples: 8    # sampler draws per generated token
-  kl_beta: 0.3                      # β₀ of the token-age-weighted sampler KL
-  loss_agg_mode: token-mean         # or token-sum (verl's seq-mean-token-sum)
-YAML
-
 # CUDA 13 only — cu12 is not supported.
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.0}"
 
@@ -78,7 +69,7 @@ TRAIN_ENV_VARS_JSON="{\"CUDA_HOME\": \"${CUDA_HOME}\", \"CUDNN_HOME\": \"${CUDNN
 
 ray job submit --address="http://127.0.0.1:8265" \
   --runtime-env-json="${RUNTIME_ENV_JSON}" \
-  -- python3 ${SLIME_DIR}/train.py \
+  -- python3 -m agentcore_rl_toolkit.backends.slime.train ${SLIME_DIR}/train.py \
   "${MODEL_ARGS[@]}" \
   --hf-checkpoint ${MODEL_DIR} \
   --ref-load ${MODEL_DIR} \
@@ -122,12 +113,15 @@ ray job submit --address="http://127.0.0.1:8265" \
       agentcore_rl_toolkit.backends.slime.integration.rollout.generate \
   --custom-reward-post-process-path \
       agentcore_rl_toolkit.backends.slime.integration.rewards.normalize_episode_rewards \
-  --custom-config-path ${SFC_CONFIG} \
+  --custom-config-path ${CONFIG} \
   --loss-type custom_loss \
   --custom-loss-function-path \
       agentcore_rl_toolkit.backends.slime.integration.score_centering.score_centering_loss \
   --custom-megatron-init-path \
       agentcore_rl_toolkit.backends.slime.integration.score_centering.install \
+  --sfc-num-auxiliary-token-samples 8 \
+  --sfc-kl-beta 0.3 \
+  --sfc-loss-agg-mode token-mean \
   --use-dynamic-batch-size \
   --save ${CKPTS_DIR} \
   --save-interval 100 \

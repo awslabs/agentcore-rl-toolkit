@@ -349,7 +349,9 @@ via two hook entry points, requiring no changes to slime itself:
 - `integration/score_centering.py` — optional score function centering ([Tinker's
   StableReinforce](https://tinker-docs.thinkingmachines.ai/tinker/losses/stable-reinforce/))
   from per-token SGLang draws. The draws ride `Sample.multimodal_train_inputs` to the
-  train actors. Setup: `examples/math_agent/SETUP.md`.
+  train actors. Its `--sfc-*` flags need the `backends/slime/train.py` entrypoint, which
+  runs slime's `train.py`/`train_async.py` with them registered. Setup:
+  `examples/math_agent/SETUP.md`.
 - `integration/rollout.py:_agent_reward` — rewards are agent-owned (scalar `{"reward": ...}`
   in the returned dict). `None` is returned when the agent omits it, signalling slime to
   fall back to its own `rm_hub`; a non-numeric reward or non-dict result raises (broken

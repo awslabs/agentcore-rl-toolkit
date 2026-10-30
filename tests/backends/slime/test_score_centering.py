@@ -6,6 +6,7 @@ slime's loss helpers below), so these tests run without the training stack.
 
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 from argparse import Namespace
@@ -25,7 +26,9 @@ from agentcore_rl_toolkit.rollout_gateway.sampling_backends.sglang_token_samples
 
 def _args(**kwargs):
     defaults = dict(
-        score_centering={"num_auxiliary_token_samples": 4, "kl_beta": 0.3},
+        sfc_num_auxiliary_token_samples=4,
+        sfc_kl_beta=0.3,
+        sfc_loss_agg_mode="token-mean",
         loss_type="custom_loss",
         custom_loss_function_path=score_centering.LOSS_PATH,
         rollout_top_p=1.0,
@@ -47,22 +50,22 @@ def test_sfc_settings_default_off():
     assert score_centering.sfc_settings(Namespace()) == (0, 0.0)
 
 
-def test_sfc_settings_reads_the_config_node():
+def test_sfc_settings_reads_the_flags():
     assert score_centering.sfc_settings(_args()) == (4, 0.3)
 
 
-@pytest.mark.parametrize(
-    "node, match",
-    [
-        ({"num_auxiliary_token_samples": True}, "num_auxiliary_token_samples"),
-        ({"num_auxiliary_token_samples": -1}, "num_auxiliary_token_samples"),
-        ({"num_auxiliary_token_samples": 2, "kl_beta": -0.1}, "kl_beta"),
-        ({"num_auxiliary_token_samples": 2, "kl_beta": "0.3"}, "kl_beta"),
-    ],
-)
-def test_sfc_settings_rejects_bad_values(node, match):
-    with pytest.raises(ValueError, match=match):
-        score_centering.sfc_settings(_args(score_centering=node))
+def test_flags_parse_into_settings():
+    parser = score_centering.add_arguments(argparse.ArgumentParser())
+    args = parser.parse_args(["--sfc-num-auxiliary-token-samples", "8", "--sfc-kl-beta", "0.3"])
+    assert score_centering.sfc_settings(args) == (8, 0.3)
+    assert args.sfc_loss_agg_mode == "token-mean"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--sfc-loss-agg-mode", "seq-mean-token-sum"])
+
+
+def test_sfc_settings_rejects_negative_values():
+    with pytest.raises(ValueError, match="non-negative"):
+        score_centering.sfc_settings(_args(sfc_kl_beta=-0.1))
 
 
 def test_validate_accepts_a_configured_run(monkeypatch):
@@ -76,11 +79,6 @@ def test_validate_lists_every_unmet_requirement(monkeypatch):
         score_centering.validate(_args(rollout_top_p=0.9, loss_type="policy_loss"), rollout=True)
     for needle in (SAMPLES_ENV, "--rollout-top-p", "--loss-type"):
         assert needle in str(excinfo.value)
-
-
-def test_loss_reducer_rejects_unknown_modes():
-    with pytest.raises(ValueError, match="loss_agg_mode"):
-        score_centering.loss_reducer(_args(score_centering={"loss_agg_mode": "seq-mean-token-sum"}), {}, None)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +378,7 @@ def test_loss_gradient_is_the_centered_score_gradient(fake_trainer, train_state)
 
     batch = _batch(torch)
     logits = torch.randn(1, sum(batch["total_lengths"]), 6, requires_grad=True)
-    args = _args(score_centering={"num_auxiliary_token_samples": 3})
+    args = _args(sfc_num_auxiliary_token_samples=3, sfc_kl_beta=0.0)
     loss, metrics = score_centering.score_centering_loss(args, batch, logits, _sum_of_sample_mean(batch))
     assert loss.item() == pytest.approx(0.0, abs=1e-6)  # zero-valued surrogate
     assert "sfc_kl_loss" not in metrics
@@ -398,7 +396,7 @@ def test_token_sum_drops_the_per_rollout_denominators(fake_trainer, train_state)
 
     batch = _batch(torch)
     logits = torch.randn(1, sum(batch["total_lengths"]), 6, requires_grad=True)
-    args = _args(score_centering={"num_auxiliary_token_samples": 3, "loss_agg_mode": "token-sum"})
+    args = _args(sfc_num_auxiliary_token_samples=3, sfc_kl_beta=0.0, sfc_loss_agg_mode="token-sum")
     loss, _ = score_centering.score_centering_loss(args, batch, logits, _sum_of_sample_mean(batch))
     loss.backward()
 
@@ -416,7 +414,7 @@ def test_kl_is_weighted_by_token_age(fake_trainer, train_state):
     train_state.push_steps.update({1: 1, 2: 5})  # version 1 is 4 steps old, version 2 is fresh
     batch = _batch(torch)
     logits = torch.randn(1, sum(batch["total_lengths"]), 6)
-    args = _args(score_centering={"num_auxiliary_token_samples": 3, "kl_beta": 0.4})
+    args = _args(sfc_num_auxiliary_token_samples=3, sfc_kl_beta=0.4)
     _, metrics = score_centering.score_centering_loss(args, batch, logits, _sum_of_sample_mean(batch))
 
     log_probs = torch.cat(
@@ -437,7 +435,7 @@ def test_kl_rejects_versions_without_a_recorded_push(fake_trainer, train_state):
     train_state.push_steps[1] = 0
     batch = _batch(torch)
     logits = torch.randn(1, sum(batch["total_lengths"]), 6)
-    args = _args(score_centering={"num_auxiliary_token_samples": 3, "kl_beta": 0.4})
+    args = _args(sfc_num_auxiliary_token_samples=3, sfc_kl_beta=0.4)
     with pytest.raises(RuntimeError, match=r"weight versions \[2\]"):
         score_centering.score_centering_loss(args, batch, logits, _sum_of_sample_mean(batch))
 
