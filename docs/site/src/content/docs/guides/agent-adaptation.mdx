@@ -114,8 +114,8 @@ class MyReward(RewardFunction):
 
 The container must implement the Runtime's
 [HTTP contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html):
-serve `/invocations` and `/ping` on port 8080. `AgentCoreRuntimeApp` provides
-these endpoints. The examples use ARM64 images built through the
+serve `/invocations` and `/ping` on port 8080 by default. `AgentCoreRuntimeApp`
+provides these endpoints. The examples use ARM64 images built through the
 [Python AgentCore CLI](https://github.com/aws/bedrock-agentcore-starter-toolkit) and CodeBuild.
 
 The Runtime must be able to reach the inference server or rollout gateway.

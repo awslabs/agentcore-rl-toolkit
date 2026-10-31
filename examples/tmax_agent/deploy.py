@@ -1,5 +1,13 @@
 """Deploy harness and task runtimes from a prepared manifest."""
 
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "agentcore-rl-toolkit==0.2.0",
+#     "boto3>=1.43.123",
+# ]
+# ///
+
 import argparse
 import json
 import time
@@ -11,7 +19,7 @@ import boto3
 from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 
 
-def ensure_runtime(client, name, image, role, network, env, *, runtime_arn=None, max_lifetime=3600):
+def ensure_runtime(client, name, image, role, network, env, *, runtime_arn=None, max_lifetime=3600, serving_port=None):
     desired = {
         "agentRuntimeArtifact": {"containerConfiguration": {"containerUri": image}},
         "roleArn": role,
@@ -21,6 +29,8 @@ def ensure_runtime(client, name, image, role, network, env, *, runtime_arn=None,
         "lifecycleConfiguration": {"idleRuntimeSessionTimeout": 300, "maxLifetime": max_lifetime},
         "platformVersion": "V2",
     }
+    if serving_port is not None:
+        desired["protocolConfiguration"]["port"] = serving_port
     if runtime_arn:
         runtime_id = runtime_arn.rsplit("/", 1)[-1]
         current = client.get_agent_runtime(agentRuntimeId=runtime_id)
@@ -93,6 +103,7 @@ def main():
             {},
             runtime_arn=task.get("runtime_arn"),
             max_lifetime=max(3600, int(task["agent_timeout"] + task["verifier_timeout"]) + 300),
+            serving_port=task.get("serving_port"),
         )
         args.manifest.write_text(json.dumps(manifest, indent=2) + "\n")
 

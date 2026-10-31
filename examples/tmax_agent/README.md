@@ -109,7 +109,7 @@ uv run --project examples/tmax_agent python examples/tmax_agent/prepare.py \
   --output examples/tmax_agent/manifest.json \
   /path/to/task-data/TASK_NAME
 
-uv run --project examples/tmax_agent python examples/tmax_agent/deploy.py \
+uv run --script examples/tmax_agent/deploy.py \
   --config /path/to/config.toml \
   --manifest examples/tmax_agent/manifest.json
 
@@ -122,3 +122,11 @@ uv run --project examples/tmax_agent python examples/tmax_agent/evaluate.py \
 
 Pass one or more downloaded task directories to `prepare.py`.
 Evaluation saves rewards, trajectories, and verifier output to `--output`.
+
+Deployment uses `uv run --script` to install a boto3 version with custom-port
+support independently of the evaluation environment's aiobotocore constraints.
+
+Task images run sandboxd on port 11000, leaving port 8080 available to the
+task's services.
+See the [custom serving port guide](../sandbox_quickstart/README.md#use-a-different-serving-port)
+for AgentCore's port constraints.

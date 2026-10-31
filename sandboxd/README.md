@@ -118,5 +118,6 @@ curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":
 curl -s -X POST localhost:8080/invocations -d '{"_agentcore_runtime":{"version":1,"operation":"get","invocation_id":"demo"}}'
 ```
 
-The HTTP address defaults to `0.0.0.0:8080`; `--listen` permits an alternate local
-test address. AgentCore deployments must keep port 8080.
+The HTTP address defaults to `0.0.0.0:8080`; `--listen` selects another address.
+See the [port configuration guide](../examples/sandbox_quickstart/README.md#use-a-different-serving-port)
+for AgentCore deployment settings.
