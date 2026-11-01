@@ -74,7 +74,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1 \
     actor_rollout_ref.actor.megatron.param_offload=false \
-    actor_rollout_ref.actor.megatron.grad_offload=true \
     actor_rollout_ref.actor.megatron.optimizer_offload=true \
     ++actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_cpu_offload=True \
     ++actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_offload_fraction=1.0 \

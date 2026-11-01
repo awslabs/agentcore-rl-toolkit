@@ -4,5 +4,3 @@ actor_rollout_ref:
       # Enabling offloading can reduce memory usage but increase update latency.
       param_offload: true
       optimizer_offload: true
-      # grad_offload is not used, replaced by param_offload in verl code
-      # grad_offload: true

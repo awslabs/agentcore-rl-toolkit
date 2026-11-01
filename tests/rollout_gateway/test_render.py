@@ -2,8 +2,8 @@
 
 Rendering uses a locally built HF/Rust tokenizer, compared directly with HF's
 apply_chat_template. Parsing uses small stubs. Neither needs model downloads.
-The schema-derender path (recognized chat template -> tokenizer.parse_response) is
-covered in test_response_schemas.py; this module covers the two-stage fallback.
+The template-derender path (recognized chat template -> response parser) is
+covered in test_response_templates.py; this module covers the two-stage fallback.
 """
 
 import asyncio
@@ -41,7 +41,7 @@ async def test_render_passes_expected_kwargs_and_returns_list(fast_tokenizer):
 def test_parse_no_tools_returns_plain_text():
     tok = StubTokenizer()
     r = HfTemplateRenderer(tok)
-    out = r.parse([1, 2, 3], tools_schema=None)
+    out = r.parse([1, 2, 3], finish_reason="stop", tools_schema=None)
     assert isinstance(out, ParsedOutput)
     assert out.text == "1 2 3"
     assert out.tool_uses == []
@@ -51,7 +51,7 @@ def test_parse_no_tools_returns_plain_text():
 def test_parse_empty_output():
     tok = StubTokenizer()
     r = HfTemplateRenderer(tok)
-    out = r.parse([], tools_schema=None)
+    out = r.parse([], finish_reason="stop", tools_schema=None)
     assert out.text == ""
     assert out.tool_uses == []
 
@@ -68,7 +68,7 @@ def test_xml_tool_calls_parsed_dependency_free():
 
     r = HfTemplateRenderer(XmlTok(), tool_parser=parse_tool_uses)
     tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
-    out = r.parse([1], tools_schema=tools)
+    out = r.parse([1], finish_reason="stop", tools_schema=tools)
     assert "sglang" not in sys.modules and "vllm" not in sys.modules
     assert len(out.tool_uses) == 1
     assert out.tool_uses[0]["name"] == "search"
@@ -83,7 +83,7 @@ def test_parse_extracts_reasoning_from_think_block():
             return "<think>weighing options</think>the answer is 4"
 
     r = HfTemplateRenderer(ThinkTok())
-    out = r.parse([1], tools_schema=None)
+    out = r.parse([1], finish_reason="stop", tools_schema=None)
     assert out.reasoning == "weighing options"
     assert out.text == "the answer is 4"
 
@@ -115,7 +115,7 @@ def test_stages_run_in_sequence_reasoning_then_tools():
         return "T", [{"name": "x", "input": {}}], True
 
     r = HfTemplateRenderer(ThinkTok(), reasoning_parser=reasoning_parser, tool_parser=tool_parser)
-    out = r.parse([1], tools_schema=TOOLS)
+    out = r.parse([1], finish_reason="stop", tools_schema=TOOLS)
 
     assert seen["raw"] == "<think>hmm</think>body"  # reasoning stage sees raw text
     assert seen["body"] == "BODY"  # tool stage sees the reasoning stage's remainder
@@ -130,7 +130,7 @@ def test_tool_parser_override_keeps_default_reasoning_split():
         return "", [{"name": "x", "input": {"got": body_text}}], False
 
     r = HfTemplateRenderer(ThinkTok(), tool_parser=tool_parser)
-    out = r.parse([1], tools_schema=TOOLS)
+    out = r.parse([1], finish_reason="stop", tools_schema=TOOLS)
     assert out.reasoning == "hmm"
     assert out.tool_uses == [{"name": "x", "input": {"got": "body"}}]
 
@@ -148,11 +148,13 @@ def test_reasoning_parser_override_requires_explicit_tool_parser_for_tools():
         left, right = raw.split("||", 1)
         return left, right
 
-    with pytest.raises(ValueError, match="matched no response schema"):
-        HfTemplateRenderer(XmlTok(), reasoning_parser=split_on_bars).parse([1], tools_schema=TOOLS)
+    with pytest.raises(ValueError, match="matched no response template"):
+        HfTemplateRenderer(XmlTok(), reasoning_parser=split_on_bars).parse(
+            [1], finish_reason="stop", tools_schema=TOOLS
+        )
 
     r = HfTemplateRenderer(XmlTok(), reasoning_parser=split_on_bars, tool_parser=parse_tool_uses)
-    out = r.parse([1], tools_schema=TOOLS)
+    out = r.parse([1], finish_reason="stop", tools_schema=TOOLS)
     assert out.reasoning == "REASON"
     assert out.tool_uses == [{"name": "x", "input": {"q": "v"}}]
 
@@ -165,7 +167,7 @@ def test_tool_parser_skipped_without_tools_schema():
         return "", [], False
 
     r = HfTemplateRenderer(ThinkTok(), tool_parser=tool_parser)
-    out = r.parse([1], tools_schema=None)
+    out = r.parse([1], finish_reason="stop", tools_schema=None)
     assert calls == []  # no tools -> tool stage never runs
     assert out.reasoning == "hmm"
     assert out.text == "body"

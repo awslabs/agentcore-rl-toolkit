@@ -429,7 +429,7 @@ class BaseAdapter:
                     prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=sid
                 )
 
-            parsed = self.renderer.parse(turn.output_ids, tools_schema=tools_schema)
+            parsed = self.renderer.parse(turn.output_ids, finish_reason=turn.finish_reason, tools_schema=tools_schema)
             reply = self._build_reply(parsed, turn.finish_reason, translated, tools_schema)
             turn = dataclasses.replace(turn, ill_formed=parsed.ill_formed)
 

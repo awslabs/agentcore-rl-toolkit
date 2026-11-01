@@ -90,17 +90,21 @@ class VariableRowBatchingMixin(TrainerMixinBase):
     def _update_actor(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
         """Mirror verl's actor-update path, using a fixed mini-batch count."""
 
-        # Keep aligned with PPOTrainer._update_actor in verl 0.9.0.
+        # Keep aligned with PPOTrainer._update_actor.
         global_batch_size = (
             self.config.actor_rollout_ref.actor.ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
         )
         calculate_entropy = self.config.actor_rollout_ref.actor.calculate_entropy or (
             self.config.actor_rollout_ref.actor.entropy_coeff != 0.0
         )
+        score_centering = bool(
+            self.config.actor_rollout_ref.actor.policy_loss.get("rollout_correction", {}).get("score_centering", False)
+        )
         extra_info: dict[str, Any] = {
             "calculate_entropy": calculate_entropy,
             "distillation_use_topk": False,
             "distillation_only": False,
+            "score_centering": score_centering,
             "global_batch_size": global_batch_size,
             "epochs": self.config.actor_rollout_ref.actor.ppo_epochs,
             "seed": self.config.actor_rollout_ref.actor.data_loader_seed,

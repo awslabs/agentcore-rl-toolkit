@@ -20,7 +20,7 @@ From a toolkit checkout:
 ```bash
 uv venv --python 3.12 .venv
 source .venv/bin/activate
-uv pip install -e '.[tinker_api]' 'transformers==5.12.1' datasets wandb
+uv pip install -e '.[tinker_api]' datasets wandb
 ```
 
 The backend extra includes rollout clients and the gateway. `datasets` is used to prepare

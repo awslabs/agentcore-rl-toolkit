@@ -23,7 +23,7 @@
 #   3. python preprocess_gsm8k.py --output-dir gsm8k   (once)
 #
 # Tool-call parsing happens in the rollout gateway's renderer, auto-detected from
-# the model's chat template (rollout_gateway/response_schemas.py) — engine-level
+# the model's chat template (rollout_gateway/response_templates.py) — engine-level
 # parser flags (vllm tool_call_parser etc.) have no effect on this token-in/token-out
 # path and are deliberately not set.
 #

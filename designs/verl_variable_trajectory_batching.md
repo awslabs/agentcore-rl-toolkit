@@ -100,7 +100,7 @@ their process-local trainer lookup.
 
 ## Current verl behavior
 
-The relevant verl 0.9.0 path is:
+The relevant verl path is:
 
 1. `PPOTrainer._balance_batch` asks `_get_required_batch_multiple(dp_size)` for an
    upsampling multiple.
@@ -426,7 +426,7 @@ class AgentCorePPOTrainerSync(
 `agentcore_colocate_async` and `agentcore_separate_async` are the same three lines over
 `PPOTrainerColocateAsync` and `PPOTrainerSeparateAsync`.
 
-The mode normalization is necessary in verl 0.9.0 because the base trainer compares the
+The mode normalization is necessary because the base trainer compares the
 literal mode string to select `ReplayBuffer` versus `ReplayBufferAsync`, exact-refill
 behavior, async prompt persistence, TransferQueue checkpointing, and the
 `trainer.v1.<mode>` node it reads `parameter_sync_step` from. A registry name that is not
@@ -448,7 +448,7 @@ trainer_cls = get_trainer_cls(config.trainer.v1.trainer_mode)
 ```
 
 before it loads `agent_loop_manager_class` or any AgentCore-owned class. The trainer module
-must therefore be imported before that lookup. verl 0.9.0 provides the
+must therefore be imported before that lookup. verl provides the
 `VERL_USE_EXTERNAL_MODULES` environment variable for this purpose:
 
 ```bash
@@ -490,13 +490,12 @@ The inherited `_balance_batch` remains unchanged. It discovers actor DP through 
 existing `"actor"` mesh dispatch metadata, calls the overridden required-multiple method,
 pads to `D * M`, and performs V1's normal whole-batch DP balancing.
 
-Since distillation is explicitly unsupported, `_update_actor` preserves verl's
-entropy, epoch, seed, temperature, metric-reduction, and worker-call behavior while setting
-the two distillation booleans to false. verl 0.9.0 does not expose a hook for constructing
-update `extra_info`, so this small override is the unavoidable compatibility surface. The
-repository pins `verl==0.9.0`. When that pin changes, the copied metadata path must
-be compared manually with upstream `_update_actor` before running the contract
-tests.
+Since distillation is explicitly unsupported, `_update_actor` preserves verl's entropy,
+epoch, seed, temperature, score-centering, metric-reduction, and worker-call behavior
+while setting the two distillation booleans to false. verl does not expose a hook for
+constructing update `extra_info`, so this small override is the unavoidable compatibility
+surface. When the verl pin changes, the copied metadata path must be compared manually
+with upstream `_update_actor` before running the contract tests.
 
 No worker, engine, dispatcher, TransferQueue, advantage, or loss implementation is
 replaced.
@@ -583,5 +582,5 @@ metrics.
   critic, distillation, or any other `loss_agg_mode` (e.g. Dr. GRPO's
   `seq-mean-token-sum-norm`) now fails at startup rather than training under a
   denominator the fixed partition count does not preserve.
-- The implementation targets `verl==0.9.0`. A version bump must run the trainer
-  contract tests, especially the copied `_update_actor` metadata path.
+- A verl version bump must run the trainer contract tests, especially the copied
+  `_update_actor` metadata path.

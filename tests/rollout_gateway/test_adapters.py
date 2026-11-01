@@ -41,7 +41,7 @@ class FakeRenderer:
     def get_stop_sequences(self):
         return []
 
-    def parse(self, output_ids, *, tools_schema=None):
+    def parse(self, output_ids, *, finish_reason, tools_schema=None):
         inv = {v: k for k, v in self.vocab.items()}
         text = " ".join(inv.get(i, "?") for i in output_ids)
         return ParsedOutput(reasoning="", text=text, tool_uses=[], ill_formed=False)
