@@ -65,10 +65,8 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=1 \
     actor_rollout_ref.actor.megatron.sequence_parallel=true \
     actor_rollout_ref.actor.megatron.use_mbridge=true \
-    actor_rollout_ref.actor.megatron.vanilla_mbridge=false \
     actor_rollout_ref.actor.megatron.use_dist_checkpointing=false \
     actor_rollout_ref.actor.megatron.param_offload=true \
-    actor_rollout_ref.actor.megatron.grad_offload=true \
     actor_rollout_ref.actor.megatron.optimizer_offload=true \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
