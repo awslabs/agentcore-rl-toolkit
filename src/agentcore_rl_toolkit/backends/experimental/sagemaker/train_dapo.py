@@ -391,8 +391,6 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     args = parser.parse_args()
     config = load_config(args.config, DapoConfig)
-    if not isinstance(config, DapoConfig):
-        raise TypeError(f"expected DapoConfig, got {type(config).__name__}")
     try:
         asyncio.run(train(config))
     except asyncio.CancelledError:
