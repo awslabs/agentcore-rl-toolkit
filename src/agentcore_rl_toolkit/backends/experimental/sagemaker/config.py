@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TypeVar
 
 import yaml
 
@@ -58,9 +58,18 @@ class Config:
     rollout_log_path: str = ""  # JSONL file for per-rollout diagnostics; auto-named if empty
 
 
-def load_config(path: str) -> Config:
+ConfigT = TypeVar("ConfigT", bound=Config)
+
+
+def load_config(path: str, config_cls: type[ConfigT] = Config) -> ConfigT:
+    """Load a YAML file into ``config_cls``: ``Config``, or a recipe's subclass that adds fields.
+
+    Keys that ``config_cls`` does not define are ignored, so one YAML file can serve several
+    recipes (e.g. ``train_grpo`` skips the fields only ``train_dapo`` reads). Returns an
+    instance of ``config_cls``.
+    """
     with open(path) as f:
         raw: dict = yaml.safe_load(f) or {}
 
-    fields = Config.__dataclass_fields__
-    return Config(**{k: v for k, v in raw.items() if k in fields})
+    fields = config_cls.__dataclass_fields__
+    return config_cls(**{k: v for k, v in raw.items() if k in fields})
