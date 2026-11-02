@@ -9,6 +9,7 @@ import pytest
 
 from agentcore_rl_toolkit.backends.tinker_api.data import Episode
 from agentcore_rl_toolkit.backends.tinker_api.train import (
+    Config,
     collect_batch,
     drain_rollouts,
     evaluate,
@@ -202,7 +203,7 @@ async def test_evaluation_refills_capacity_before_slowest_finishes(tmp_path, rol
 
 
 @pytest.mark.asyncio
-async def test_training_concurrency_preserves_groups_and_drains_failures(rollout_kwargs):
+async def test_training_concurrency_preserves_groups(rollout_kwargs):
     active = peak = 0
     seen = []
 
@@ -223,3 +224,13 @@ async def test_training_concurrency_preserves_groups_and_drains_failures(rollout
     assert peak == 2
     assert groups == [[(0, 0), (0, 1), (0, 2)], [(1, 3), (1, 4), (1, 5)]]
     assert sorted(seen) == list(range(6))
+
+
+@pytest.mark.parametrize("field", ["rollout_concurrency", "evaluation_batch_size"])
+@pytest.mark.parametrize("value", [0, 1.5, True])
+def test_config_rejects_non_positive_int_concurrency(field, value):
+    required = dict.fromkeys(
+        ["endpoint", "base_model", "tokenizer", "dataset", "agent_runtime_arn", "gateway_host", "output_dir"], ""
+    )
+    with pytest.raises(ValueError, match=field):
+        Config(**required, **{field: value})

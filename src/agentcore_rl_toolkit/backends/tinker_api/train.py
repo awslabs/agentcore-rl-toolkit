@@ -75,12 +75,22 @@ class Config:
             raise ValueError("Require 0 < max_new_tokens < max_context_tokens")
         if self.tps_limit < 1:
             raise ValueError("tps_limit must be positive")
-        if self.rollout_concurrency is not None and self.rollout_concurrency < 1:
-            raise ValueError("rollout_concurrency must be positive or None")
+        if self.rollout_concurrency is not None and (
+            isinstance(self.rollout_concurrency, bool)
+            or not isinstance(self.rollout_concurrency, int)
+            or self.rollout_concurrency < 1
+        ):
+            raise ValueError("rollout_concurrency must be a positive integer or None")
+        if (
+            isinstance(self.evaluation_batch_size, bool)
+            or not isinstance(self.evaluation_batch_size, int)
+            or self.evaluation_batch_size < 1
+        ):
+            raise ValueError("evaluation_batch_size must be a positive integer")
         if self.history_mode not in ("tree", "linear"):
             raise ValueError("history_mode must be 'tree' or 'linear'")
-        if min(self.evaluation_batch_size, self.evaluation_interval, self.checkpoint_interval) < 1:
-            raise ValueError("Evaluation batch size and evaluation/checkpoint intervals must be positive")
+        if min(self.evaluation_interval, self.checkpoint_interval) < 1:
+            raise ValueError("Evaluation and checkpoint intervals must be positive")
         if not math.isfinite(self.evaluation_temperature) or self.evaluation_temperature < 0:
             raise ValueError("Evaluation temperature must be finite and nonnegative")
 
