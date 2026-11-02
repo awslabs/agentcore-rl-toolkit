@@ -51,7 +51,7 @@ class FakeRenderer:
     def get_stop_sequences(self):
         return []
 
-    def parse(self, output_ids, *, tools_schema=None):
+    def parse(self, output_ids, *, finish_reason, tools_schema=None):
         """Split a reply into leading text plus one tool use per ``CALL`` segment,
         mirroring render()'s ``content`` then ``CALL name k=v`` layout."""
         text = self.decode(output_ids)

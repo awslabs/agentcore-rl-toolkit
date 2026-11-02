@@ -48,17 +48,12 @@ dev = [
     "agentcore-rl-toolkit[core,gateway,a2a-server]",
 ]
 gateway = [
-    # The rollout capture gateway (agentcore_rl_toolkit.rollout_gateway). Trainer-side
-    # only — the agent-side surface (AgentCoreRLApp, RolloutClient) needs none of this.
     # aiohttp: the gateway HTTP server + HTTP sampling backends.
     # transformers: HF tokenizer for HfTemplateRenderer — apply_chat_template plus
-    # tokenizer.parse_response for the schema derender (>=5.0; the legacy schema
-    # engine incl. jmespath transforms shipped in 5.0.0).
-    # jmespath: transform expressions in response schemas.
+    # the response-template parser (>=5.16.1).
     "aiohttp>=3.9",
-    "transformers>=5.0",
-    "tokenizers>=0.22.2",  # native async_encode
-    "jmespath>=1.0",
+    "transformers>=5.16.1",
+    "tokenizers>=0.23.1",  # native async_encode; transformers 5.16's floor
     "jinja2>=3.1.0",  # HF apply_chat_template; optional in transformers itself
 ]
 tinker_api = [
@@ -82,27 +77,23 @@ a2a = [
 verl = [
     "agentcore-rl-toolkit[rollout,gateway]",
     # For backends/verl — see its README for design and install notes.
-    "verl==0.9.0",
-    # verl 0.9.0 declares its core dependencies, but still omits these dependencies
-    # required at import time on our training path:
-    "transferqueue==0.1.10",  # required by the v1 trainer
-    "orjson",  # required for tracking
+    # Pinned to a verl main commit through [tool.uv.sources]; the first release
+    # carrying transformers 5.16 support is 0.10. verl-core holds the runtime
+    # dependencies verl's base (setup.py) metadata omits, e.g. TransferQueue.
+    "verl[verl-core]>=0.10.0.dev0",
+    "orjson",  # required for tracking; not in verl-core
     "aiohttp>=3.9",
-    # The gateway's schema derender needs tokenizer.parse_response (transformers >=5.0).
-    "transformers==5.12.1",
-    "numpy",
-    "ray",
-    "torch>=2.10.0",
-    "torchvision>=0.23.0",
-    # matches verl 0.9.0's reference stack
-    "vllm==0.24.0",
+    "transformers==5.16.1",
+    # transformers / torch / torchvision / vllm match verl's vllm extra.
+    "torch==2.13.0",
+    "torchvision==0.28.0",
+    "vllm==0.32.0",
     # 0.5.1's gated_delta_rule backward faults with "Triton Error [CUDA]: misaligned
     # address" when H == HV (Qwen3.6-27B expands q/k to 48 heads via repeat_interleave
     # before the call, so all 48 linear_attention layers hit it on the first optimizer
     # step). Not varlen-specific; reproduces on the dense path at T=512.
     "flash-linear-attention>=0.5.2",
     "flash-attn==2.8.3",
-    "qwen-vl-utils",
 ]
 [dependency-groups]
 sagemaker-integration = [
@@ -122,33 +113,29 @@ swe-agent = [
 verl-ci = [
     # CI uses CPU torch and omits inference-only dependencies because the
     # integration tests fake the LLM-server seam.
-    "verl==0.9.0",
-    "transferqueue==0.1.10",
+    "verl[verl-core]>=0.10.0.dev0",
     "orjson",
-    # verl deps the full extra gets transitively via vllm: fastapi/uvicorn are
-    # in verl's requirements.txt (not its setup.py); cachetools is undeclared
-    # even there (verl/workers/rollout/llm_server.py).
-    "cachetools",
-    "fastapi",
-    "uvicorn",
     "aiohttp>=3.9",
-    "transformers==5.12.1",  # keep in lockstep with the [verl] extra
-    "numpy",
-    "ray",
-    "torch>=2.10.0",
-    "torchvision>=0.23.0",
+    "transformers==5.16.1",  # keep in lockstep with the [verl] extra
+    "torch==2.13.0",
+    "torchvision==0.28.0",
 ]
 verl-megatron = [
-    "torch==2.11.0",  # Must match the Apex wheel index below.
+    "torch==2.13.0",  # Must match the verl wheelhouse index below.
     "apex",
-    # Root-pin TE's transitive packages so uv applies the explicit Astral index to each.
-    "transformer-engine[pytorch]==2.16.0",
-    "transformer-engine-torch==2.16.0",
-    "transformer-engine-cu13==2.16.0",
-    "megatron-core==0.18.0",
-    "megatron-bridge==0.5.0",
+    # TE comes from Astral rather than verl's wheelhouse: the wheelhouse build of
+    # libtransformer_engine.so requires GLIBCXX_3.4.32 (GCC 13 / Ubuntu 24.04) and
+    # fails to load on Ubuntu 22.04 hosts; Astral's manylinux build of the same
+    # version does not. Root-pin TE's transitive packages so uv applies the explicit
+    # Astral index to each.
+    "transformer-engine[pytorch]==2.16.1",
+    "transformer-engine-torch==2.16.1",
+    "transformer-engine-cu13==2.16.1",
+    "megatron-core==0.19.2",
+    "megatron-bridge==0.6.2",
     # Required at import time after stripping megatron-bridge's dependencies below.
-    "nvidia-modelopt>=0.37.0",
+    "nvidia-modelopt==0.44.0",
+    "megatron-energon==7.4.1",
 ]
 
 [project.urls]
@@ -170,9 +157,11 @@ conflicts = [
         { group = "verl-ci" },
         { group = "verl-megatron" },
     ],
-]
-override-dependencies = [
-    { package = { name = "verl", version = "0.9.0" }, dependencies = ["transformers==5.12.1"] },
+    # vllm 0.32 requires protobuf 7 on s390x; sagemaker-core caps protobuf below 7.
+    [
+        { extra = "verl" },
+        { group = "sagemaker-integration" },
+    ],
 ]
 
 [tool.uv.dependency-groups]
@@ -181,10 +170,12 @@ verl-megatron = { requires-python = ">=3.12,<3.13" }
 # Megatron-Bridge's published dependencies conflict with the verl stack.
 [[tool.uv.dependency-metadata]]
 name = "megatron-bridge"
-version = "0.5.0"
+version = "0.6.2"
 requires-dist = []
 
 [tool.uv.sources]
+# verl main with vllm 0.32.0 / transformers 5.16.1 (verl-project/verl#8390).
+verl = { git = "https://github.com/verl-project/verl.git", rev = "f78fd053e13c3d021e51de5e81afc54dddd13993" }
 # CI group only: CPU torch wheels so the CUDA distribution (plus nvidia-* wheels)
 # never resolves on GitHub runners. The other extras keep the default index.
 torch = [
@@ -195,7 +186,7 @@ torchvision = [
 ]
 # Prebuilt GPU wheels avoid local source builds from PyPI.
 apex = { index = "verl-wheelhouse" }
-flash-attn = { index = "astral-cu130" }
+flash-attn = { index = "verl-wheelhouse" }
 transformer-engine = { index = "astral-cu130" }
 transformer-engine-torch = { index = "astral-cu130" }
 transformer-engine-cu13 = { index = "astral-cu130" }
@@ -212,7 +203,7 @@ explicit = true
 
 [[tool.uv.index]]
 name = "verl-wheelhouse"
-url = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.11/simple/"
+url = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.13/simple/"
 explicit = true
 
 

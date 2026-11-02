@@ -1,7 +1,8 @@
 """``VllmHttpBackend`` — token-in/token-out HTTP sampling backend for vLLM.
 
 POSTs rendered ``token_ids`` to ``{url}/inference/v1/generate`` and parses the
-response into a :class:`TurnRecord`. Expects this response shape:
+response into a :class:`TurnRecord`. ``vllm serve`` registers that endpoint only with
+``--enable-scale-out``. Expects this response shape:
 ```
 {"choices": [{"token_ids": [int, ...],
               "logprobs": {"content": [{"logprob": float}, ...]},

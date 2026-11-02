@@ -172,21 +172,21 @@ drains the tree into `list[TraceRecord]`.
 Trainer environments use `[rollout]` without the server SDK. Root and runtime
 package exports are loaded on first access. The gateway lives behind extras:
 - `uv sync --extra gateway` → `aiohttp` + `transformers` + `tokenizers`
-  + `jmespath` + `jinja2`.
+  + `jinja2`.
 - Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
-  lookup in `rollout_gateway/response_schemas.py`), `HfTemplateRenderer` derenders the
-  whole output in one pass via `tokenizer.parse_response(text, schema=...)` — reasoning,
-  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6,
-  GLM4-MoE, GPT-OSS, Nemotron-3; schemas vendored from huggingface/trl, see NOTICE). A
-  parse failure degrades to raw text with `ill_formed=True`, never an exception.
+  lookup in `rollout_gateway/response_templates.py`), `HfTemplateRenderer` derenders the
+  whole output in one pass with transformers' response-template parser — reasoning,
+  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6, GPT-OSS;
+  templates vendored from huggingface/trl, see NOTICE). A truncated turn or a parse
+  failure degrades to raw text with `ill_formed=True`, never an exception.
   Unrecognized templates fall back to a `</think>` split for tool-free parsing, but
   tool-bearing requests are **rejected** (there is no implicit tool parser — the
   dependency-free `<tool_call><function=...>` XML regex understands one format and
   would silently miss every other; opt into it explicitly with
   `tool_parser=parse_tool_uses`); the gateway itself never imports an inference
   engine. Injecting a `reasoning_parser` / `tool_parser` callable into
-  `HfTemplateRenderer` disables schema detection and takes full control. The slime
-  backend (`backends/slime/`) uses the default schema-based parsing (`HfTemplateRenderer` with no custom parsers); injecting the same
+  `HfTemplateRenderer` disables template detection and takes full control. The slime
+  backend (`backends/slime/`) uses the default template-based parsing (`HfTemplateRenderer` with no custom parsers); injecting the same
   SGLang-native parsers via the `reasoning_parser` / `tool_parser` kwargs is a natural
   extension if tool-bearing or reasoning-bearing models are served.
 - For Tinker API training (`backends/tinker_api/`), install `[tinker_api]`
@@ -301,17 +301,18 @@ cannot work; failures surface as rollouts scored `0.0`, not as a crash, because
 `run_one_rollout()` logs and returns a zero reward. Documented under "Networking" in
 `docs/site/src/content/docs/guides/sagemaker-backend-setup.md`.
 
-**Vendored response schemas.** The response-schema registry is adapted from
+**Vendored response templates.** The response-template registry is adapted from
 [trl](https://github.com/huggingface/trl) (Apache-2.0; see `NOTICE`).
 
 | This repo | upstream source | Baseline commit |
 |---|---|---|
-| `rollout_gateway/response_schemas.py` | `trl/chat_template_utils.py` (schema dicts) + `trl/chat_templates/*.jinja` (hash table) | `7073af94` |
+| `rollout_gateway/response_templates.py` | `trl/chat_template_utils.py` (`*_template` dicts) + `trl/chat_templates/*.jinja` (hash table) | `775de52a` |
 
-For `response_schemas.py`, re-sync means updating the schema dicts and recomputing the
+For `response_templates.py`, re-sync means updating the template dicts and recomputing the
 sha256 hashes of the covered chat templates — preserving the marked local-additions
 block at the end of `_TEMPLATE_HASHES` (templates with no TRL equivalent, e.g.
-Qwen3-Coder → `qwen3_5`). Bump the baseline commit here when you re-sync.
+Qwen3-Coder → `qwen3_5`) and the marked local change to `GPTOSS_TEMPLATE`'s tool-call
+pattern. Bump the baseline commit here when you re-sync.
 
 ### slime backend (`backends/slime/`)
 

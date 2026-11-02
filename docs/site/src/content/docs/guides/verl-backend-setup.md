@@ -26,7 +26,7 @@ The example training scripts have been run end to end with:
 - Network routing from the AgentCore containers to the trainer nodes' rollout
   gateway ports.
 
-The backend is pinned to verl 0.9.0. Install it from a checkout of this repository:
+Install the backend from a checkout of this repository:
 
 ```bash
 uv sync --extra verl

@@ -18,8 +18,8 @@
 #      Use a Python 3.12 venv (`uv venv --python 3.12`).
 #
 # Tool-call parsing happens in the rollout gateway's renderer, auto-detected from the
-# model's chat template (rollout_gateway/response_schemas.py — Qwen3-Coder maps to the
-# qwen3_5 XML schema). Engine-level parser flags (vllm tool_call_parser etc.) have no
+# model's chat template (rollout_gateway/response_templates.py — Qwen3-Coder maps to the
+# qwen3_5 XML template). Engine-level parser flags (vllm tool_call_parser etc.) have no
 # effect on this token-in/token-out path and are deliberately not set.
 #
 set -x
@@ -100,7 +100,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_method=uniform \
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers=1 \
     actor_rollout_ref.actor.megatron.param_offload=false \
-    actor_rollout_ref.actor.megatron.grad_offload=true \
     actor_rollout_ref.actor.megatron.optimizer_offload=true \
     ++actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_cpu_offload=True \
     ++actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_offload_fraction=1.0 \

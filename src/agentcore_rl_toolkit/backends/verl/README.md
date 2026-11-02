@@ -122,7 +122,7 @@ endpoints.
 
 ## Install
 
-verl is pinned to version 0.9.0. From a checkout of this repo:
+From a checkout of this repo:
 
 ```bash
 uv sync --extra verl
@@ -140,8 +140,7 @@ Megatron requires Python 3.12:
 uv sync --extra verl --group verl-megatron
 ```
 
-- Use NVIDIA Megatron-Bridge with `megatron.use_mbridge=True` and
-  `megatron.vanilla_mbridge=False`.
+- Use NVIDIA Megatron-Bridge with `megatron.use_mbridge=True`.
 
 #### Context parallelism on VL models: apply the megatron-bridge patch
 

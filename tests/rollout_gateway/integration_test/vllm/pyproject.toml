@@ -20,5 +20,5 @@ agentcore-rl-toolkit = { path = "../../../../", editable = true }
 
 [tool.uv]
 package = false
-# GPU inference server -> only resolve for linux
-environments = ["sys_platform == 'linux'"]
+# GPU inference server -> only resolve for linux x86_64 / aarch64 (vllm's wheel platforms)
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]

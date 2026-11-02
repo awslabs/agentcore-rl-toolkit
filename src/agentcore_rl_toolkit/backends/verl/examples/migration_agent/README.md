@@ -6,7 +6,7 @@ using Qwen3-Coder-30B-A3B with Megatron expert parallelism and LoRA.
 
 ## Install
 
-Megatron-Bridge 0.5.0 requires Python 3.12. From the repository root, create the
+Megatron requires Python 3.12. From the repository root, create the
 root project environment with:
 
 ```bash
@@ -39,5 +39,5 @@ wandb login
 
 The per-turn generation limit is configured in `agentcore_agent.yaml`; the shell
 script separately configures the cumulative model context and verl storage limits.
-Qwen3-Coder's chat-template hash maps to the gateway's `qwen3_5` response schema for
+Qwen3-Coder's chat-template hash maps to the gateway's `qwen3_5` response template for
 tool-call parsing.

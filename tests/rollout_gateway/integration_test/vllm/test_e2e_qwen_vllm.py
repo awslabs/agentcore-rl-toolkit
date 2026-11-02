@@ -24,7 +24,6 @@ VLLM_URL = os.environ.get("E2E_VLLM_URL", "http://localhost:8000")
 MODEL = os.environ.get("E2E_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 MAX_NEW_TOKENS = 512
 SERVER_LOG = "/tmp/e2e_vllm_server.log"
-GATEWAY_PORT = 9090
 
 HAVE_DEPS = all(importlib.util.find_spec(m) for m in ("openai", "anthropic", "vllm"))
 
@@ -56,7 +55,7 @@ def server():
     vllm_bin = str(Path(sys.executable).parent / "vllm")
     with open(SERVER_LOG, "w") as log:
         proc = subprocess.Popen(
-            [vllm_bin, "serve", MODEL, "--port", VLLM_URL.rsplit(":", 1)[-1]],
+            [vllm_bin, "serve", MODEL, "--port", VLLM_URL.rsplit(":", 1)[-1], "--enable-scale-out"],
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # own process group -> clean teardown
@@ -116,10 +115,10 @@ def make_gateway():
 def serve(gateway: RolloutGateway):
     """Serve the gateway exactly as a sync trainer would: on a
     ThreadedGatewayServer, off the test's own event loop."""
-    gw_server = ThreadedGatewayServer(gateway, host="127.0.0.1", port=GATEWAY_PORT)
+    gw_server = ThreadedGatewayServer(gateway, host="127.0.0.1")
     gw_server.start()
     try:
-        yield f"http://127.0.0.1:{GATEWAY_PORT}"
+        yield f"http://127.0.0.1:{gw_server.port}"
     finally:
         gw_server.shutdown()
 
@@ -169,7 +168,7 @@ async def test_single_turn_token_exact(server):
     assert all(lp <= 0.0 for lp in rec.logprobs)
     # decoded artifacts round-trip through the real tokenizer
     assert rec.response == tokenizer.decode(output_ids, skip_special_tokens=False)
-    assert renderer.parse(output_ids).text == content
+    assert renderer.parse(output_ids, finish_reason="stop").text == content
     assert rec.reward == 1.0 and rec.rollout_id == "e2e-1"
     assert rec.metadata["truncated"] is False and rec.metadata["ill_formed"] is False
 
