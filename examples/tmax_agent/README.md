@@ -6,6 +6,8 @@ on AgentCore Runtime to solve and evaluate Harbor tasks
 The agent harness and the code it executes run in separate sessions, so task code does not
 inherit the harness's access to the model gateway or verifier storage.
 
+For training with verl, see [Training with verl](#training-with-verl).
+
 ## Architecture
 
 Each rollout uses two AgentCore Runtime sessions:
@@ -57,6 +59,18 @@ task code. Delaying verifier delivery also reduces opportunities for reward
 hacking through access to tests or grading feedback during the agent loop.
 The verifier still runs in the task sandbox, so this does not prevent
 deliberate grader tampering.
+
+## Harness settings
+
+Each task may set `command_timeout` (default 300 seconds) and `max_steps`
+(default 64). Commands are also bounded by the remaining `agent_timeout`.
+The harness returns a scalar `reward`, including `0.0` and an `error` when
+session execution or verification fails.
+
+The harness forwards `_config.sampling_params` to the model client. Omitted
+sampling fields inherit the model endpoint's defaults, including the rollout
+gateway's per-session training or evaluation settings. The standalone evaluator
+explicitly requests 16,384 output tokens per call, temperature 0.7, and top-p 0.95.
 
 ## Run
 
@@ -130,3 +144,26 @@ Task images run sandboxd on port 11000, leaving port 8080 available to the
 task's services.
 See the [custom serving port guide](../sandbox_quickstart/README.md#use-a-different-serving-port)
 for AgentCore's port constraints.
+
+## Training with verl
+
+Install the [verl Megatron dependencies](../../src/agentcore_rl_toolkit/backends/verl/README.md#megatron-engine)
+on every Ray node. After deploying the harness and task environments, provide
+separate training and evaluation Parquet files with `payload.task` and a
+chat-format `prompt`, following the
+[dataset contract](../../src/agentcore_rl_toolkit/backends/verl/README.md#dataset-contract-the-payload-column).
+
+From the repository root, with the training environment active on the Ray
+head node, set the paths, harness Runtime ARN, and allocated resources:
+
+```bash
+export TRAIN_DATA_PATH=/path/to/tmax_train.parquet
+export VAL_DATA_PATH=/path/to/tblite2_eval.parquet
+export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/HARNESS
+export CHECKPOINT_DIR=/path/to/checkpoints
+export NNODES=YOUR_NODE_COUNT GPUS_PER_NODE=YOUR_GPUS_PER_NODE
+bash examples/tmax_agent/train/verl/megatron_lora_sync_grpo.sh
+```
+
+Training parameters are in [`megatron_lora_sync_grpo.sh`](train/verl/megatron_lora_sync_grpo.sh);
+rollout settings are in [`agentcore_agent.yaml`](train/verl/agentcore_agent.yaml).

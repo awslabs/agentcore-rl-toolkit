@@ -71,19 +71,18 @@ class DeadlineModel(LitellmModel):
             remaining(self.deadline)
 
 
-def run(instruction, sandbox, config, *, timeout=600, max_steps=64, record):
+def run(instruction, sandbox, config, *, timeout=600, command_timeout=300, max_steps=64, record):
     settings = get_config_from_spec(builtin_config_dir / "mini.yaml")
+    # Omitted sampling fields inherit the training gateway's per-session defaults.
+    settings["model"]["model_kwargs"].update(config.get("sampling_params", {}))
     settings["model"]["model_kwargs"].update(
         api_base=config["base_url"],
         api_key=config.get("api_key", "EMPTY"),
-        max_tokens=16384,
-        temperature=0.7,
-        top_p=0.95,
         num_retries=0,
     )
     settings["agent"].update(step_limit=max_steps, cost_limit=0, wall_time_limit_seconds=math.ceil(timeout))
     deadline = time.monotonic() + timeout
-    environment = SandboxEnvironment(sandbox, deadline, timeout=120, **settings["environment"])
+    environment = SandboxEnvironment(sandbox, deadline, **(settings["environment"] | {"timeout": command_timeout}))
     model = DeadlineModel(
         deadline,
         model_name=f"openai/{config['model_id']}",
