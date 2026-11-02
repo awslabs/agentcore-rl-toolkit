@@ -29,8 +29,8 @@ rollout_session_agent_loop:
   rollout_gateway:
     adapters: ["openai"]
     max_turns_per_sid: 1000
-    # one record per trajectory reaches the trainer, so linearize history
-    history_mode: "linear"
+    # one record per trajectory reaches the trainer, so heal re-tokenization drift
+    history_mode: "healed"
 
   # gateway defaults for turns the agent did not specify; verl's own
   # temperature/top_p/top_k override the same keys

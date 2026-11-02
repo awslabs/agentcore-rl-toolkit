@@ -44,11 +44,13 @@ class TurnRecord:
 @dataclasses.dataclass(frozen=True)
 class HealAnchor:
     """A generated turn a later request can extend: its served token ids, the stored
-    messages from the root through its assistant message, and its tools schema."""
+    messages from the root through its assistant message, its tools schema, and its
+    ``turn_index`` (equal to :meth:`TrajectoryManager.turn_count` for the latest turn)."""
 
     served_ids: list[int]
     messages: list[dict[str, Any]]
     tools: list[dict[str, Any]] | None
+    turn_index: int
 
 
 # ===========================================================================
@@ -314,6 +316,7 @@ class TrajectoryManager:
             served_ids=node.turn.prompt_ids + node.turn.output_ids,
             messages=[n.message for n in node.path_from_root()],
             tools=node.tools,
+            turn_index=node.turn_index,
         )
 
     def get_trajectory(

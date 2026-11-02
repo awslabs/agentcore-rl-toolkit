@@ -17,12 +17,11 @@ from aiohttp import web
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.common import BaseAdapter, _health
 from .adapters.openai import OpenAIAdapter
-from .linear import LinearHealer
+from .healer import PrefixHealer, make_healer
 from .render import Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, TraceRecord
 from .trajectory import TrajectoryManager
-from .tree_healer import make_healer
 
 # name -> adapter class for the `adapters=[...]` convenience arg
 _ADAPTER_REGISTRY: dict[str, type[BaseAdapter]] = {
@@ -42,13 +41,12 @@ class RolloutGateway:
         adapters: which wire protocols to mount — names ("openai", "anthropic") or
             ``BaseAdapter`` subclasses. Defaults to both.
         max_turns_per_sid / debug_callback: forwarded to the adapters.
-        history_mode: ``"tree"`` (default), ``"linear"``, or ``"tree_healed"``. Linear mode
-            heals re-tokenization drift at generation time via one shared ``LinearHealer``
-            so the manager stays CLEAN (one sample per session). See ``linear.py``.
-            ``"tree_healed"`` applies the same healing to every branch of the session
-            tree via a ``TreeHealer``. See ``tree_healer.py``.
-        linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
-            behaviour when a turn breaks the append-only assumption (linear mode only).
+        history_mode: ``"tree"`` (default) or ``"healed"``. In healed mode the gateway
+            heals re-tokenization drift at generation time via one shared
+            ``PrefixHealer`` so every branch of the session tree stays CLEAN. See
+            ``healer.py``.
+        healer_on_branch: ``"heal"`` (default) | ``"error"`` — behavior when a request
+            does not extend the session's latest turn (healed mode only).
     """
 
     def __init__(
@@ -59,7 +57,7 @@ class RolloutGateway:
         tokenizer=None,
         adapters: list[str | type[BaseAdapter]] | None = None,
         history_mode: str = "tree",
-        linear_on_nonlinear: str = "reset",
+        healer_on_branch: str = "heal",
         max_turns_per_sid: int | None = None,
         debug_callback: Any = None,
     ) -> None:
@@ -69,10 +67,10 @@ class RolloutGateway:
 
         self.manager = TrajectoryManager()
 
-        # In the healing modes, one healer is shared across all co-mounted adapters (like
-        # the manager) so a session's canonical served-id state is coherent regardless of
-        # which wire protocol its turns arrive on. See linear.py and tree_healer.py.
-        self.healer: LinearHealer | None = make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
+        # In healed mode, one healer is shared across all co-mounted adapters (like the
+        # manager) so its counters cover a session whichever wire protocol its turns
+        # arrive on. See healer.py.
+        self.healer: PrefixHealer | None = make_healer(history_mode, renderer, self.manager, healer_on_branch)
 
         # one aiohttp app shared by all adapters; register health once here.
         self.app = web.Application(client_max_size=64 * 1024 * 1024)
@@ -90,7 +88,7 @@ class RolloutGateway:
                 max_turns_per_sid=max_turns_per_sid,
                 debug_callback=debug_callback,
                 manager=self.manager,  # SHARED across adapters -> one tree per sid
-                healer=self.healer,  # SHARED across adapters -> coherent canonical state
+                healer=self.healer,  # SHARED across adapters -> one set of per-session counters
                 app=self.app,  # SHARED app -> all routes on one server
             )
             self.adapters.append(adapter)

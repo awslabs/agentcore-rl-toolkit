@@ -202,7 +202,7 @@ unless the backend is `agentcore` and `dynamodb_table` is set.
   graded on. Grading is unaffected -- the eval script resets and re-applies the same
   patch -- so the flag can be flipped over an unchanged parquet. See "Showing the agent
   the tests it is graded on" in the example's own README.
-- The gateway runs in `history_mode: linear` to keep append-only history in one
+- The gateway runs in `history_mode: healed` to keep append-only history in one
   training record. This example's rollout loop currently keeps only the record
   with the most trainable tokens when multiple records are captured.
   `num_records` in the session meta reports the total captured record count.

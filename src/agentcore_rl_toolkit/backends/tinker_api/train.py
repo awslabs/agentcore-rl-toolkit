@@ -87,8 +87,8 @@ class Config:
             or self.evaluation_batch_size < 1
         ):
             raise ValueError("evaluation_batch_size must be a positive integer")
-        if self.history_mode not in ("tree", "linear", "tree_healed"):
-            raise ValueError("history_mode must be 'tree', 'linear', or 'tree_healed'")
+        if self.history_mode not in ("tree", "healed"):
+            raise ValueError("history_mode must be 'tree' or 'healed'")
         if min(self.evaluation_interval, self.checkpoint_interval) < 1:
             raise ValueError("Evaluation and checkpoint intervals must be positive")
         if not math.isfinite(self.evaluation_temperature) or self.evaluation_temperature < 0:

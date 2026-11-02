@@ -23,9 +23,8 @@ class Config:
     acr_tps_limit: int = 5
     gateway_port: int = 0
     # "tree": re-tokenization drift forks a rollout into multiple records.
-    # "linear": reuse served token ids for append-only histories; one record per rollout.
-    # "tree_healed": reuse served token ids on every branch; one record per branch.
-    history_mode: Literal["tree", "linear", "tree_healed"] = "tree"
+    # "healed": reuse served token ids; one record per append-only rollout (per branch otherwise).
+    history_mode: Literal["tree", "healed"] = "tree"
     # Passed to the gateway renderer's apply_chat_template, e.g. {"enable_thinking": false}.
     chat_template_kwargs: dict = field(default_factory=dict)
 

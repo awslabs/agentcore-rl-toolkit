@@ -27,12 +27,11 @@ from typing import Any
 
 from aiohttp import web
 
-from ..linear import LinearHealer
+from ..healer import PrefixHealer, make_healer
 from ..render import Renderer
 from ..sampling_backends.base import SamplingBackend
 from ..trace import BaseTrace, TraceRecord
 from ..trajectory import TrajectoryManager
-from ..tree_healer import make_healer
 
 __all__ = ["BaseAdapter", "Reply", "Session", "sid_from_bearer", "sid_from_body"]
 
@@ -148,8 +147,8 @@ class BaseAdapter:
         tokenizer=None,
         max_turns_per_sid: int | None = None,
         history_mode: str = "tree",
-        linear_on_nonlinear: str = "reset",
-        healer: LinearHealer | None = None,
+        healer_on_branch: str = "heal",
+        healer: PrefixHealer | None = None,
         debug_callback: Callable[..., None] | None = None,
         manager: TrajectoryManager | None = None,
         app: web.Application | None = None,
@@ -170,12 +169,11 @@ class BaseAdapter:
         else:
             self.manager = TrajectoryManager()
 
-        # linear / tree_healed modes: heal re-tokenization drift at generation time so
-        # the manager stays CLEAN. See linear.py and tree_healer.py.
-        # A shared healer may be injected (co-mounted adapters
-        # share canonical state, like the manager); else built here when requested.
-        self.healer: LinearHealer | None = (
-            healer if healer is not None else make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
+        # healed mode: heal re-tokenization drift at generation time so every branch of
+        # the manager's tree stays CLEAN. See healer.py. A shared healer may be injected
+        # (co-mounted adapters share it, like the manager); else built here when requested.
+        self.healer: PrefixHealer | None = (
+            healer if healer is not None else make_healer(history_mode, renderer, self.manager, healer_on_branch)
         )
 
         self.debug_callback: Callable[..., None] | None = debug_callback
@@ -380,8 +378,8 @@ class BaseAdapter:
         try:
             translated, tools_schema = self._translate(body)
             if self.healer is not None:
-                # linear mode: splice canonical served ids over the drifted re-render
-                # before generation (the healer does the render internally).
+                # healed mode: splice served ids over the drifted re-render before
+                # generation (the healer does the render internally).
                 prompt_ids = await self.healer.heal(sid, translated, tools_schema)
             else:
                 prompt_ids = await self.renderer.render(
@@ -459,19 +457,8 @@ class BaseAdapter:
                 turn,
             )
 
-            # advance linear-mode canonical state in lockstep with record_turn (only on
-            # turns we actually record — the disconnect path above returned early). Uses
-            # turn.prompt_ids so the healer's state matches exactly what the manager saw.
-            if self.healer is not None:
-                self.healer.commit(
-                    sid,
-                    fed_prompt_ids=turn.prompt_ids,
-                    output_ids=turn.output_ids,
-                    messages=translated,
-                    response_message=reply.manager_message,
-                    tools=tools_schema,
-                )
-
+            # Only turns the client received are recorded (the disconnect path above
+            # returned early); in healed mode they are what later requests anchor on.
             self.manager.record_turn(
                 sid,
                 turn=turn,

@@ -85,7 +85,7 @@ def get_or_start_gateway(
     max_turns_per_sid: int | None = None,
     history_mode: str = "tree",
     chat_template_kwargs: dict | None = None,
-    linear_on_nonlinear: str = "reset",
+    healer_on_branch: str = "heal",
 ) -> GatewayHandle:
     """Lazily create or return this process's gateway singleton."""
     global _HANDLE
@@ -102,7 +102,7 @@ def get_or_start_gateway(
             adapters=adapter_names,
             max_turns_per_sid=max_turns_per_sid,
             history_mode=history_mode,
-            linear_on_nonlinear=linear_on_nonlinear,
+            healer_on_branch=healer_on_branch,
         )
         server = ThreadedGatewayServer(
             gateway,
