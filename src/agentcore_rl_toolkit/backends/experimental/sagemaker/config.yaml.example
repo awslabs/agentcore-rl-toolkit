@@ -37,7 +37,7 @@ eval_temperature: 0.0
 
 # --- Gateway ---
 gateway_port: 0    # 0 = OS-assigned
-history_mode: healed # tree | healed (healed: one record per append-only rollout)
+history_mode: healed # tree | healed (healed: one record per branch; an append-only rollout is one record)
 chat_template_kwargs: {enable_thinking: false}  # e.g. {enable_thinking: false}
 
 # --- Checkpointing ---
