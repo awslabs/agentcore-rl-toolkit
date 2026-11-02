@@ -18,6 +18,7 @@ Usage:
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import time
 from collections.abc import Awaitable, Callable
@@ -391,6 +392,8 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     args = parser.parse_args()
     config = load_config(args.config, DapoConfig)
+    # Identify the training program in AWS User-Agent headers, preserving an existing application ID.
+    os.environ.setdefault("AWS_SDK_UA_APP_ID", "agentcore-rl-toolkit")
     try:
         asyncio.run(train(config))
     except asyncio.CancelledError:
