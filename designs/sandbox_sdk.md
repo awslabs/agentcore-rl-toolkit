@@ -175,6 +175,11 @@ surface should wrap AgentCore's native `InvokeAgentRuntimeCommandShell`, which
 already provides persistent terminal state and reconnection. A shell ID identifies
 the terminal, not every command typed into it.
 
+### Serving port
+
+Deployment selects a matching serving port for sandboxd and AgentCore Runtime;
+see the [port configuration guide](../examples/sandbox_quickstart/README.md#use-a-different-serving-port).
+
 ## Process ownership, storage, and output
 
 The daemon uses Go's `exec.CommandContext` to execute `command[0]` with

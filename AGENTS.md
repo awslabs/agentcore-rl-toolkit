@@ -68,8 +68,8 @@ For online RL training techniques like GRPO, developers need to:
 
 ### Background: BedrockAgentCoreApp
 
-ACR containers must serve `/invocations` (agent logic) and `/ping` (health) on port 8080 —
-see the [HTTP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html#container-requirements-http).
+See the [AgentCore HTTP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html)
+for container requirements.
 AWS's [`BedrockAgentCoreApp`](https://github.com/aws/bedrock-agentcore-sdk-python) wraps that
 contract (`@app.entrypoint`, `@app.websocket`, `@app.ping`, `@app.async_task`); see
 `examples/*/basic_app.py` for the production shape this repo adapts from, and the

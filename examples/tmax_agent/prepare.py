@@ -15,6 +15,7 @@ import boto3
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+SANDBOX_PORT = 11000
 
 
 def command(*args, **kwargs):
@@ -59,7 +60,8 @@ def prepare_task(task_dir, binary, repository, bucket, s3, scratch):
             "RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \\\n"
             "    && rm -rf /var/lib/apt/lists/*\n"
             "COPY --chmod=755 agentcore-sandboxd /usr/local/bin/agentcore-sandboxd\n"
-            'EXPOSE 8080\nCMD ["/usr/local/bin/agentcore-sandboxd"]\n'
+            f"EXPOSE {SANDBOX_PORT}\n"
+            f'CMD ["/usr/local/bin/agentcore-sandboxd", "--listen", "0.0.0.0:{SANDBOX_PORT}"]\n'
         )
     digest = hashlib.sha256()
     for file in sorted(context.rglob("*")):
@@ -77,6 +79,7 @@ def prepare_task(task_dir, binary, repository, bucket, s3, scratch):
         "task_id": task_dir.name,
         "source": source,
         "image_uri": image,
+        "serving_port": SANDBOX_PORT,
         "instruction": (task_dir / "instruction.md").read_text(),
         "verifier_key": key,
         "verifier_sha256": archive_hash,

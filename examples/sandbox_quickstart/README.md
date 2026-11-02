@@ -7,10 +7,10 @@ Runtime sandbox. This example wraps a plain `debian:bookworm-slim` image with th
 
 How it works: `agentcore-sandboxd` (a tiny Go binary, source in
 [`sandboxd/`](../../sandboxd/)) satisfies AgentCore Runtime's container contract
-(`/ping`, `/invocations` on port 8080) and manages the Healthy/HealthyBusy session
-state. Commands use RIP `start/get` over `InvokeAgentRuntime`; the daemon owns
-execution and saves results independently of the client connection. Rebuild the
-image when upgrading the daemon alongside the SDK.
+(`/ping`, `/invocations` on port 8080 by default) and manages the
+Healthy/HealthyBusy session state. Commands use RIP `start/get` over
+`InvokeAgentRuntime`; the daemon owns execution and saves results independently
+of the client connection.
 
 Commands are argv lists: `sb.exec(["python", "script.py", "--name", "hello world"])`.
 For shell syntax, use `sb.exec(["/bin/sh", "-c", "ls | head"])`.
@@ -50,6 +50,31 @@ Set `SANDBOX_RUNTIME_ARN` to the ARN returned by deployment. After changing
 
 The caller also needs IAM permissions for `bedrock-agentcore:InvokeAgentRuntime`,
 `bedrock-agentcore:StopRuntimeSession` on the runtime.
+
+### Use a different serving port
+
+If a task needs port 8080, move sandboxd to another port so both servers can run
+in the same session. For example, change the Dockerfile's final two lines to:
+
+```dockerfile
+EXPOSE 11000
+CMD ["/opt/agentcore-sandbox/agentcore-sandboxd", "--listen", "0.0.0.0:11000"]
+```
+
+Build and push the image to ECR, then use boto3's `create_agent_runtime` or
+`update_agent_runtime` with that image and the matching port configuration:
+
+```python
+protocolConfiguration={"serverProtocol": "HTTP", "port": 11000}
+```
+
+Requires boto3/botocore 1.43.123 or later.
+
+Custom serving ports are supported for microVM runtimes in the range
+8000–12000, excluding
+[reserved platform ports](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#runtime-reserved-ports).
+See AWS's [serving port configuration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-configure-invocation.html)
+for the full contract.
 
 ## 3. Run the demo
 
