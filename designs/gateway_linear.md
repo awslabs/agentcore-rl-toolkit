@@ -9,23 +9,21 @@
 
 ## Summary
 
-`history_mode="linear"` is an opt-in gateway mode for agents whose conversation is
-strictly **linear and append-only** and where cosmetic re-tokenization drift of a
-previously-generated assistant turn is out-of-distribution-insignificant. In that mode the
-gateway heals drift at generation time: before each `backend.generate` it substitutes the
-exact token ids it already served for the earlier assistant turns, so the model always
-generates on the canonical, drift-free context. The recorded trajectory is then append-only
-by construction, so `TrajectoryManager` stays permanently CLEAN — one training sample per
-session, every generated turn trained on its true multi-turn context, no dropped turns and
-no cosmetic forks.
+`history_mode="linear"` is an opt-in gateway mode for agents where cosmetic
+re-tokenization drift of a previously-generated assistant turn is
+out-of-distribution-insignificant. In that mode the gateway heals drift at generation time:
+before each `backend.generate` it substitutes the exact token ids it already served for the
+earlier assistant turns, so the model always generates on the canonical, drift-free context.
+Each recorded prompt then extends the turn it continues exactly, so every branch of the
+`TrajectoryManager` tree stays CLEAN. An append-only session is one training sample, with
+every generated turn trained on its true multi-turn context; retries, edits, parallel
+branches, and sub-agent forks that reuse the session id add one sample per branch.
 
 Default behavior (`history_mode="tree"`) is unchanged.
 
-The accepted v1 design is implemented in
-`src/agentcore_rl_toolkit/rollout_gateway/linear.py`
-(`LinearHealer`), wired through `RolloutGateway` and `BaseAdapter`. Unit-tested in
-`tests/rollout_gateway/test_linear_healer.py`; core template assumptions validated against
-the real Qwen3-Coder-30B tokenizer. Remaining follow-ups at the end.
+The design is implemented in `src/agentcore_rl_toolkit/rollout_gateway/linear.py`
+(`LinearHealer`), wired through `RolloutGateway` and `BaseAdapter`, with anchors read from
+`TrajectoryManager.heal_anchor`.
 
 ## Motivation
 
@@ -36,11 +34,11 @@ whitespace, tool-call JSON spacing, or reasoning re-keying. `TrajectoryManager`
 (`rollout_gateway/trajectory.py`) detects that drift and, to stay safe for harnesses that
 may branch or edit history, resolves it by FORK (split the rollout into a second sample).
 
-For a strictly linear, multi-turn tool-calling agent that safety is pure overhead. On a
-real multi-turn SWE-agent run (OpenHands driving Qwen3-Coder-30B, forking on token drift)
-the large majority of sessions forked into several records each, even though every rollout
-was linear. Each fork re-emits the shared prefix as `loss_mask=0` context and splits the
-trajectory, so it is a large, avoidable training-efficiency loss.
+For a multi-turn tool-calling agent whose history is append-only, that safety is pure
+overhead. On a real multi-turn SWE-agent run (OpenHands driving Qwen3-Coder-30B, forking on
+token drift) the large majority of sessions forked into several records each, even though
+every rollout was append-only. Each fork re-emits the shared prefix as `loss_mask=0` context
+and splits the trajectory, so it is a large, avoidable training-efficiency loss.
 
 ## Design
 
@@ -51,37 +49,62 @@ converts text to token IDs (`encode`). The APIs `Renderer.render()` and
 
 Because the gateway controls the tokens handed to the backend, it can splice the exact ids
 it already served for prior turns over IDs recomputed from the client's messages **before**
-generation, so the model always generates on the canonical, drift-free context:
+generation:
 
 ```
-fed_{N+1} = served_prefix + close_N + delta_tail
-O_{N+1}   = backend.generate(fed_{N+1})
-served_prefix = fed_{N+1} + O_{N+1}    # extend the canonical sequence
+anchor = manager.heal_anchor(sid, messages)    # deepest generated turn the request matches
+fed    = anchor.served_ids + close + delta_tail(messages[len(anchor.messages):])
+out    = backend.generate(fed)
+manager.record_turn(sid, TurnRecord(prompt_ids=fed, output_ids=out), ...)
 ```
 
-where `served_prefix` is the canonical ids through the last generated turn, `close_N` is the
+`anchor.served_ids` is the anchor turn's `prompt_ids + output_ids`, `close` is the
 template's between-message glue, and `delta_tail` is the genuinely-new tokens (new
-observation messages + generation prompt). `O_{N+1}` is then sampled on the canonical
-context, `TrajectoryManager` sees an append-only sequence, appends the tail, and never forks
-— one session, one `TraceRecord`, every generated turn trained on its true multi-turn
-context.
+observation messages + generation prompt). The new turn is recorded below the anchor, and
+its prompt extends the anchor's served ids exactly, so the manager appends it to that
+branch without forking.
+
+### Anchoring on the tree
+
+`TrajectoryManager.heal_anchor` walks the session tree with the same message matching
+`record_turn` mounts by — role plus dict equality, which is order-independent — then moves
+up to the nearest generated assistant node. Its root-path messages and tools schema come
+back with its served ids; `record_turn` stores the tools schema on each generated node for
+this purpose. Because each turn's prompt ids were themselves healed, every branch carries
+the served ids of all generated turns on its path. The manager's existing tree
+linearization emits one record per branch and trains a shared turn on one branch only.
+
+The healer keeps no per-session history. The tree that `record_turn` advances is the only
+state, so a failed or disconnected generation, which is never recorded, cannot advance it.
+
+For an append-only harness the anchor is always the session's latest turn. Other harnesses
+anchor deeper in the tree:
+
+| Request | Anchor |
+| --- | --- |
+| Next turn of an append-only history | latest turn |
+| Retry of turn N | turn N-1 |
+| Edit of a message after turn K | turn K |
+| Return to an older branch | that branch's last matching turn |
+| First turn, or a new root (e.g. a sub-agent with its own first message) | none: full render |
+| Tools schema differs from the anchor's | full render |
+
+Matching at dict equality (rather than by a raw token-prefix check on the client's render)
+keeps the healer in agreement with `TrajectoryManager`. A harness may replay a prior tool
+call with its arguments re-keyed or its JSON re-spaced: the resulting message is still `==`
+to what the gateway stored, but it renders to different tokens under an order-sensitive chat
+template. A token-prefix check would treat that cosmetic re-serialization as non-linear.
 
 ### Computing `delta_tail`
 
-Linearity is decided in **message space**, at the same altitude `TrajectoryManager` matches
-replayed history: dict equality (which is order-independent), not raw token identity. The
-stored `prev_messages` (whose last element is the gateway's own parsed assistant message)
-must be a prefix of the incoming `messages` under `==`, and the tools schema must be
-unchanged. The genuinely-new messages are then `new = messages[len(prev_messages):]`, and
 `delta_tail` is rendered from the gateway's **own** stored messages, so no hand-rolled
 delimiter logic is needed and the client's re-serialization of prior turns never enters the
 fed tokens:
 
 ```
-assert messages[:len(prev_messages)] == prev_messages and tools == prev_tools  # linearity check
-new        = messages[len(prev_messages):]
-text_prev  = render_text(prev_messages,       tools=prev_tools, add_generation_prompt=False)
-text_ext   = render_text(prev_messages + new, tools=prev_tools, add_generation_prompt=True)
+new        = messages[len(anchor.messages):]
+text_prev  = render_text(anchor.messages,       tools=anchor.tools, add_generation_prompt=False)
+text_ext   = render_text(anchor.messages + new, tools=anchor.tools, add_generation_prompt=True)
 assert text_ext.startswith(text_prev)
 delta_tail = encode(text_ext[len(text_prev):])  # new messages + generation prompt
 ```
@@ -92,26 +115,17 @@ described below. Only the closer and new tail are encoded into token IDs.
 The tail is sliced from text because the same append boundary may not exist in token
 space. For example, the Qwen3-Coder tokenizer encodes `\n` as `[198]` but `\n\n` as
 `[271]`, so a newline on each side becomes one token when encoded together. Encoding
-the new newline separately lets the healer append it without changing `served_prefix`.
+the new newline separately lets the healer append it without changing the served ids.
 
 If the text prefix or closer check fails, `render_delta()` returns `None`.
 `LinearHealer` then uses `Renderer.render()` to render and encode both histories
 (`r_prev`, `r_ext`), check their token prefix, and probe the closer in token space.
-Renderers without `render_delta()` also use this path. If full-history healing fails,
-`linear_on_nonlinear` determines whether to reset, raise, or disable healing.
-
-Deciding linearity at the message level (rather than by a raw token-prefix check on the
-client's render) is what keeps the healer in agreement with `TrajectoryManager`. A harness
-may replay a prior tool call with its arguments re-keyed or its JSON re-spaced: the resulting
-message is still `==` to what the gateway stored — so the manager, matching by dict equality,
-keeps it linear — but it renders to different tokens under an order-sensitive chat template.
-A token-prefix check would wrongly flag that cosmetic re-serialization as non-linear and
-reset, needlessly. Matching at dict equality keeps cosmetic drift healed and reserves the
-non-linear path for a genuine edit/branch (see *When the assumption breaks*).
+Renderers without `render_delta()` also use this path. If full-history healing fails, the
+request is rendered in full and counted as `unhealable`.
 
 ### Isolating the assistant closer
 
-The canonical `served_prefix` ends at the model's last generated content; to rejoin it to
+The anchor's served ids end at the model's last generated content; to rejoin them to
 `delta_tail` we reinsert the template's between-message glue (Qwen: `<|im_end|>\n`). That
 glue must be **message-type independent** — the same after a text turn and a tool-call turn.
 `render_delta()` probes it by rendering the prior turns with the last
@@ -124,124 +138,99 @@ is itself content-independent and would otherwise be mistaken for the closer.
 
 Two details, both handled: the served output already contains part of the closer (with
 `no_stop_trim=True` the served ids end with the stop token `<|im_end|>`), so `_trim_overlap`
-drops the prefix of the glue the served prefix already ends with — the reinserted glue is
+drops the prefix of the glue the served ids already end with — the reinserted glue is
 just `\n`, never a doubled `<|im_end|>`. And the tool-call wrapper `</tool_call>` is
 generated by the model, so it lives in the served output and is preserved verbatim,
 correctly not treated as closer.
 
 ## Integration
 
-- `rollout_gateway/linear.py` — `LinearHealer`, the per-sid healer. Tokenizer-free and
-  torch-free; it only calls the injected `Renderer`. `heal` (read-only, before generation)
-  returns the ids to feed the backend; `commit` advances per-sid state after a turn is
-  actually recorded. `heal`/`commit` are split because `commit` needs the served `output_ids`
-  (which only exist after generation) and must fire only for turns that are truly recorded —
-  a failed or retried generation must not advance the canonical prefix — keeping healer state
-  in lockstep with `TrajectoryManager`.
-- `rollout_gateway/gateway.py` — `RolloutGateway.__init__` gains `history_mode` and
-  `linear_on_nonlinear`. In linear mode it builds **one** shared `LinearHealer` and injects it
-  into every co-mounted adapter (like the shared `TrajectoryManager`), so a session's
-  canonical state is coherent regardless of which wire protocol its turns arrive on.
+- `rollout_gateway/linear.py` — `LinearHealer`, tokenizer-free and torch-free; it only
+  calls the injected `Renderer` and reads anchors from the injected `TrajectoryManager`.
+  `heal` (before generation) returns the ids to feed the backend. `make_healer` builds the
+  healer for a `history_mode` and rejects unknown modes.
+- `rollout_gateway/trajectory.py` — `heal_anchor` and `HealAnchor`; `record_turn` stores
+  the tools schema on generated nodes.
+- `rollout_gateway/gateway.py` — `RolloutGateway.__init__` takes `history_mode` and
+  `linear_on_nonlinear`. In linear mode it builds **one** `LinearHealer` over the shared
+  `TrajectoryManager` and injects it into every co-mounted adapter, so a session heals the
+  same whichever wire protocol its turns arrive on.
 - `rollout_gateway/adapters/common.py` — `BaseAdapter` calls `heal` before
-  `backend.generate` in `_run_turn`; the healer handles rendering and encoding internally.
-  The adapter feeds the healed ids to both `generate` and `TurnRecord`, and calls `commit`
-  before `record_turn`. Session teardown drops per-sid healer state.
-  The existing `TrajectoryManager` is unchanged.
-- `rollout_gateway/__init__.py` — exports `LinearHealer`.
+  `backend.generate` in `_run_turn` and feeds the healed ids to both `generate` and
+  `TurnRecord`. Session teardown drops per-sid healer counters.
 
 ### Config surface
 
-- `history_mode`: `"tree"` (default, current behavior) | `"linear"`. Gateway-global; linear and tree
-  sessions do not coexist within a run.
-- `linear_on_nonlinear`: `"reset"` (default) | `"error"` | `"passthrough"` — behavior when a
-  turn breaks the append-only assumption.
+- `history_mode`: `"tree"` (default) | `"linear"`. Gateway-global; sessions of different
+  modes do not coexist within a run.
+- `linear_on_nonlinear`: `"reset"` (default) | `"error"` | `"passthrough"` — behavior when
+  a request does not extend the session's latest turn (see below).
 
-## When the assumption breaks
+## When the history is not append-only
 
-The message-level linearity check fails when the incoming history is not an append-only
-extension of what the gateway stored: a dropped/edited/branched prior message (a genuine
-dict change, not merely a re-serialization), context compaction, a changed tools schema, or
-an LLM-client retry that re-issues the same prompt and produces a second generation from the
-same prefix. The same fallback path also fires when the closer probe cannot isolate the glue
-(a message-type-dependent template — `close_unresolved` counter). Behavior is controlled by
-`linear_on_nonlinear`:
+A request is *non-linear* when it does not extend the session's latest generated turn: a
+retry, an edit or drop of a prior message, a parallel branch, a sub-agent with its own
+first message, a compaction, or a tools change. `linear_on_nonlinear` selects the behavior:
 
-- `"reset"` (default) — drop per-sid state and re-anchor to the fully rendered and encoded
-  prompt, treating the jump as the start of a fresh linear segment. The turns before and after
-  each stay drift-free; only the single jump turn conditions on that prompt. Correct for benign,
-  agent-controlled jumps; increments a counter so a run that resets constantly is visible.
-- `"error"` — raise and fail the rollout, for runs that want a hard guarantee the assumption
-  holds.
-- `"passthrough"` — stop healing this session and route the rest through the standard
-  tree/FORK path (default behavior) for the remainder of the session.
+- `"reset"` (default) — anchor on the deepest generated turn the request still matches, as
+  in the table above, or render in full when none matches or its tools schema differs.
+- `"error"` — raise and fail the rollout, for runs that require an append-only history.
+- `"passthrough"` — stop healing this session and render the rest of its requests in full,
+  so the standard tree/FORK path handles them.
 
-`"reset"` re-anchoring is only sound because we train on the canonical/healed context by
-design: the reset turn's slightly drifted context is accepted for the same reason the whole
-mode is.
+Healing from the deepest match rather than from the latest turn only matters for these
+requests. Restarting from a full render instead would generate the non-linear turn on the
+re-tokenized prior turns and split it from the shared prefix; and a healer that tracked
+only the latest turn would also lose the anchor when the agent returns to an older branch.
 
 ## Observability
 
-`LinearHealer` tracks, per turn: `healed_turns` and `healed_prefix_tokens` (turns healed and
-canonical prefix tokens spliced); `nonlinear` (message-level linearity failures — a genuine
-history edit/branch or tools change, not cosmetic re-serialization); `close_unresolved`
-(turns where the closer probe couldn't isolate the glue and fell back). A high `nonlinear`
-rate means the "linear" assumption is wrong for that harness and tree mode is the better fit
-— what happened to those jumps is the (known) `linear_on_nonlinear` mode, so there is no
-separate reset counter.
+`LinearHealer` tracks `healed_turns` and `healed_prefix_tokens` (turns healed and
+served prefix tokens spliced); `nonlinear` (requests that did not extend the session's
+latest turn); `unhealable` (anchored requests the template could not splice, rendered in
+full); and `close_unresolved` (the subset of `unhealable` where the closer probe couldn't
+isolate the glue). A high `nonlinear` rate on a harness expected to be append-only is worth
+investigating, and `linear_on_nonlinear="error"` turns it into a failure.
 
 These are kept two ways. `LinearHealer.counters` is the run-cumulative total across every
 session the (shared) healer has seen. Per session, `finish_session` pops that session's own
 counters (`LinearHealer.pop_stats`, a fixed schema of `LinearHealer.COUNTER_KEYS` with zeros
 for counters that never fired) and attaches them to every record's metadata under
-`linear_healer`, riding out on the existing `extra_metadata` → `TraceRecord.metadata` seam —
-so a downstream consumer sees each rollout's healing stats without touching the healer. The
-per-session counters survive `reset`/`passthrough` jumps within a session (only per-sid
-healing *state* is cleared on a jump), so the final record still reports the full `nonlinear`
-total for that session.
+`linear_healer`,
+riding out on the existing `extra_metadata` → `TraceRecord.metadata` seam — so a downstream
+consumer sees each rollout's healing stats without touching the healer.
 
 ## Validation
 
 **Unit tests** (`tests/rollout_gateway/test_linear_healer.py`) drive the real `LinearHealer`
-+ `TrajectoryManager` through the same heal → generate → commit pipeline
++ `TrajectoryManager` through the same heal → generate → record pipeline
 `BaseAdapter._run_turn` uses, with a template-shaped fake renderer that reproduces
 assistant-only drift: renderer-driven drift forks without healing and collapses to one
 sample with it (loss mask covering every generated turn, served logprobs preserved);
-multi-turn drift stays one sample; the closer probe isolates the glue for both text and
-tool-call turns and does not double the closer when the served output already ends with the
-stop token; and the three `linear_on_nonlinear` paths behave as specified. The template-level
-assumptions (generation-prompt tokens equal the assistant open; token-prefix consistency turn to
-turn; the closer probe returns `<|im_end|>\n` for both text and tool-call turns and is a
-genuine suffix of a tool-call `r_prev`; served ids end with the stop token) were confirmed
-against the live Qwen3-Coder-30B tokenizer/template.
+multi-turn drift stays one sample; retries, edits, and returns to an older branch anchor
+on the right turn and give one CLEAN sample per branch; new roots, tools changes, and
+unspliceable templates fall back to the full render; the closer probe isolates the glue for
+both text and tool-call turns and does not double the closer when the served output already
+ends with the stop token; and the three `linear_on_nonlinear` paths behave as specified. The
+template-level assumptions (generation-prompt tokens equal the assistant open; token-prefix
+consistency turn to turn; the closer probe returns `<|im_end|>\n` for both text and
+tool-call turns and is a genuine suffix of a tool-call `r_prev`; served ids end with the
+stop token) were confirmed against the live Qwen3-Coder-30B tokenizer/template.
 
 `tests/rollout_gateway/test_render.py` covers four incremental-path properties with a local
 HF/Rust tokenizer: correct delta extraction without encoding old history, multi-turn
 trajectory preservation, fallback on incompatible text prefixes or closers, and preservation
 of the served token prefix across a BPE merge boundary.
 
-## Assumptions and target use case
+## Assumptions
 
-- The agent harness intends a strictly **linear, append-only** history: it replays prior
-  turns without semantically editing them. It may re-serialize a prior assistant turn
-  cosmetically — tool-call `arguments` re-keyed, JSON re-spaced — because such a replay is
-  still `==` (dict equality) to what the gateway stored, so the message-level linearity check
-  keeps it linear; the only turn-to-turn divergence it need not tolerate is a message-level
-  rewrite that actually changes a prior dict. The target is a multi-turn, tool-calling SWE
-  agent (validated with OpenHands driving Qwen3-Coder-30B); the harness never branches or
-  edits prior turns.
 - Cosmetic re-tokenization drift is treated as OOD-insignificant, so training on the
   canonical/healed context is acceptable.
+- A prior message the harness replays must be `==` to what the gateway stored for the
+  request to anchor past it. Cosmetic re-serialization (re-keyed tool-call arguments,
+  re-spaced JSON) keeps dict equality; a semantic rewrite of a prior message is non-linear
+  and anchors on the turn before it.
 - Incremental healing requires a stable text prefix and a matching closer. The
   type-independent-closer assumption is validated for Qwen3-Coder-30B; re-check it when
   targeting a template family whose between-message glue could differ after tool-call vs text
   turns (the `close_unresolved` fallback keeps such a case correct, just unhealed).
-
-## Non-goals
-
-- Message-level rewrites where a prior message's **dict** changes *semantically* (not just
-  its key order or JSON spacing): treated as non-linear and re-anchored/failed per
-  `linear_on_nonlinear`. Cosmetic re-serialization that keeps the dict `==` is handled — the
-  linearity check matches at dict equality — but an actual content change is out of scope for
-  healing.
-- Sub-agent / parallel-branch capture: that is what tree mode is for; linear mode re-anchors
-  or falls back rather than trying to represent it.

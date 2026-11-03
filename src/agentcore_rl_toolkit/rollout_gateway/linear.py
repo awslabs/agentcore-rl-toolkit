@@ -1,110 +1,107 @@
-"""Generate-time prefix healing for strictly-linear agent histories.
+"""Generate-time prefix healing over the session tree.
 
-This is the engine behind the gateway's ``history_mode="linear"``. It targets agents whose conversation
-is **append-only** and where cosmetic re-tokenization drift of a previously-generated
-assistant turn is considered insignificant (OOD-negligible).
+This is the engine behind the gateway's ``history_mode="linear"``. It targets harnesses
+whose cosmetic re-tokenization drift of a previously-generated assistant turn is
+considered insignificant (OOD-negligible).
 
 The problem it removes: each turn the client replays the whole conversation as messages;
 re-rendering a prior assistant message from its parsed dict rarely reproduces the exact
 token ids the model actually generated (whitespace, tool-call JSON spacing, reasoning
 re-keying). The :class:`~.trajectory.TrajectoryManager` then sees that drift and FORKs the
-single rollout into multiple training samples.
+rollout into multiple training samples.
 
 The fix: because the gateway owns the tokens handed to the backend, it substitutes the
 exact ids it already served for the earlier turns **before** generation, so the model
-always generates on the canonical, drift-free context. The recorded prompt is then an
-exact prefix extension of what the manager holds, so the manager stays permanently CLEAN
-— one sample per session, every generated turn trained on its true multi-turn context.
-
-Per turn the healer holds, per sid:
-
-* ``served_prefix`` — the canonical token ids of the conversation through the end of the
-  last turn's *generated content* (i.e. what we fed to generate last turn, plus the ids
-  the backend actually served). This is exactly what the manager holds after that turn.
-* ``prev_messages`` / ``prev_tools`` — the message list (including the generated assistant)
-  and tools schema last rendered, used to re-derive the drifted skeleton.
+always generates on the canonical, drift-free context. Each recorded prompt is then an
+exact prefix extension of the turn it continues, so every branch of the manager's tree
+stays CLEAN: an append-only session is one sample, and retries, edits, parallel branches,
+and sub-agent forks that reuse the session id add one sample per branch.
 
 Healing ``messages`` for the next turn (``await heal(...)``):
 
-1. Linearity check at the **message level**: ``prev_messages`` must be a prefix of the
-   incoming ``messages`` under dict equality (``==``, which is order-independent), and the
-   tools schema must be unchanged. This is the SAME notion the :class:`TrajectoryManager`
-   uses to match replayed history, so a prior turn the client re-serialized cosmetically
-   (e.g. tool-call ``arguments`` re-keyed, or JSON re-spaced — the wire form is emitted
-   ``sort_keys=True`` while the manager kept the model's emission order) still compares
-   equal and stays linear. Only a genuine edit/drop/branch/compaction (or a tools change)
-   is non-linear — handled per ``on_nonlinear``. ``new = messages[len(prev_messages):]``
-   is the genuinely-new observation(s).
-2. If the renderer supports ``render_delta``, render the real stored history and its
-   extension to text, probe the assistant closer in text, and encode only the closer
-   and the new tail. If that path is unavailable or declines, use steps 3–5 below.
-3. ``r_prev = render(prev_messages, add_generation_prompt=False)`` — the prior conversation
-   rendered from the gateway's OWN stored messages (``= served_prompt' + O_n' + close_n``).
-4. ``r_ext = render(prev_messages + new, add_generation_prompt=True)`` — the same stored
+1. Anchor at the **message level**: :meth:`TrajectoryManager.heal_anchor` returns the
+   deepest generated turn whose root path is a prefix of ``messages`` under the dict
+   equality ``record_turn`` mounts by, so a prior turn the client re-serialized
+   cosmetically (tool-call ``arguments`` re-keyed, JSON re-spaced) still matches. The
+   anchor carries the turn's served ids (``prompt_ids + output_ids``), its root-path
+   messages, and its tools schema. ``new = messages[len(anchor.messages):]`` is the
+   genuinely-new observation(s).
+2. If the renderer supports ``render_delta``, render the stored history and its extension
+   to text, probe the assistant closer in text, and encode only the closer and the new
+   tail. If that path is unavailable or declines, use steps 3–5 below.
+3. ``r_prev = render(anchor.messages, add_generation_prompt=False)`` — the prior
+   conversation rendered from the gateway's OWN stored messages.
+4. ``r_ext = render(anchor.messages + new, add_generation_prompt=True)`` — the same stored
    prefix extended by the new observation(s). Check that ``r_ext`` starts with ``r_prev``;
    the client's re-serialization of prior turns never enters the fed tokens.
-5. ``close_n`` — the template's assistant-closer after the last turn, extracted by
-   a common-suffix probe (:func:`_assistant_close`), independent of template internals.
-6. Splice the closer and new tail onto ``served_prefix``, omitting any closer tokens
-   already present at the end of the served prefix.
+5. ``close`` — the template's assistant-closer after the anchor turn, extracted by a
+   common-suffix probe (:meth:`LinearHealer._assistant_close`).
+6. Splice the closer and new tail onto the anchor's served ids, omitting any closer tokens
+   already present at their end.
 
-:meth:`commit` (after a successful turn) advances ``served_prefix`` to
-``healed + output_ids`` and ``prev_messages`` to ``messages + [response_message]``.
+A request with no anchor (first turn, or a new root such as a sub-agent with its own first
+message), a changed tools schema, or a template the splice cannot handle is rendered in
+full, and the manager handles any drift as in tree mode.
 
-The healer is tokenizer-free and torch-free: it only calls the injected ``Renderer``.
+The healer keeps no per-session history: the anchor comes from the manager's tree, which
+``record_turn`` advances. It is tokenizer-free and torch-free; it only calls the injected
+``Renderer``.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 from collections import Counter
 
 from .render import _PROBE_A, _PROBE_B, Renderer, _common_suffix
+from .trajectory import HealAnchor, TrajectoryManager
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LinearHealer"]
+__all__ = ["LinearHealer", "make_healer"]
+
+HISTORY_MODES = ("tree", "linear")
 
 
-def _common_prefix_len(a: list[int], b: list[int]) -> int:
-    limit = min(len(a), len(b))
-    i = 0
-    while i < limit and a[i] == b[i]:
-        i += 1
-    return i
-
-
-@dataclasses.dataclass
-class _State:
-    served_prefix: list[int]
-    prev_messages: list[dict]
-    prev_tools: list[dict] | None
+def make_healer(
+    history_mode: str, renderer: Renderer, manager: TrajectoryManager, on_nonlinear: str = "reset"
+) -> LinearHealer | None:
+    """The healer for ``history_mode``: a ``LinearHealer`` for ``"linear"``, ``None`` for
+    ``"tree"``."""
+    if history_mode not in HISTORY_MODES:
+        raise ValueError(f"history_mode must be one of {HISTORY_MODES}, got {history_mode!r}")
+    return LinearHealer(renderer, manager, on_nonlinear=on_nonlinear) if history_mode == "linear" else None
 
 
 class LinearHealer:
-    """Per-sid generate-time prefix healing for linear histories.
+    """Per-branch generate-time prefix healing anchored on the manager's tree.
 
-    ``on_nonlinear`` picks the behaviour when the message-level linearity assumption breaks
-    (the stored history is not a dict-equality prefix of the incoming history, or the tools
-    schema changed):
+    A request is *non-linear* when it does not extend the session's latest generated
+    turn: a retry, an edit or drop of a prior message, a parallel branch, a sub-agent with
+    its own first message, a compaction, or a tools change. ``on_nonlinear`` picks the
+    behavior:
 
-    * ``"reset"`` (default) — re-anchor to the incoming render and keep healing forward,
-      treating the jump as the start of a fresh linear segment. Cheapest; correct when the
-      jump is a benign, agent-controlled compaction. The single jump turn conditions on the
-      client's (drifted-but-linear-from-here) render.
-    * ``"error"`` — raise, failing the rollout, for runs that want a hard guarantee.
-    * ``"passthrough"`` — stop healing this sid and hand back the raw incoming render, so
-      the caller records the drifted prompt and the manager's tree/FORK path takes over.
+    * ``"reset"`` (default) — heal from the deepest generated turn the request still
+      matches, or render in full when none matches or its tools schema differs.
+    * ``"error"`` — raise, failing the rollout, for runs that require an append-only
+      history.
+    * ``"passthrough"`` — stop healing this sid and hand back the full render, so the
+      manager's tree/FORK path handles the rest of the session.
+
+    Every non-linear request is counted under ``nonlinear``.
     """
 
-    def __init__(self, renderer: Renderer, *, on_nonlinear: str = "reset") -> None:
+    #: every counter key this healer can emit; ``pop_stats`` returns all of them (with
+    #: zeros for counters that never fired) so per-session stats have a stable schema.
+    COUNTER_KEYS = ("healed_turns", "healed_prefix_tokens", "nonlinear", "close_unresolved", "unhealable")
+
+    def __init__(self, renderer: Renderer, manager: TrajectoryManager, *, on_nonlinear: str = "reset") -> None:
         if on_nonlinear not in ("reset", "error", "passthrough"):
             raise ValueError(f"on_nonlinear must be reset|error|passthrough, got {on_nonlinear!r}")
         self.renderer = renderer
+        self.manager = manager
         self.on_nonlinear = on_nonlinear
-        self._state: dict[str, _State] = {}
-        # sids we have stopped healing (passthrough after a non-linear jump)
+        # sids we have stopped healing (passthrough after a non-linear request)
         self._disabled: set[str] = set()
         # run-cumulative totals across every sid this healer instance has seen
         self.counters: Counter[str] = Counter()
@@ -119,124 +116,31 @@ class LinearHealer:
     # -- public -------------------------------------------------------------
 
     async def heal(self, sid: str, messages: list[dict], tools: list[dict] | None) -> list[int]:
-        """Return the token ids to feed the backend for this turn.
-
-        For the first turn of a sid (or a passthrough sid) this is just the plain render;
-        otherwise the drift-healed canonical prompt described in the module docstring.
-        ``commit`` must be called afterwards on the turns that are actually recorded.
-        """
-        # canonical tokens = assistant message in token space as sampled from the llm
-        # drifted tokens = same message but with a different token-space representation
-        # some messages render into canonical tokens, some into drifted
-        # given canonical tokens, we can't compute a message that will render into canonical tokens
-        # but if two messages are equal, then we can use canonical tokens as context for the llm
-
-        st = self._state.get(sid)
-        if st is None or sid in self._disabled:
-            # first turn, or healing disabled for this sid: feed the plain render
-            return await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
-
-        # Linearity is decided in MESSAGE space, not token space. st.prev_messages is this
-        # session's history before this request (including the last assistant message). The
-        # history is linear iff those messages are a prefix of the incoming messages under
-        # dict equality -- the same order-independent match the TrajectoryManager uses -- and
-        # the tools schema is unchanged. A prior assistant turn the client re-serialized
-        # cosmetically (tool-call arguments re-keyed, or JSON re-spaced: the wire form is
-        # emitted sort_keys=True while the manager keeps the model's emission order) still
-        # compares equal, so it stays linear instead of tripping a token-level prefix check.
-        new = self._linear_delta(st, messages, tools)
-        if new is None:
-            # genuine edit/drop/branch/compaction (or a tools change): re-anchor
-            r_full = await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
-            return self._handle_nonlinear(sid, r_full)
-
-        render_delta = getattr(self.renderer, "render_delta", None)
-        if render_delta is not None:
-            delta = await render_delta(st.prev_messages, new, tools=st.prev_tools)
-            if delta is not None:
-                close, tail = delta
-                return self._splice(sid, st, close, tail)
-
-        # r_prev is the token-space render of the gateway's OWN stored history. r_ext extends
-        # that same stored prefix by only the genuinely-new (non-assistant, drift-free)
-        # messages, so r_ext starts with r_prev by construction (identical prefix list and
-        # tools) -- the client's re-serialized prior turns never enter the fed tokens.
-        r_prev = await self.renderer.render(st.prev_messages, tools=st.prev_tools, add_generation_prompt=False)
-        r_ext = await self.renderer.render(st.prev_messages + new, tools=st.prev_tools, add_generation_prompt=True)
-        if r_ext[: len(r_prev)] != r_prev:
-            # template glue for the prior turns depends on the appended messages, so we
-            # cannot splice the canonical prefix safely; re-anchor rather than emit garbage.
-            return self._handle_nonlinear(sid, r_ext)
-
-        # close is the token-space marker of the end of the assistant turn
-        close = await self._assistant_close(st.prev_messages, st.prev_tools, r_prev)
-        if close is None:
-            # couldn't isolate the assistant-closer (e.g. a template whose glue depends on
-            # message type); don't emit a subtly-wrong sequence — fall back.
-            self._bump(sid, "close_unresolved")
-            return self._handle_nonlinear(sid, r_ext)
-
-        return self._splice(sid, st, close, r_ext[len(r_prev) :])
-
-    def _splice(self, sid: str, st: _State, close: list[int], tail: list[int]) -> list[int]:
-        # don't duplicate close tokens the model already emitted at the end of its served
-        # output (e.g. a trailing stop token kept by no_stop_trim): drop the prefix of
-        # `close` that the served prefix already ends with.
-        close = self._trim_overlap(st.served_prefix, close)
-
-        self._bump(sid, "healed_turns")
-        self._bump(sid, "healed_prefix_tokens", len(st.served_prefix) + len(close))
-
-        # st.served_prefix is the accumulation of rendered non-assistant messages
-        # and canonical tokens of assistant messsages, therefore the concatenated
-        # sequence contains zero drifted tokens
-        return list(st.served_prefix) + close + tail
-
-    @staticmethod
-    def _linear_delta(st: _State, messages: list[dict], tools: list[dict] | None) -> list[dict] | None:
-        """The genuinely-new messages appended since the last turn, or ``None`` if the
-        incoming history is not a linear extension of the stored history.
-
-        Linear iff ``st.prev_messages`` is a prefix of ``messages`` under dict equality
-        (order-independent, matching :class:`TrajectoryManager`) AND the tools schema is
-        unchanged. Returns ``messages[len(prev_messages):]`` when linear (possibly empty:
-        a bare re-generation of the same turn).
-        """
-        prev = st.prev_messages
-        k = len(prev)
-        if len(messages) < k or messages[:k] != prev:
-            return None
-        if (list(tools) if tools else None) != st.prev_tools:
-            return None
-        return messages[k:]
-
-    def commit(
-        self,
-        sid: str,
-        *,
-        fed_prompt_ids: list[int],
-        output_ids: list[int],
-        messages: list[dict],
-        response_message: dict | None,
-        tools: list[dict] | None,
-    ) -> None:
-        """Advance per-sid state after a turn that was actually recorded.
-
-        ``fed_prompt_ids`` is what :meth:`heal` returned (and what the backend generated
-        against); ``output_ids`` is what the backend served.
-        """
+        """Return the token ids to feed the backend for this turn: the drift-healed prompt
+        described in the module docstring, or the full render when there is nothing to
+        heal from."""
+        tools = list(tools) if tools else None
         if sid in self._disabled:
-            return
-        asst = response_message if response_message is not None else {"role": "assistant", "content": ""}
-        self._state[sid] = _State(
-            served_prefix=list(fed_prompt_ids) + list(output_ids),
-            prev_messages=list(messages) + [asst],
-            prev_tools=list(tools) if tools else None,
-        )
+            return await self._render_full(messages, tools)
 
-    #: every counter key this healer can emit; ``pop_stats`` returns all of them (with
-    #: zeros for counters that never fired) so per-session stats have a stable schema.
-    COUNTER_KEYS = ("healed_turns", "healed_prefix_tokens", "nonlinear", "close_unresolved")
+        anchor = self.manager.heal_anchor(sid, messages)
+        latest = self.manager.turn_count(sid)
+        extends_latest = anchor is not None and anchor.turn_index == latest and anchor.tools == tools
+        if latest and not extends_latest:
+            self._bump(sid, "nonlinear")
+            if self.on_nonlinear == "error":
+                raise RuntimeError(
+                    f"linear history mode: sid {sid!r} broke the append-only assumption "
+                    "(the request does not extend the session's latest turn)"
+                )
+            if self.on_nonlinear == "passthrough":
+                self._disabled.add(sid)
+                logger.warning("linear healer: sid=%s non-linear request; disabling healing for this session", sid)
+                return await self._render_full(messages, tools)
+
+        if anchor is None or anchor.tools != tools:
+            return await self._render_full(messages, tools)
+        return await self._extend(sid, anchor, messages[len(anchor.messages) :])
 
     def pop_stats(self, sid: str) -> dict[str, int]:
         """Remove and return this sid's healing counters as a fixed-schema dict.
@@ -250,31 +154,54 @@ class LinearHealer:
         return {k: c[k] for k in self.COUNTER_KEYS}
 
     def drop(self, sid: str) -> None:
-        self._state.pop(sid, None)
         self._disabled.discard(sid)
         self._per_sid.pop(sid, None)
 
     # -- internals ----------------------------------------------------------
 
-    def _handle_nonlinear(self, sid: str, r_full: list[int]) -> list[int]:
-        self._bump(sid, "nonlinear")
-        if self.on_nonlinear == "error":
-            raise RuntimeError(
-                f"linear history mode: sid {sid!r} broke the append-only assumption "
-                "(stored history is not a message-level prefix of the incoming history)"
-            )
-        if self.on_nonlinear == "passthrough":
-            self._disabled.add(sid)
-            self._state.pop(sid, None)
-            logger.warning("linear healer: sid=%s non-linear jump; disabling healing for this session", sid)
-            return r_full
-        # reset: re-anchor to the incoming render as a fresh linear segment. commit() will
-        # overwrite _state; here we just clear it so this turn is treated first-turn-like.
-        # (No separate reset counter: with on_nonlinear="reset" every ``nonlinear`` jump is
-        # re-anchored, so it would just duplicate ``nonlinear``; the mode is known config.)
-        self._state.pop(sid, None)
-        logger.info("linear healer: sid=%s non-linear jump; re-anchoring", sid)
-        return r_full
+    async def _render_full(self, messages: list[dict], tools: list[dict] | None) -> list[int]:
+        return await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+
+    async def _extend(self, sid: str, anchor: HealAnchor, new: list[dict]) -> list[int]:
+        """Splice ``anchor.served_ids`` with the closer and the render of ``new``, or
+        return the full render when the template cannot be spliced."""
+        render_delta = getattr(self.renderer, "render_delta", None)
+        if render_delta is not None:
+            delta = await render_delta(anchor.messages, new, tools=anchor.tools)
+            if delta is not None:
+                close, tail = delta
+                return self._splice(sid, anchor.served_ids, close, tail)
+
+        # r_prev is the token-space render of the gateway's OWN stored history; r_ext
+        # extends that same stored prefix by only the genuinely-new messages, so the
+        # client's re-serialized prior turns never enter the fed tokens.
+        r_prev = await self.renderer.render(anchor.messages, tools=anchor.tools, add_generation_prompt=False)
+        r_ext = await self.renderer.render(anchor.messages + new, tools=anchor.tools, add_generation_prompt=True)
+        if r_ext[: len(r_prev)] != r_prev:
+            # template glue for the prior turns depends on the appended messages, so the
+            # served ids cannot be spliced safely.
+            self._bump(sid, "unhealable")
+            return r_ext
+
+        close = await self._assistant_close(anchor.messages, anchor.tools, r_prev)
+        if close is None:
+            # couldn't isolate the assistant-closer (a template whose glue depends on
+            # message type); don't emit a subtly-wrong sequence.
+            self._bump(sid, "close_unresolved")
+            self._bump(sid, "unhealable")
+            return r_ext
+
+        return self._splice(sid, anchor.served_ids, close, r_ext[len(r_prev) :])
+
+    def _splice(self, sid: str, served_ids: list[int], close: list[int], tail: list[int]) -> list[int]:
+        # don't duplicate close tokens the model already emitted at the end of its served
+        # output (e.g. a trailing stop token kept by no_stop_trim).
+        close = self._trim_overlap(served_ids, close)
+        self._bump(sid, "healed_turns")
+        self._bump(sid, "healed_prefix_tokens", len(served_ids) + len(close))
+        # served_ids interleave rendered non-assistant messages with the served tokens of
+        # every generated turn on the branch, so the result contains no drifted tokens.
+        return list(served_ids) + close + tail
 
     async def _assistant_close(
         self, prev_messages: list[dict], tools: list[dict] | None, r_prev: list[int]
@@ -307,10 +234,10 @@ class LinearHealer:
         return close
 
     @staticmethod
-    def _trim_overlap(served_prefix: list[int], close: list[int]) -> list[int]:
-        """Drop the longest prefix of ``close`` that ``served_prefix`` already ends with, so
+    def _trim_overlap(served_ids: list[int], close: list[int]) -> list[int]:
+        """Drop the longest prefix of ``close`` that ``served_ids`` already ends with, so
         a closer the model emitted in its served output isn't duplicated."""
-        for k in range(min(len(close), len(served_prefix)), 0, -1):
-            if served_prefix[-k:] == close[:k]:
+        for k in range(min(len(close), len(served_ids)), 0, -1):
+            if served_ids[-k:] == close[:k]:
                 return close[k:]
         return close

@@ -18,7 +18,7 @@ from aiohttp import web
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.common import BaseAdapter, _health
 from .adapters.openai import OpenAIAdapter
-from .linear import LinearHealer
+from .linear import LinearHealer, make_healer
 from .render import Renderer
 from .sampling_backends.base import SamplingBackend, supports_top_logprobs
 from .trace import BaseTrace, TraceRecord
@@ -44,9 +44,11 @@ class RolloutGateway:
         max_turns_per_sid / debug_callback: forwarded to the adapters.
         history_mode: ``"tree"`` (default) or ``"linear"``. In linear mode the gateway
             heals re-tokenization drift at generation time via one shared ``LinearHealer``
-            so the manager stays CLEAN (one sample per session). See ``linear.py``.
+            so every branch of the session tree stays CLEAN (one sample per append-only
+            session). See ``linear.py``.
         linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
-            behaviour when a turn breaks the append-only assumption (linear mode only).
+            behaviour when a request does not extend the session's latest turn (linear
+            mode only).
     """
 
     def __init__(
@@ -68,11 +70,9 @@ class RolloutGateway:
         self.manager = TrajectoryManager()
 
         # In linear mode, one healer is shared across all co-mounted adapters (like the
-        # manager) so a session's canonical served-id state is coherent regardless of
-        # which wire protocol its turns arrive on. See linear.py.
-        self.healer: LinearHealer | None = (
-            LinearHealer(renderer, on_nonlinear=linear_on_nonlinear) if history_mode == "linear" else None
-        )
+        # manager) so its counters cover a session whichever wire protocol its turns
+        # arrive on. See linear.py.
+        self.healer: LinearHealer | None = make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
 
         # one aiohttp app shared by all adapters; register health once here.
         self.app = web.Application(client_max_size=64 * 1024 * 1024)
@@ -90,7 +90,7 @@ class RolloutGateway:
                 max_turns_per_sid=max_turns_per_sid,
                 debug_callback=debug_callback,
                 manager=self.manager,  # SHARED across adapters -> one tree per sid
-                healer=self.healer,  # SHARED across adapters -> coherent canonical state
+                healer=self.healer,  # SHARED across adapters -> one set of per-session counters
                 app=self.app,  # SHARED app -> all routes on one server
             )
             self.adapters.append(adapter)

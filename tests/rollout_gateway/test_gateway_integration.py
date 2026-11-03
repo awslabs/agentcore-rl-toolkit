@@ -239,9 +239,9 @@ async def test_openai_tool_loop_end_to_end():
 
 
 @pytest.mark.asyncio
-async def test_linear_mode_attaches_healer_stats_to_metadata():
+async def test_healed_mode_attaches_healer_stats_to_metadata():
     """In linear mode, the session's LinearHealer counters ride out on every record's
-    metadata under ``linear_healer`` (the metrics seam), alongside caller extra_metadata."""
+    metadata under ``healer`` (the metrics seam), alongside caller extra_metadata."""
     gateway, backend = make_gateway(replies=["CALL calculator expr=2+2", "the answer is 4"], history_mode="linear")
     tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
     sid = "ep-lin:solver"
@@ -264,12 +264,50 @@ async def test_linear_mode_attaches_healer_stats_to_metadata():
         await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))
         records = await gateway.finish_session(sid, reward=1.0, extra_metadata={"task": "math"})
 
-    assert len(records) == 1  # linear mode stays CLEAN -> one row
+    assert len(records) == 1  # append-only history stays CLEAN -> one row
     md = records[0].metadata
     assert md["task"] == "math"  # caller metadata preserved
-    # turn 2 was healed (prior state exists); the per-session counter is surfaced.
+    # turn 2 was healed on turn 1; the per-session counter is surfaced.
     assert md["linear_healer"]["healed_turns"] == 1
-    assert md["linear_healer"].get("nonlinear", 0) == 0
+    assert md["linear_healer"]["nonlinear"] == 0
+
+
+@pytest.mark.asyncio
+async def test_healed_mode_heals_retry_branch():
+    """In linear mode a retried turn anchors on the turn it extends: both attempts become
+    CLEAN branches."""
+    gateway, backend = make_gateway(
+        replies=["CALL calculator expr=2+2", "the answer is 4", "it is 4"], history_mode="linear"
+    )
+    tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
+    sid = "ep-tree:solver"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid)
+        body1 = {"model": "m", "messages": [{"role": "user", "content": "two plus two"}], "tools": tools}
+        resp1 = await client.post("/v1/chat/completions", json=body1, headers=bearer(sid))
+        choice1 = (await resp1.json())["choices"][0]
+        call = choice1["message"]["tool_calls"][0]
+        body2 = {
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "two plus two"},
+                {"role": "assistant", "content": None, "tool_calls": choice1["message"]["tool_calls"]},
+                {"role": "tool", "tool_call_id": call["id"], "content": "4"},
+            ],
+            "tools": tools,
+        }
+        await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))
+        await client.post("/v1/chat/completions", json=body2, headers=bearer(sid))  # retry turn 2
+        records = await gateway.finish_session(sid, reward=1.0)
+
+    turn1 = backend.calls[0]["prompt_ids"] + gateway.renderer._encode("CALL calculator expr=2+2")
+    assert backend.calls[1]["prompt_ids"] == backend.calls[2]["prompt_ids"]
+    assert backend.calls[1]["prompt_ids"][: len(turn1)] == turn1
+    assert len(records) == 2  # one CLEAN record per branch
+    stats = records[0].metadata["linear_healer"]
+    assert stats["healed_turns"] == 2
+    assert stats["nonlinear"] == 1  # the retry
 
 
 # ---------------------------------------------------------------------------
