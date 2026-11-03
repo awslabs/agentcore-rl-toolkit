@@ -1,4 +1,4 @@
-# Healed-history mode for the rollout gateway (generate-time prefix healing)
+# Linear-history mode for the rollout gateway (generate-time prefix healing)
 
 | Field | Value |
 | --- | --- |
@@ -9,7 +9,7 @@
 
 ## Summary
 
-`history_mode="healed"` is an opt-in gateway mode for agents where cosmetic
+`history_mode="linear"` is an opt-in gateway mode for agents where cosmetic
 re-tokenization drift of a previously-generated assistant turn is
 out-of-distribution-insignificant. In that mode the gateway heals drift at generation time:
 before each `backend.generate` it substitutes the exact token ids it already served for the
@@ -21,8 +21,8 @@ branches, and sub-agent forks that reuse the session id add one sample per branc
 
 Default behavior (`history_mode="tree"`) is unchanged.
 
-The design is implemented in `src/agentcore_rl_toolkit/rollout_gateway/healer.py`
-(`PrefixHealer`), wired through `RolloutGateway` and `BaseAdapter`, with anchors read from
+The design is implemented in `src/agentcore_rl_toolkit/rollout_gateway/linear.py`
+(`LinearHealer`), wired through `RolloutGateway` and `BaseAdapter`, with anchors read from
 `TrajectoryManager.heal_anchor`.
 
 ## Motivation
@@ -93,7 +93,7 @@ Matching at dict equality (rather than by a raw token-prefix check on the client
 keeps the healer in agreement with `TrajectoryManager`. A harness may replay a prior tool
 call with its arguments re-keyed or its JSON re-spaced: the resulting message is still `==`
 to what the gateway stored, but it renders to different tokens under an order-sensitive chat
-template. A token-prefix check would treat that cosmetic re-serialization as a branch.
+template. A token-prefix check would treat that cosmetic re-serialization as non-linear.
 
 ### Computing `delta_tail`
 
@@ -118,7 +118,7 @@ space. For example, the Qwen3-Coder tokenizer encodes `\n` as `[198]` but `\n\n`
 the new newline separately lets the healer append it without changing the served ids.
 
 If the text prefix or closer check fails, `render_delta()` returns `None`.
-`PrefixHealer` then uses `Renderer.render()` to render and encode both histories
+`LinearHealer` then uses `Renderer.render()` to render and encode both histories
 (`r_prev`, `r_ext`), check their token prefix, and probe the closer in token space.
 Renderers without `render_delta()` also use this path. If full-history healing fails, the
 request is rendered in full and counted as `unhealable`.
@@ -131,7 +131,7 @@ glue must be **message-type independent** — the same after a text turn and a t
 `render_delta()` probes it by rendering the prior turns with the last
 assistant replaced by two distinct *text* bodies and taking the common suffix of the two
 strings. It checks that the suffix also terminates the real `text_prev`, then encodes
-only that short suffix. The full-history fallback uses `PrefixHealer._assistant_close`
+only that short suffix. The full-history fallback uses `LinearHealer._assistant_close`
 to perform the same probe and suffix check on token IDs.
 Probing with text bodies avoids a tool-call turn's `<tool_call>…</tool_call>` wrapper, which
 is itself content-independent and would otherwise be mistaken for the closer.
@@ -145,14 +145,14 @@ correctly not treated as closer.
 
 ## Integration
 
-- `rollout_gateway/healer.py` — `PrefixHealer`, tokenizer-free and torch-free; it only
+- `rollout_gateway/linear.py` — `LinearHealer`, tokenizer-free and torch-free; it only
   calls the injected `Renderer` and reads anchors from the injected `TrajectoryManager`.
   `heal` (before generation) returns the ids to feed the backend. `make_healer` builds the
   healer for a `history_mode` and rejects unknown modes.
 - `rollout_gateway/trajectory.py` — `heal_anchor` and `HealAnchor`; `record_turn` stores
   the tools schema on generated nodes.
 - `rollout_gateway/gateway.py` — `RolloutGateway.__init__` takes `history_mode` and
-  `healer_on_branch`. In healed mode it builds **one** `PrefixHealer` over the shared
+  `linear_on_nonlinear`. In linear mode it builds **one** `LinearHealer` over the shared
   `TrajectoryManager` and injects it into every co-mounted adapter, so a session heals the
   same whichever wire protocol its turns arrive on.
 - `rollout_gateway/adapters/common.py` — `BaseAdapter` calls `heal` before
@@ -161,45 +161,48 @@ correctly not treated as closer.
 
 ### Config surface
 
-- `history_mode`: `"tree"` (default) | `"healed"`. Gateway-global; sessions of different
+- `history_mode`: `"tree"` (default) | `"linear"`. Gateway-global; sessions of different
   modes do not coexist within a run.
-- `healer_on_branch`: `"heal"` (default) | `"error"` — behavior when a request does not
-  extend the session's latest turn (see below).
+- `linear_on_nonlinear`: `"reset"` (default) | `"error"` | `"passthrough"` — behavior when
+  a request does not extend the session's latest turn (see below).
 
-## Branches
+## When the history is not append-only
 
-A request *branches* when it does not extend the session's latest generated turn: a
+A request is *non-linear* when it does not extend the session's latest generated turn: a
 retry, an edit or drop of a prior message, a parallel branch, a sub-agent with its own
-first message, a compaction, or a tools change. `healer_on_branch` selects the behavior:
+first message, a compaction, or a tools change. `linear_on_nonlinear` selects the behavior:
 
-- `"heal"` (default) — anchor on the deepest generated turn the request still matches, as
+- `"reset"` (default) — anchor on the deepest generated turn the request still matches, as
   in the table above, or render in full when none matches or its tools schema differs.
 - `"error"` — raise and fail the rollout, for runs that require an append-only history.
+- `"passthrough"` — stop healing this session and render the rest of its requests in full,
+  so the standard tree/FORK path handles them.
 
 Healing from the deepest match rather than from the latest turn only matters for these
-requests. Restarting from a full render instead would generate the branching turn on the
+requests. Restarting from a full render instead would generate the non-linear turn on the
 re-tokenized prior turns and split it from the shared prefix; and a healer that tracked
 only the latest turn would also lose the anchor when the agent returns to an older branch.
 
 ## Observability
 
-`PrefixHealer` tracks `healed_turns` and `healed_prefix_tokens` (turns healed and
-served prefix tokens spliced); `branches` (requests that did not extend the session's
+`LinearHealer` tracks `healed_turns` and `healed_prefix_tokens` (turns healed and
+served prefix tokens spliced); `nonlinear` (requests that did not extend the session's
 latest turn); `unhealable` (anchored requests the template could not splice, rendered in
 full); and `close_unresolved` (the subset of `unhealable` where the closer probe couldn't
-isolate the glue). A high `branches` rate on a harness expected to be append-only is worth
-investigating, and `healer_on_branch="error"` turns it into a failure.
+isolate the glue). A high `nonlinear` rate on a harness expected to be append-only is worth
+investigating, and `linear_on_nonlinear="error"` turns it into a failure.
 
-These are kept two ways. `PrefixHealer.counters` is the run-cumulative total across every
+These are kept two ways. `LinearHealer.counters` is the run-cumulative total across every
 session the (shared) healer has seen. Per session, `finish_session` pops that session's own
-counters (`PrefixHealer.pop_stats`, a fixed schema of `PrefixHealer.COUNTER_KEYS` with zeros
-for counters that never fired) and attaches them to every record's metadata under `healer`,
+counters (`LinearHealer.pop_stats`, a fixed schema of `LinearHealer.COUNTER_KEYS` with zeros
+for counters that never fired) and attaches them to every record's metadata under
+`linear_healer`,
 riding out on the existing `extra_metadata` → `TraceRecord.metadata` seam — so a downstream
 consumer sees each rollout's healing stats without touching the healer.
 
 ## Validation
 
-**Unit tests** (`tests/rollout_gateway/test_healer.py`) drive the real `PrefixHealer`
+**Unit tests** (`tests/rollout_gateway/test_linear_healer.py`) drive the real `LinearHealer`
 + `TrajectoryManager` through the same heal → generate → record pipeline
 `BaseAdapter._run_turn` uses, with a template-shaped fake renderer that reproduces
 assistant-only drift: renderer-driven drift forks without healing and collapses to one
@@ -208,7 +211,7 @@ multi-turn drift stays one sample; retries, edits, and returns to an older branc
 on the right turn and give one CLEAN sample per branch; new roots, tools changes, and
 unspliceable templates fall back to the full render; the closer probe isolates the glue for
 both text and tool-call turns and does not double the closer when the served output already
-ends with the stop token; and `healer_on_branch="error"` raises on a branch. The
+ends with the stop token; and the three `linear_on_nonlinear` paths behave as specified. The
 template-level assumptions (generation-prompt tokens equal the assistant open; token-prefix
 consistency turn to turn; the closer probe returns `<|im_end|>\n` for both text and
 tool-call turns and is a genuine suffix of a tool-call `r_prev`; served ids end with the
@@ -225,8 +228,8 @@ of the served token prefix across a BPE merge boundary.
   canonical/healed context is acceptable.
 - A prior message the harness replays must be `==` to what the gateway stored for the
   request to anchor past it. Cosmetic re-serialization (re-keyed tool-call arguments,
-  re-spaced JSON) keeps dict equality; a semantic rewrite of a prior message is a branch
-  from the turn before it.
+  re-spaced JSON) keeps dict equality; a semantic rewrite of a prior message is non-linear
+  and anchors on the turn before it.
 - Incremental healing requires a stable text prefix and a matching closer. The
   type-independent-closer assumption is validated for Qwen3-Coder-30B; re-check it when
   targeting a template family whose between-message glue could differ after tool-call vs text

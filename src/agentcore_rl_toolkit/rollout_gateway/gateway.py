@@ -17,7 +17,7 @@ from aiohttp import web
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.common import BaseAdapter, _health
 from .adapters.openai import OpenAIAdapter
-from .healer import PrefixHealer, make_healer
+from .linear import LinearHealer, make_healer
 from .render import Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, TraceRecord
@@ -41,12 +41,13 @@ class RolloutGateway:
         adapters: which wire protocols to mount — names ("openai", "anthropic") or
             ``BaseAdapter`` subclasses. Defaults to both.
         max_turns_per_sid / debug_callback: forwarded to the adapters.
-        history_mode: ``"tree"`` (default) or ``"healed"``. In healed mode the gateway
-            heals re-tokenization drift at generation time via one shared
-            ``PrefixHealer`` so every branch of the session tree stays CLEAN. See
-            ``healer.py``.
-        healer_on_branch: ``"heal"`` (default) | ``"error"`` — behavior when a request
-            does not extend the session's latest turn (healed mode only).
+        history_mode: ``"tree"`` (default) or ``"linear"``. In linear mode the gateway
+            heals re-tokenization drift at generation time via one shared ``LinearHealer``
+            so every branch of the session tree stays CLEAN (one sample per append-only
+            session). See ``linear.py``.
+        linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
+            behaviour when a request does not extend the session's latest turn (linear
+            mode only).
     """
 
     def __init__(
@@ -57,7 +58,7 @@ class RolloutGateway:
         tokenizer=None,
         adapters: list[str | type[BaseAdapter]] | None = None,
         history_mode: str = "tree",
-        healer_on_branch: str = "heal",
+        linear_on_nonlinear: str = "reset",
         max_turns_per_sid: int | None = None,
         debug_callback: Any = None,
     ) -> None:
@@ -67,10 +68,10 @@ class RolloutGateway:
 
         self.manager = TrajectoryManager()
 
-        # In healed mode, one healer is shared across all co-mounted adapters (like the
+        # In linear mode, one healer is shared across all co-mounted adapters (like the
         # manager) so its counters cover a session whichever wire protocol its turns
-        # arrive on. See healer.py.
-        self.healer: PrefixHealer | None = make_healer(history_mode, renderer, self.manager, healer_on_branch)
+        # arrive on. See linear.py.
+        self.healer: LinearHealer | None = make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
 
         # one aiohttp app shared by all adapters; register health once here.
         self.app = web.Application(client_max_size=64 * 1024 * 1024)

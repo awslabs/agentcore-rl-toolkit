@@ -8,7 +8,7 @@
   "agent_runtime_arn": "arn:aws:bedrock-agentcore:us-west-2:ACCOUNT:runtime/RUNTIME_ID",
   "gateway_host": "CPU_NODE_PRIVATE_IP",
   "gateway_port": 0,
-  "history_mode": "healed",
+  "history_mode": "linear",
   "output_dir": "/path/to/run-output",
   "steps": 50,
   "batch_size": 64,

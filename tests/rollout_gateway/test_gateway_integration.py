@@ -111,7 +111,7 @@ def bearer(sid: str) -> dict:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("history_mode", ["tree", "healed"])
+@pytest.mark.parametrize("history_mode", ["tree", "linear"])
 async def test_close_during_async_render_does_not_generate(history_mode):
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -217,9 +217,9 @@ async def test_openai_tool_loop_end_to_end():
 
 @pytest.mark.asyncio
 async def test_healed_mode_attaches_healer_stats_to_metadata():
-    """In healed mode, the session's PrefixHealer counters ride out on every record's
+    """In linear mode, the session's LinearHealer counters ride out on every record's
     metadata under ``healer`` (the metrics seam), alongside caller extra_metadata."""
-    gateway, backend = make_gateway(replies=["CALL calculator expr=2+2", "the answer is 4"], history_mode="healed")
+    gateway, backend = make_gateway(replies=["CALL calculator expr=2+2", "the answer is 4"], history_mode="linear")
     tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
     sid = "ep-lin:solver"
 
@@ -245,16 +245,16 @@ async def test_healed_mode_attaches_healer_stats_to_metadata():
     md = records[0].metadata
     assert md["task"] == "math"  # caller metadata preserved
     # turn 2 was healed on turn 1; the per-session counter is surfaced.
-    assert md["healer"]["healed_turns"] == 1
-    assert md["healer"]["branches"] == 0
+    assert md["linear_healer"]["healed_turns"] == 1
+    assert md["linear_healer"]["nonlinear"] == 0
 
 
 @pytest.mark.asyncio
 async def test_healed_mode_heals_retry_branch():
-    """In healed mode a retried turn anchors on the turn it extends: both attempts become
+    """In linear mode a retried turn anchors on the turn it extends: both attempts become
     CLEAN branches."""
     gateway, backend = make_gateway(
-        replies=["CALL calculator expr=2+2", "the answer is 4", "it is 4"], history_mode="healed"
+        replies=["CALL calculator expr=2+2", "the answer is 4", "it is 4"], history_mode="linear"
     )
     tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]
     sid = "ep-tree:solver"
@@ -282,9 +282,9 @@ async def test_healed_mode_heals_retry_branch():
     assert backend.calls[1]["prompt_ids"] == backend.calls[2]["prompt_ids"]
     assert backend.calls[1]["prompt_ids"][: len(turn1)] == turn1
     assert len(records) == 2  # one CLEAN record per branch
-    stats = records[0].metadata["healer"]
+    stats = records[0].metadata["linear_healer"]
     assert stats["healed_turns"] == 2
-    assert stats["branches"] == 1  # the retry
+    assert stats["nonlinear"] == 1  # the retry
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
-"""Correctness tests for PrefixHealer (generate-time prefix healing over the session tree).
+"""Correctness tests for LinearHealer (generate-time prefix healing over the session tree).
 
 These drive the healer + a real TrajectoryManager the same way ``BaseAdapter._run_turn``
 does (heal -> generate -> record_turn), using a FakeRenderer that reproduces the exact
-failure mode healed mode targets: re-rendering a previously-generated assistant message
+failure mode linear mode targets: re-rendering a previously-generated assistant message
 yields *different* token ids than the ones the backend served (cosmetic re-tokenization
 drift), while system/user/tool messages re-render identically.
 
@@ -19,7 +19,7 @@ import pytest
 
 from agentcore_rl_toolkit.rollout_gateway import (
     BaseTrace,
-    PrefixHealer,
+    LinearHealer,
     TrajectoryManager,
     TurnRecord,
 )
@@ -95,7 +95,7 @@ def _tail(text):
 
 def _make(renderer=None, **kw):
     mgr = TrajectoryManager()
-    return mgr, PrefixHealer(renderer or FakeRenderer(), mgr, **kw)
+    return mgr, LinearHealer(renderer or FakeRenderer(), mgr, **kw)
 
 
 async def _drive_turn(
@@ -183,7 +183,7 @@ async def test_healed_drift_stays_one_sample():
     # served logprobs preserved for both generated turns; glue zeroed
     assert rec.logprobs == [-0.1, -0.2] + [0.0] * len(tail) + [-0.3, -0.4, -0.5]
     assert healer.counters["healed_turns"] == 1
-    assert healer.counters["branches"] == 0
+    assert healer.counters["nonlinear"] == 0
 
 
 @pytest.mark.asyncio
@@ -269,7 +269,7 @@ def _a_tool(name, arguments, content=""):
 async def test_reordered_tool_call_args_stay_healed():
     """A replayed tool-call assistant whose arguments are re-keyed (dict-equal, but a
     different token render under an order-sensitive template) must still anchor -- the
-    drift a token-prefix check would wrongly treat as a branch."""
+    drift a token-prefix check would wrongly treat as non-linear."""
     r = OrderSensitiveRenderer()
     mgr, healer = _make(r)
 
@@ -293,7 +293,7 @@ async def test_reordered_tool_call_args_stay_healed():
 
     # the fed prompt reuses the served prefix (the drifted replay order never appears),
     # and the whole session stays one training sample.
-    assert healer.counters["branches"] == 0
+    assert healer.counters["nonlinear"] == 0
     assert healer.counters["healed_turns"] == 1
     served_prefix = _prompt("q1") + [2001, 2002]
     assert healed[: len(served_prefix)] == served_prefix
@@ -331,7 +331,7 @@ async def test_close_probe_isolates_closer_tool_call_turn():
 
 
 # ---------------------------------------------------------------------------
-# Branches: requests that do not extend the session's latest turn.
+# Non-linear requests: requests that do not extend the session's latest turn.
 # ---------------------------------------------------------------------------
 
 
@@ -362,7 +362,7 @@ async def test_retry_branch_is_healed_on_its_anchor():
     assert sum(r.loss_mask.count(1) for r in recs) == 3  # turn 1 once, each attempt once
     stats = healer.pop_stats("s")
     assert stats["healed_turns"] == 2
-    assert stats["branches"] == 1  # the retry
+    assert stats["nonlinear"] == 1  # the retry
 
 
 @pytest.mark.asyncio
@@ -389,7 +389,7 @@ async def test_continuing_an_older_branch_is_healed():
     assert cont == first + [2002] + _tail("q3")
     recs = _records(mgr)
     assert len(recs) == 2  # one per branch
-    assert healer.pop_stats("s")["branches"] == 2  # the retry, then the return to attempt 1
+    assert healer.pop_stats("s")["nonlinear"] == 2  # the retry, then the return to attempt 1
 
 
 @pytest.mark.asyncio
@@ -407,7 +407,7 @@ async def test_edit_branches_from_earlier_turn():
 
     assert edited == _prompt("q1") + [2001] + _tail("q2 edited")
     assert len(_records(mgr)) == 2
-    assert healer.pop_stats("s")["branches"] == 1
+    assert healer.pop_stats("s")["nonlinear"] == 1
 
 
 @pytest.mark.asyncio
@@ -426,7 +426,7 @@ async def test_edit_with_no_generated_anchor_is_rendered_in_full(edited):
     prompt = await _drive_turn(mgr, healer, "s", messages=messages, served_ids=[2002], response_message=_a("r2"))
 
     assert prompt == await healer.renderer.render(messages, add_generation_prompt=True)
-    assert healer.counters["branches"] == 1
+    assert healer.counters["nonlinear"] == 1
     recs = _records(mgr)
     assert [rec.token_ids[-1] for rec in recs] == [2001, 2002]
     assert [rec.loss_mask for rec in recs] == [[1], [1]]
@@ -435,19 +435,19 @@ async def test_edit_with_no_generated_anchor_is_rendered_in_full(edited):
 @pytest.mark.asyncio
 async def test_new_root_is_rendered_in_full():
     """A request matching no generated turn (e.g. a sub-agent with its own first message)
-    is rendered in full. The first turn of a session is not a branch; the new root is."""
+    is rendered in full. The first turn of a session is not non-linear; the new root is."""
     mgr, healer = _make()
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
-    assert healer.pop_stats("s")["branches"] == 0
+    assert healer.pop_stats("s")["nonlinear"] == 0
     sub = await _drive_turn(mgr, healer, "s", messages=[_u("sub task")], served_ids=[2002], response_message=_a("s1"))
 
     assert sub == _prompt("sub task")
-    assert healer.pop_stats("s")["branches"] == 1
+    assert healer.pop_stats("s")["nonlinear"] == 1
 
 
 @pytest.mark.asyncio
 async def test_tools_change_is_rendered_in_full():
-    """A changed tools schema is a branch even when the messages extend cleanly; the
+    """A changed tools schema is non-linear even when the messages extend cleanly; the
     anchor's served ids were generated under other tools, so the request is rendered in full."""
     mgr, healer = _make()
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"), tools=TOOLS)
@@ -456,25 +456,39 @@ async def test_tools_change_is_rendered_in_full():
 
     assert prompt == await healer.renderer.render(messages, add_generation_prompt=True)
     stats = healer.pop_stats("s")
-    assert stats["branches"] == 1
+    assert stats["nonlinear"] == 1
     assert stats["healed_turns"] == 0
 
 
 @pytest.mark.asyncio
-async def test_branch_error_raises_when_configured():
-    mgr, healer = _make(on_branch="error")
+async def test_nonlinear_error_raises_when_configured():
+    mgr, healer = _make(on_nonlinear="error")
     await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
     # extending the latest turn is fine
     await _drive_turn(
         mgr, healer, "s", messages=[_u("q1"), _a("r1"), _u("q2")], served_ids=[2002], response_message=_a("r2")
     )
-    with pytest.raises(RuntimeError, match="branched"):
+    with pytest.raises(RuntimeError, match="append-only"):
         await healer.heal("s", [_u("q1"), _a("r1"), _u("EDITED")], None)
 
 
-def test_bad_on_branch_rejected():
+@pytest.mark.asyncio
+async def test_nonlinear_passthrough_disables_healing_for_session():
+    mgr, healer = _make(on_nonlinear="passthrough")
+    await _drive_turn(mgr, healer, "s", messages=[_u("q1")], served_ids=[2001], response_message=_a("r1"))
+    await _drive_turn(
+        mgr, healer, "s", messages=[_u("EDITED"), _a("r1"), _u("q2")], served_ids=[2002], response_message=_a("r2")
+    )  # trips passthrough
+    # subsequent turns get the full render, even when they extend the latest turn again
+    messages = [_u("EDITED"), _a("r1"), _u("q2"), _a("r2"), _u("q3")]
+    assert await healer.heal("s", messages, None) == await healer.renderer.render(messages, add_generation_prompt=True)
+    assert healer.counters["nonlinear"] == 1
+    assert healer.counters["healed_turns"] == 0
+
+
+def test_bad_on_nonlinear_rejected():
     with pytest.raises(ValueError):
-        PrefixHealer(FakeRenderer(), TrajectoryManager(), on_branch="reset")
+        LinearHealer(FakeRenderer(), TrajectoryManager(), on_nonlinear="nope")
 
 
 class PrefixChangingRenderer(FakeRenderer):
@@ -497,7 +511,7 @@ async def test_unhealable_template_is_rendered_in_full():
     stats = healer.pop_stats("s")
     assert stats["unhealable"] == 1
     assert stats["healed_turns"] == 0
-    assert stats["branches"] == 0  # the history is append-only; the template is the issue
+    assert stats["nonlinear"] == 0  # the history is append-only; the template is the issue
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +539,7 @@ async def test_pop_stats_is_per_session_and_isolated():
     assert healer.counters["healed_turns"] == 2
     stats_a = healer.pop_stats("a")
     assert stats_a["healed_turns"] == 1
-    assert set(stats_a) == set(PrefixHealer.COUNTER_KEYS)  # fixed schema
+    assert set(stats_a) == set(LinearHealer.COUNTER_KEYS)  # fixed schema
     assert healer.pop_stats("a")["healed_turns"] == 0  # cleared after pop
     assert healer.counters["healed_turns"] == 2  # run-cumulative untouched
     assert healer.pop_stats("b")["healed_turns"] == 1
@@ -539,4 +553,4 @@ async def test_drop_clears_per_sid_stats():
         mgr, healer, "s", messages=[_u("q1"), _a("r1"), _u("q2")], served_ids=[2002], response_message=_a("r2")
     )
     healer.drop("s")
-    assert healer.pop_stats("s") == dict.fromkeys(PrefixHealer.COUNTER_KEYS, 0)
+    assert healer.pop_stats("s") == dict.fromkeys(LinearHealer.COUNTER_KEYS, 0)

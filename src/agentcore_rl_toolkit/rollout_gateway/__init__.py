@@ -15,7 +15,7 @@ Import layering:
   ``__getattr__`` — importing this package never requires aiohttp.
 """
 
-from .healer import PrefixHealer
+from .linear import LinearHealer
 from .render import HfTemplateRenderer, ParsedOutput, Renderer
 from .sampling_backends.base import SamplingBackend
 from .trace import BaseTrace, Status, TraceRecord
@@ -29,9 +29,9 @@ __all__ = [
     "GatewayServer",
     "HealAnchor",
     "HfTemplateRenderer",
+    "LinearHealer",
     "MessageNode",
     "ParsedOutput",
-    "PrefixHealer",
     "Renderer",
     "RolloutGateway",
     "SamplingBackend",

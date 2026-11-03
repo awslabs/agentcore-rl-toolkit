@@ -14,7 +14,7 @@ import pytest
 from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers
 from transformers import PreTrainedTokenizerFast
 
-from agentcore_rl_toolkit.rollout_gateway import BaseTrace, PrefixHealer, TrajectoryManager, TurnRecord
+from agentcore_rl_toolkit.rollout_gateway import BaseTrace, LinearHealer, TrajectoryManager, TurnRecord
 from agentcore_rl_toolkit.rollout_gateway.parsing import parse_tool_uses
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
 
@@ -308,7 +308,7 @@ async def test_delta_healing_preserves_multiturn_tokens_and_training_masks(fast_
     full_renderer = HfTemplateRenderer(tok)
     full_renderer.render_delta = None  # Exercise the existing full-history oracle.
     managers = [TrajectoryManager(), TrajectoryManager()]
-    healers = [PrefixHealer(renderer, managers[0]), PrefixHealer(full_renderer, managers[1])]
+    healers = [LinearHealer(renderer, managers[0]), LinearHealer(full_renderer, managers[1])]
     history = [{"role": "user", "content": "Inspect the project."}]
     generated_ids = []
     with patch.object(renderer, "render_delta", wraps=renderer.render_delta) as delta:
@@ -339,7 +339,7 @@ async def test_delta_healing_preserves_multiturn_tokens_and_training_masks(fast_
     record = rows[0][0]
     response_ids = record.token_ids[-len(record.loss_mask) :]
     assert [tid for tid, mask in zip(response_ids, record.loss_mask, strict=True) if mask] == generated_ids
-    assert all(h.counters["branches"] == 0 for h in healers)
+    assert all(h.counters["nonlinear"] == 0 for h in healers)
 
 
 @pytest.mark.asyncio
@@ -364,7 +364,7 @@ async def test_delta_declines_unsafe_template_and_preserves_fallback(fast_tokeni
     new = [{"role": "tool", "content": "result"}]
     assert await renderer.render_delta(prior + [last], new) is None
     seed = await renderer.render(prior)
-    healers = [PrefixHealer(r, TrajectoryManager()) for r in (renderer, oracle)]
+    healers = [LinearHealer(r, TrajectoryManager()) for r in (renderer, oracle)]
     results = []
     for h in healers:
         _record(h.manager, prompt_ids=seed, output_ids=[42], messages=prior, response=last)
@@ -391,7 +391,7 @@ async def test_delta_keeps_served_prefix_when_bpe_can_merge_across_boundary():
         ),
     )
     r = HfTemplateRenderer(tok)
-    h = PrefixHealer(r, TrajectoryManager())
+    h = LinearHealer(r, TrajectoryManager())
     prior = [{"role": "user", "content": "q"}]
     last = {"role": "assistant", "content": "answer"}
     new = [{"role": "tool", "content": "result"}]
@@ -406,4 +406,4 @@ async def test_delta_keeps_served_prefix_when_bpe_can_merge_across_boundary():
     assert tok.decode(actual) == tok.decode(full)
     assert actual[: len(seed + output)] == seed + output
     assert h.counters["healed_turns"] == 1
-    assert h.counters["branches"] == 0
+    assert h.counters["nonlinear"] == 0

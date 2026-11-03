@@ -1,6 +1,6 @@
 """Generate-time prefix healing over the session tree.
 
-This is the engine behind the gateway's ``history_mode="healed"``. It targets harnesses
+This is the engine behind the gateway's ``history_mode="linear"``. It targets harnesses
 whose cosmetic re-tokenization drift of a previously-generated assistant turn is
 considered insignificant (OOD-negligible).
 
@@ -35,7 +35,7 @@ Healing ``messages`` for the next turn (``await heal(...)``):
    prefix extended by the new observation(s). Check that ``r_ext`` starts with ``r_prev``;
    the client's re-serialization of prior turns never enters the fed tokens.
 5. ``close`` — the template's assistant-closer after the anchor turn, extracted by a
-   common-suffix probe (:meth:`PrefixHealer._assistant_close`).
+   common-suffix probe (:meth:`LinearHealer._assistant_close`).
 6. Splice the closer and new tail onto the anchor's served ids, omitting any closer tokens
    already present at their end.
 
@@ -50,54 +50,59 @@ The healer keeps no per-session history: the anchor comes from the manager's tre
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
 from .render import _PROBE_A, _PROBE_B, Renderer, _common_suffix
 from .trajectory import HealAnchor, TrajectoryManager
 
-__all__ = ["PrefixHealer", "make_healer"]
+logger = logging.getLogger(__name__)
 
-HISTORY_MODES = ("tree", "healed")
+__all__ = ["LinearHealer", "make_healer"]
+
+HISTORY_MODES = ("tree", "linear")
 
 
 def make_healer(
-    history_mode: str, renderer: Renderer, manager: TrajectoryManager, on_branch: str = "heal"
-) -> PrefixHealer | None:
-    """The healer for ``history_mode``: a ``PrefixHealer`` for ``"healed"``, ``None`` for
+    history_mode: str, renderer: Renderer, manager: TrajectoryManager, on_nonlinear: str = "reset"
+) -> LinearHealer | None:
+    """The healer for ``history_mode``: a ``LinearHealer`` for ``"linear"``, ``None`` for
     ``"tree"``."""
     if history_mode not in HISTORY_MODES:
         raise ValueError(f"history_mode must be one of {HISTORY_MODES}, got {history_mode!r}")
-    return PrefixHealer(renderer, manager, on_branch=on_branch) if history_mode == "healed" else None
+    return LinearHealer(renderer, manager, on_nonlinear=on_nonlinear) if history_mode == "linear" else None
 
 
-class PrefixHealer:
+class LinearHealer:
     """Per-branch generate-time prefix healing anchored on the manager's tree.
 
-    A request *branches* when it does not extend the session's latest generated turn: a
-    retry, an edit or drop of a prior message, a parallel branch, a sub-agent with its own
-    first message, a compaction, or a tools change. ``on_branch`` picks the behavior:
+    A request is *non-linear* when it does not extend the session's latest generated
+    turn: a retry, an edit or drop of a prior message, a parallel branch, a sub-agent with
+    its own first message, a compaction, or a tools change. ``on_nonlinear`` picks the
+    behavior:
 
-    * ``"heal"`` (default) — heal from the deepest generated turn the request still
+    * ``"reset"`` (default) — heal from the deepest generated turn the request still
       matches, or render in full when none matches or its tools schema differs.
     * ``"error"`` — raise, failing the rollout, for runs that require an append-only
       history.
+    * ``"passthrough"`` — stop healing this sid and hand back the full render, so the
+      manager's tree/FORK path handles the rest of the session.
 
-    Either way the branch is counted under ``branches``.
+    Every non-linear request is counted under ``nonlinear``.
     """
-
-    #: record-metadata key under which ``finish_session`` attaches ``pop_stats``
-    STATS_KEY = "healer"
 
     #: every counter key this healer can emit; ``pop_stats`` returns all of them (with
     #: zeros for counters that never fired) so per-session stats have a stable schema.
-    COUNTER_KEYS = ("healed_turns", "healed_prefix_tokens", "branches", "unhealable", "close_unresolved")
+    COUNTER_KEYS = ("healed_turns", "healed_prefix_tokens", "nonlinear", "close_unresolved", "unhealable")
 
-    def __init__(self, renderer: Renderer, manager: TrajectoryManager, *, on_branch: str = "heal") -> None:
-        if on_branch not in ("heal", "error"):
-            raise ValueError(f"on_branch must be heal|error, got {on_branch!r}")
+    def __init__(self, renderer: Renderer, manager: TrajectoryManager, *, on_nonlinear: str = "reset") -> None:
+        if on_nonlinear not in ("reset", "error", "passthrough"):
+            raise ValueError(f"on_nonlinear must be reset|error|passthrough, got {on_nonlinear!r}")
         self.renderer = renderer
         self.manager = manager
-        self.on_branch = on_branch
+        self.on_nonlinear = on_nonlinear
+        # sids we have stopped healing (passthrough after a non-linear request)
+        self._disabled: set[str] = set()
         # run-cumulative totals across every sid this healer instance has seen
         self.counters: Counter[str] = Counter()
         # per-sid totals, popped at session end so they can ride out on the record's
@@ -115,19 +120,26 @@ class PrefixHealer:
         described in the module docstring, or the full render when there is nothing to
         heal from."""
         tools = list(tools) if tools else None
+        if sid in self._disabled:
+            return await self._render_full(messages, tools)
+
         anchor = self.manager.heal_anchor(sid, messages)
         latest = self.manager.turn_count(sid)
         extends_latest = anchor is not None and anchor.turn_index == latest and anchor.tools == tools
         if latest and not extends_latest:
-            self._bump(sid, "branches")
-            if self.on_branch == "error":
+            self._bump(sid, "nonlinear")
+            if self.on_nonlinear == "error":
                 raise RuntimeError(
-                    f"healed history mode: sid {sid!r} branched (the request does not extend "
-                    "the session's latest turn) with on_branch='error'"
+                    f"linear history mode: sid {sid!r} broke the append-only assumption "
+                    "(the request does not extend the session's latest turn)"
                 )
+            if self.on_nonlinear == "passthrough":
+                self._disabled.add(sid)
+                logger.warning("linear healer: sid=%s non-linear request; disabling healing for this session", sid)
+                return await self._render_full(messages, tools)
 
         if anchor is None or anchor.tools != tools:
-            return await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
+            return await self._render_full(messages, tools)
         return await self._extend(sid, anchor, messages[len(anchor.messages) :])
 
     def pop_stats(self, sid: str) -> dict[str, int]:
@@ -142,9 +154,13 @@ class PrefixHealer:
         return {k: c[k] for k in self.COUNTER_KEYS}
 
     def drop(self, sid: str) -> None:
+        self._disabled.discard(sid)
         self._per_sid.pop(sid, None)
 
     # -- internals ----------------------------------------------------------
+
+    async def _render_full(self, messages: list[dict], tools: list[dict] | None) -> list[int]:
+        return await self.renderer.render(messages, tools=tools, add_generation_prompt=True)
 
     async def _extend(self, sid: str, anchor: HealAnchor, new: list[dict]) -> list[int]:
         """Splice ``anchor.served_ids`` with the closer and the render of ``new``, or

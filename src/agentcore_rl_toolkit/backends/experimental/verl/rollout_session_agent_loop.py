@@ -446,9 +446,9 @@ class RolloutSessionAgentLoop(AgentLoopBase):
             primary = max(range(len(records)), key=lambda i: sum(records[i].loss_mask))
             records.append(records.pop(primary))
 
-        # in gateway healed mode every record carries the same PrefixHealer counters
-        healer_stats = records[-1].metadata.get("healer")
-        metrics |= {f"healer_{k}": float(v) for k, v in (healer_stats or {}).items()}
+        # in gateway linear-history mode every record carries the same LinearHealer counters
+        healer_stats = records[-1].metadata.get("linear_healer")
+        metrics |= {f"linear_healer_{k}": float(v) for k, v in (healer_stats or {}).items()}
 
         # The engine's extra_fields carry the weight versions of the turns it served; a session
         # whose turns never reached this engine (all served before a restart) falls back to the

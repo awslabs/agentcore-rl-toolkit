@@ -67,7 +67,7 @@ flowchart TD
     Agent["Agent"] -->|"HTTP"| HTTP
     Server --> HTTP["AppRunner + TCPSite"]
     HTTP --> App["RolloutGateway.app and handlers"]
-    Lifecycle --> Capture["Adapters + trajectory manager + prefix healer"]
+    Lifecycle --> Capture["Adapters + trajectory manager + linear healer"]
     App --> Capture
 ```
 
@@ -84,8 +84,8 @@ implement these operations and hold the session state. An agent sends the
 capture-session ID in its API-key/Bearer field, associating its model requests
 with the session created by the integration.
 
-The gateway supports `tree` and `healed` history modes; see the
-[healed-history design](gateway_healing.md) for prefix healing.
+The gateway supports `tree` and `linear` history modes; see the
+[linear-history design](gateway_linear.md) for prefix healing.
 
 `handle.finish_session()` drains in-flight requests and returns a `GatewayResult`
 containing records, the turn count, and backend metadata. Finish consumes the

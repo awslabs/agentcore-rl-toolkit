@@ -1,31 +1,4 @@
-# Migration guide
-
-## Migrating from v0.2.0: healed history mode
-
-The rollout gateway's `linear` history mode is replaced by `healed`, and
-`LinearHealer` by `PrefixHealer`. Rename the settings below in verl agent-loop
-YAML, SageMaker YAML, and Tinker JSON configs. An unknown `history_mode`,
-including `linear`, raises `ValueError` when the gateway is constructed.
-
-| Before | After |
-|---|---|
-| `history_mode: linear` | `history_mode: healed` |
-| `linear_on_nonlinear: reset` | `healer_on_branch: heal` (default) |
-| `linear_on_nonlinear: error` | `healer_on_branch: error` |
-| `linear_on_nonlinear: passthrough` | Removed; use `heal` |
-| `LinearHealer(renderer, on_nonlinear=...)` | `PrefixHealer(renderer, manager, on_branch=...)` |
-| Record metadata key `linear_healer` | `healer` |
-| verl metrics `linear_healer_*` | `healer_*` |
-| Counter `nonlinear` | `branches`; template splice failures count as `unhealable` |
-
-Append-only histories are healed as before. A request that does not extend the
-session's latest turn (a retry, edit, parallel branch, or sub-agent) now heals
-from the deepest earlier turn it matches instead of being re-rendered in full.
-`PrefixHealer` reads that turn from the `TrajectoryManager`, so it has no
-`commit()`; custom adapters that call it must stop. See the
-[healed-history design](designs/gateway_healing.md).
-
-## Migrating from v0.1.x to v0.2
+# Migrating from v0.1.x to v0.2
 
 The v0.2 training integrations use HTTP invocations with `_config` model settings
 and a scalar `reward`. An image built with `AgentCoreRLApp` cannot be used directly
@@ -38,7 +11,7 @@ deprecated and retained for existing callers. Their constructors emit
 `payload / llm / group_id` task; selecting it in a current trainer does not
 translate the new payload automatically.
 
-### Update the agent
+## Update the agent
 
 | Before | After |
 |---|---|
@@ -83,7 +56,7 @@ Use a finite scalar reward; reduce any old per-turn reward list in your agent.
 For persistent results, configure an S3 Files mount and point `state_dir` at it;
 see the [Runtime storage contract](designs/agentcore_runtime_app.md#filesystem-storage-and-recovery).
 
-### Update training configuration
+## Update training configuration
 
 For verl and slime, replace the old top-level Runtime ARN and result bucket with:
 
@@ -98,7 +71,7 @@ backend-specific ARN configuration and deploy the updated agent. All these
 trainers inject `_config` into the task payload and capture tokens at the
 gateway. Do not put `_config` in dataset rows.
 
-### Update evaluation
+## Update evaluation
 
 Use `AgentCoreHttpSession` to stop each session on success, failure, or timeout:
 

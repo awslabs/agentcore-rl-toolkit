@@ -27,7 +27,7 @@ from typing import Any
 
 from aiohttp import web
 
-from ..healer import PrefixHealer, make_healer
+from ..linear import LinearHealer, make_healer
 from ..render import Renderer
 from ..sampling_backends.base import SamplingBackend
 from ..trace import BaseTrace, TraceRecord
@@ -147,8 +147,8 @@ class BaseAdapter:
         tokenizer=None,
         max_turns_per_sid: int | None = None,
         history_mode: str = "tree",
-        healer_on_branch: str = "heal",
-        healer: PrefixHealer | None = None,
+        linear_on_nonlinear: str = "reset",
+        healer: LinearHealer | None = None,
         debug_callback: Callable[..., None] | None = None,
         manager: TrajectoryManager | None = None,
         app: web.Application | None = None,
@@ -169,11 +169,11 @@ class BaseAdapter:
         else:
             self.manager = TrajectoryManager()
 
-        # healed mode: heal re-tokenization drift at generation time so every branch of
-        # the manager's tree stays CLEAN. See healer.py. A shared healer may be injected
-        # (co-mounted adapters share it, like the manager); else built here when requested.
-        self.healer: PrefixHealer | None = (
-            healer if healer is not None else make_healer(history_mode, renderer, self.manager, healer_on_branch)
+        # linear-history mode: heal re-tokenization drift at generation time so every
+        # branch of the manager's tree stays CLEAN. See linear.py. A shared healer may be
+        # injected (co-mounted adapters share it, like the manager); else built here.
+        self.healer: LinearHealer | None = (
+            healer if healer is not None else make_healer(history_mode, renderer, self.manager, linear_on_nonlinear)
         )
 
         self.debug_callback: Callable[..., None] | None = debug_callback
@@ -285,7 +285,7 @@ class BaseAdapter:
             # then drop per-sid state. pop_stats must precede drop, which clears it.
             stats = self.healer.pop_stats(sid)
             if stats:
-                extra_metadata = {**(extra_metadata or {}), self.healer.STATS_KEY: stats}
+                extra_metadata = {**(extra_metadata or {}), "linear_healer": stats}
             self.healer.drop(sid)
         base_sample = base_sample if base_sample is not None else BaseTrace()
         max_sample_tokens = int(getattr(session, "max_context_tokens", 0) or 0) if session is not None else 0
@@ -378,7 +378,7 @@ class BaseAdapter:
         try:
             translated, tools_schema = self._translate(body)
             if self.healer is not None:
-                # healed mode: splice served ids over the drifted re-render before
+                # linear mode: splice served ids over the drifted re-render before
                 # generation (the healer does the render internally).
                 prompt_ids = await self.healer.heal(sid, translated, tools_schema)
             else:
@@ -458,7 +458,7 @@ class BaseAdapter:
             )
 
             # Only turns the client received are recorded (the disconnect path above
-            # returned early); in healed mode they are what later requests anchor on.
+            # returned early); in linear mode they are what later requests anchor on.
             self.manager.record_turn(
                 sid,
                 turn=turn,
