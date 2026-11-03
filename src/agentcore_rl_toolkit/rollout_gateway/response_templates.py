@@ -47,9 +47,15 @@ QWEN3_TEMPLATE = {
 
 # XML tool-call formats render a string argument as raw text, so only the tool's JSON
 # schema (``parse_response(..., tools=...)``) can type it; values stay text otherwise.
-_XML_INLINE_VALUE_PARSER = {"name": "text"}
+# Local change: TRL strips the value; kept verbatim here (see QWEN3_5_TEMPLATE).
+_XML_INLINE_VALUE_PARSER = {"name": "text", "args": {"strip": False}}
 
 # Qwen3.5 / Qwen3.6 / Qwen3.8: XML tool calls (<function=...>/<parameter=...>).
+# Local change: TRL's parameter pattern strips all surrounding whitespace, but the
+# template renders ``<parameter=KEY>\nVALUE\n</parameter>``, so a value with leading
+# indentation or a trailing newline (e.g. a heredoc) re-renders differently from the
+# sampled tokens and the next turn's prompt forks the trajectory. The pattern consumes
+# only the template's own newline on each side.
 QWEN3_5_TEMPLATE = {
     "defaults": {"role": "assistant"},
     "start_anchor": "<|im_start|>assistant\n",
@@ -65,7 +71,7 @@ QWEN3_5_TEMPLATE = {
             "repeats": True,
             "content": "xml-inline",
             "content_args": {
-                "tag_pattern": r"<parameter=(?P<key>[^>\n]+)>\s*(?P<value>.*?)\s*</parameter>",
+                "tag_pattern": r"<parameter=(?P<key>[^>\n]+)>\n?(?P<value>.*?)\n?</parameter>",
                 "value_parser": _XML_INLINE_VALUE_PARSER,
             },
             "transform": {"type": "function", "function": {"name": "{name}", "arguments": "{content}"}},

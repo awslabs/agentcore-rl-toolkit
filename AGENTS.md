@@ -311,8 +311,9 @@ cannot work; failures surface as rollouts scored `0.0`, not as a crash, because
 For `response_templates.py`, re-sync means updating the template dicts and recomputing the
 sha256 hashes of the covered chat templates — preserving the marked local-additions
 block at the end of `_TEMPLATE_HASHES` (templates with no TRL equivalent, e.g.
-Qwen3-Coder → `qwen3_5`) and the marked local change to `GPTOSS_TEMPLATE`'s tool-call
-pattern. Bump the baseline commit here when you re-sync.
+Qwen3-Coder → `qwen3_5`) and the marked local changes to `GPTOSS_TEMPLATE`'s tool-call
+pattern and `QWEN3_5_TEMPLATE`'s whitespace-preserving parameter parsing. Bump the
+baseline commit here when you re-sync.
 
 ### slime backend (`backends/slime/`)
 
