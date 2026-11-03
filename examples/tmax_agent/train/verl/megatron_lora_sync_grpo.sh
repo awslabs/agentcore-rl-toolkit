@@ -37,7 +37,7 @@ python -m verl.trainer.main_ppo \
     data.max_response_length="$MAX_CONTEXT_LENGTH" \
     data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.verl.dataset \
     data.custom_cls.name=PayloadDataset \
-    +data.apply_chat_template_kwargs.enable_thinking=false \
+    +data.apply_chat_template_kwargs.enable_thinking=true \
     actor_rollout_ref.model.path="$MODEL_PATH" \
     actor_rollout_ref.model.use_remove_padding=true \
     actor_rollout_ref.model.use_fused_kernels=true \
