@@ -94,6 +94,7 @@ verl = [
     # step). Not varlen-specific; reproduces on the dense path at T=512.
     "flash-linear-attention>=0.5.2",
     "flash-attn==2.8.3",
+    "uvloop>=0.23.0",  # MagicStack/uvloop#738 aborts Ray agent-loop workers
 ]
 [dependency-groups]
 sagemaker-integration = [

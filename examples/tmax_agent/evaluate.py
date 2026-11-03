@@ -32,7 +32,11 @@ async def evaluate_one(task, runtime_arn, config, semaphore):
 async def evaluate(manifest, base_url, model_id, output, concurrency):
     run_id = str(uuid.uuid4())
     semaphore = asyncio.Semaphore(concurrency)
-    config = {"base_url": base_url, "model_id": model_id}
+    config = {
+        "base_url": base_url,
+        "model_id": model_id,
+        "sampling_params": {"max_tokens": 16384, "temperature": 0.7, "top_p": 0.95},
+    }
     results = []
     try:
         async with asyncio.TaskGroup() as group:
@@ -55,7 +59,7 @@ async def evaluate(manifest, base_url, model_id, output, concurrency):
         json.dumps(
             {
                 "completed": len(completed),
-                "errors": len(results) - len(completed),
+                "errors": sum("error" in result or "reward" not in result for result in results),
                 "passed": sum(result["reward"] == 1 for result in completed),
                 "mean_reward": sum(result.get("reward", 0) for result in results) / len(results) if results else 0,
             }

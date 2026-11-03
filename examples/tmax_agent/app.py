@@ -57,11 +57,19 @@ def invoke(payload, context):
     sandbox = sandbox_client.attach(session_id)
     s3 = boto3.client("s3", region_name=os.environ["VERIFIER_REGION"])
     bucket = os.environ["VERIFIER_BUCKET"]
-    record = {"task_id": task["task_id"], "sandbox_session_id": session_id, "source": task["source"]}
+    record = {"task_id": task["task_id"], "sandbox_session_id": session_id, "source": task["source"], "reward": 0.0}
     try:
         sandbox_client.start(session_id)
         try:
-            run(task["instruction"], sandbox, payload["_config"], timeout=task["agent_timeout"], record=record)
+            run(
+                task["instruction"],
+                sandbox,
+                payload["_config"],
+                timeout=task["agent_timeout"],
+                command_timeout=task.get("command_timeout", 300),
+                max_steps=task.get("max_steps", 64),
+                record=record,
+            )
         except TimeoutError as exc:
             record.update(stop_reason="timeout", error=f"{type(exc).__name__}: {exc}")
         reward, verifier = verify(sandbox, s3, bucket, task)

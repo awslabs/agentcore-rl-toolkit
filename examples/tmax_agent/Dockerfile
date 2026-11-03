@@ -5,6 +5,8 @@ ENV TMPDIR=/var/tmp PYTHONUNBUFFERED=1 \
 RUN pip install --no-cache-dir --no-compile \
     'agentcore-rl-toolkit[core]==0.2.0' \
     mini-swe-agent==2.4.6 \
+    # litellm>=1.106 requires mcp for tool calls (BerriAI/litellm#46045).
+    litellm==1.105.0 \
     aws-opentelemetry-distro==0.12.2
 COPY app.py harness.py ./
 EXPOSE 8080

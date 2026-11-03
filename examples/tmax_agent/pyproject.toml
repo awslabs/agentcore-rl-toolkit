@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentcore-rl-toolkit[rollout]==0.2.0",
     "mini-swe-agent==2.4.6",
+    "litellm==1.105.0",  # >=1.106 requires mcp for tool calls (BerriAI/litellm#46045)
     "boto3>=1.43.102",
     "botocore>=1.43.102",
 ]
