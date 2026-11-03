@@ -177,7 +177,7 @@ package exports are loaded on first access. The gateway lives behind extras:
   lookup in `rollout_gateway/response_templates.py`), `HfTemplateRenderer` derenders the
   whole output in one pass with transformers' response-template parser — reasoning,
   text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6, GPT-OSS;
-  templates vendored from huggingface/trl, see NOTICE). A truncated turn or a parse
+  templates adapted from huggingface/trl, see NOTICE). A truncated turn or a parse
   failure degrades to raw text with `ill_formed=True`, never an exception.
   Unrecognized templates fall back to a `</think>` split for tool-free parsing, but
   tool-bearing requests are **rejected** (there is no implicit tool parser — the
@@ -301,19 +301,14 @@ cannot work; failures surface as rollouts scored `0.0`, not as a crash, because
 `run_one_rollout()` logs and returns a zero reward. Documented under "Networking" in
 `docs/site/src/content/docs/guides/sagemaker-backend-setup.md`.
 
-**Vendored response templates.** The response-template registry is adapted from
-[trl](https://github.com/huggingface/trl) (Apache-2.0; see `NOTICE`).
-
-| This repo | upstream source | Baseline commit |
-|---|---|---|
-| `rollout_gateway/response_templates.py` | `trl/chat_template_utils.py` (`*_template` dicts) + `trl/chat_templates/*.jinja` (hash table) | `775de52a` |
-
-For `response_templates.py`, re-sync means updating the template dicts and recomputing the
-sha256 hashes of the covered chat templates — preserving the marked local-additions
-block at the end of `_TEMPLATE_HASHES` (templates with no TRL equivalent, e.g.
-Qwen3-Coder → `qwen3_5`) and the marked local changes to `GPTOSS_TEMPLATE`'s tool-call
-pattern and `QWEN3_5_TEMPLATE`'s whitespace-preserving parameter parsing. Bump the
-baseline commit here when you re-sync.
+**Response templates.** The template dicts in `rollout_gateway/response_templates.py`
+are adapted from [trl](https://github.com/huggingface/trl)'s `trl/chat_template_utils.py`
+at commit `775de52a` (Apache-2.0; see `NOTICE`), with local changes marked inline. The
+`_TEMPLATE_HASHES` entries are sha256 hashes of the chat templates shipped by hub model
+repos; `tests/rollout_gateway/test_template_hashes_live.py` checks each against its
+repo. To support a new chat template, add its hash and a representative repo to that
+test. When adopting upstream TRL template changes, keep the round-trip tests in that
+file passing.
 
 ### slime backend (`backends/slime/`)
 

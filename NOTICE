@@ -22,8 +22,6 @@ This product includes data developed as part of the TRL project
 (https://github.com/huggingface/trl), licensed under the Apache License,
 Version 2.0.
 
-The rollout gateway's response-template registry
-(src/agentcore_rl_toolkit/rollout_gateway/response_templates.py) vendors the
-response-template dicts from trl/chat_template_utils.py and derives its
-chat-template hash table from trl/chat_templates/*.jinja (baseline commit
-775de52a).
+The rollout gateway's response templates
+(src/agentcore_rl_toolkit/rollout_gateway/response_templates.py) adapt the
+response-template dicts from trl/chat_template_utils.py (commit 775de52a).
