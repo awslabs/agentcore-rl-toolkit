@@ -4,6 +4,10 @@ POSTs rendered ``input_ids`` to ``{url}/generate`` and parses
 ``meta_info.output_token_logprobs`` into a :class:`TurnRecord`. On cancel/timeout it
 eagerly hits ``/abort_request`` so an orphaned generation doesn't keep occupying KV
 cache.
+
+``num_top_logprobs`` requests SGLang's ``top_logprobs_num`` head. The binary
+``output_topk_*`` fields added by slime's SGLang patch are preferred over the JSON
+``output_top_logprobs`` that stock SGLang returns.
 """
 
 import asyncio
@@ -13,9 +17,30 @@ from typing import Any
 
 import aiohttp
 
+from ..trace import TopLogprobs
 from ..trajectory import TurnRecord
 
 logger = logging.getLogger(__name__)
+
+
+def _top_logprobs_from_meta(meta: dict, n: int, k: int) -> TopLogprobs:
+    """The ``(n, k)`` sampler head of a ``top_logprobs_num=k`` response."""
+    import base64
+
+    import numpy as np
+
+    if "output_topk_shape" in meta:
+        if list(meta["output_topk_shape"]) != [n, k]:
+            raise RuntimeError(f"SGLang top-k head has shape {meta['output_topk_shape']}, expected {[n, k]}")
+        ids = np.frombuffer(base64.b64decode(meta["output_topk_token_ids"]), dtype="<i4").reshape(n, k)
+        logprobs = np.frombuffer(base64.b64decode(meta["output_topk_log_probs"]), dtype="<f4").reshape(n, k)
+        return TopLogprobs(ids.astype(np.int32), logprobs.astype(np.float32))
+    rows = meta.get("output_top_logprobs") or []
+    if len(rows) != n or any(len(row or []) != k for row in rows):
+        raise RuntimeError(f"SGLang did not return a top-{k} head for each of the {n} output tokens")
+    ids = np.asarray([[entry[1] for entry in row] for row in rows], dtype=np.int32).reshape(n, k)
+    logprobs = np.asarray([[entry[0] for entry in row] for row in rows], dtype=np.float32).reshape(n, k)
+    return TopLogprobs(ids, logprobs)
 
 
 class SglangHttpBackend:
@@ -33,23 +58,23 @@ class SglangHttpBackend:
         session_id: str | None = None,
         image_data: Any = None,
         video_data: Any = None,
+        num_top_logprobs: int = 0,
     ) -> TurnRecord:
         rid = uuid.uuid4().hex
+        body: dict[str, Any] = {
+            "rid": rid,
+            "input_ids": list(prompt_ids),
+            "sampling_params": dict(sampling_params),
+            "return_logprob": True,
+        }
+        if num_top_logprobs:
+            body["top_logprobs_num"] = num_top_logprobs
         headers = {"X-SMG-Routing-Key": session_id} if session_id and session_id != "default" else None
         timeout = aiohttp.ClientTimeout(total=None, sock_read=self._sock_read_timeout)
         try:
             async with (
                 aiohttp.ClientSession(timeout=timeout) as sess,
-                sess.post(
-                    f"{self.url}/generate",
-                    json={
-                        "rid": rid,
-                        "input_ids": list(prompt_ids),
-                        "sampling_params": dict(sampling_params),
-                        "return_logprob": True,
-                    },
-                    headers=headers,
-                ) as r,
+                sess.post(f"{self.url}/generate", json=body, headers=headers) as r,
             ):
                 if r.status >= 400:
                     text = await r.text()
@@ -83,6 +108,9 @@ class SglangHttpBackend:
             output_ids=output_ids,
             finish_reason=finish,
             output_log_probs=output_log_probs,
+            output_top_logprobs=(
+                _top_logprobs_from_meta(meta, len(output_ids), num_top_logprobs) if num_top_logprobs else None
+            ),
         )
 
 

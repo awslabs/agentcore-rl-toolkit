@@ -10,6 +10,7 @@ api-key / Bearer slot (the adapters resolve it via ``sid_from_bearer``); the age
 ``base_url`` is a plain fixed gateway address — there are no per-session URLs.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 from aiohttp import web
@@ -19,7 +20,7 @@ from .adapters.common import BaseAdapter, _health
 from .adapters.openai import OpenAIAdapter
 from .linear import LinearHealer, make_healer
 from .render import Renderer
-from .sampling_backends.base import SamplingBackend
+from .sampling_backends.base import SamplingBackend, supports_top_logprobs
 from .trace import BaseTrace, TraceRecord
 from .trajectory import TrajectoryManager
 
@@ -102,11 +103,26 @@ class RolloutGateway:
         *,
         sampling_defaults: dict | None = None,
         max_context_tokens: int = 0,
+        num_top_logprobs: int = 0,
+        validate_sampling_params: Callable[[dict], None] | None = None,
     ) -> None:
         """Register a fresh per-sid session. Registers on every adapter so a turn on
-        any protocol under this sid finds its Session state."""
+        any protocol under this sid finds its Session state.
+
+        ``num_top_logprobs > 0`` asks the backend for the sampler's top-``K`` head at each
+        output position (see ``SamplingBackend``). ``validate_sampling_params`` receives a
+        copy of each turn's final sampling params, after the agent's overrides; a
+        ``ValueError`` from it fails the turn with HTTP 400 before generation."""
+        if num_top_logprobs and not supports_top_logprobs(self.backend):
+            raise ValueError(f"{type(self.backend).__name__} cannot return top logprobs")
         for adapter in self.adapters:
-            adapter.open_session(sid, sampling_defaults=sampling_defaults, max_context_tokens=max_context_tokens)
+            adapter.open_session(
+                sid,
+                sampling_defaults=sampling_defaults,
+                max_context_tokens=max_context_tokens,
+                num_top_logprobs=num_top_logprobs,
+                validate_sampling_params=validate_sampling_params,
+            )
 
     async def finish_session(
         self,

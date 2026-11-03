@@ -18,7 +18,7 @@ Import layering:
 from .linear import LinearHealer
 from .render import HfTemplateRenderer, ParsedOutput, Renderer
 from .sampling_backends.base import SamplingBackend
-from .trace import BaseTrace, Status, TraceRecord
+from .trace import BaseTrace, Status, TopLogprobs, TraceRecord
 from .trajectory import HealAnchor, MessageNode, TrajectoryManager, TurnRecord
 
 # RolloutGateway is aiohttp-dependent, so it is NOT imported at module top — it is
@@ -37,6 +37,7 @@ __all__ = [
     "SamplingBackend",
     "Status",
     "ThreadedGatewayServer",
+    "TopLogprobs",
     "TraceRecord",
     "TrajectoryManager",
     "TurnRecord",

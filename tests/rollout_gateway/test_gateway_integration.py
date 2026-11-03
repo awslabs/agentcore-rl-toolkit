@@ -1,13 +1,14 @@
 """Integration tests for ``RolloutGateway`` — the assembled serving unit."""
 
 import asyncio
+import dataclasses
 import json
 from contextlib import asynccontextmanager
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from agentcore_rl_toolkit.rollout_gateway import BaseTrace, RolloutGateway
+from agentcore_rl_toolkit.rollout_gateway import BaseTrace, RolloutGateway, TopLogprobs
 from agentcore_rl_toolkit.rollout_gateway.render import ParsedOutput
 from agentcore_rl_toolkit.rollout_gateway.trajectory import TurnRecord
 
@@ -86,6 +87,28 @@ class FakeBackend:
             finish_reason="stop",
             output_log_probs=[-0.5] * len(out_ids),
         )
+
+
+class FakeTopLogprobsBackend(FakeBackend):
+    """Also returns a K-wide head per output token when asked: row i = [token, token + 1, ...]."""
+
+    async def generate(
+        self,
+        *,
+        prompt_ids,
+        sampling_params,
+        session_id=None,
+        image_data=None,
+        video_data=None,
+        num_top_logprobs=0,
+    ):
+        turn = await super().generate(prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=session_id)
+        self.calls[-1]["num_top_logprobs"] = num_top_logprobs
+        if not num_top_logprobs:
+            return turn
+        ids = [[t + j for j in range(num_top_logprobs)] for t in turn.output_ids]
+        head = TopLogprobs(ids=ids, logprobs=[[-1.0] * num_top_logprobs for _ in ids])
+        return dataclasses.replace(turn, output_top_logprobs=head)
 
 
 def make_gateway(replies: list[str], **gateway_kwargs) -> tuple[RolloutGateway, FakeBackend]:
@@ -605,3 +628,62 @@ async def test_adapter_subset_mounts_only_requested_routes():
         assert resp.status == 200
         resp = await client.post("/v1/messages", json=body, headers=bearer("s"))
         assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_top_logprobs_follow_trained_tokens():
+    renderer = FakeRenderer()
+    backend = FakeTopLogprobsBackend(renderer, ["first reply", "second reply"])
+    gateway = RolloutGateway(backend=backend, renderer=renderer, tokenizer=renderer)
+    sid = "ep1"
+
+    async with serve(gateway) as client:
+        gateway.create_session(sid, num_top_logprobs=3)
+        messages = [{"role": "user", "content": "hi"}]
+        for _ in range(2):
+            resp = await client.post(
+                "/v1/chat/completions", json={"model": "m", "messages": messages}, headers=bearer(sid)
+            )
+            assert resp.status == 200
+            reply = (await resp.json())["choices"][0]["message"]
+            messages = messages + [reply, {"role": "user", "content": "more"}]
+        (rec,) = await gateway.finish_session(sid, base_sample=BaseTrace(rollout_id=sid))
+
+    assert [call["num_top_logprobs"] for call in backend.calls] == [3, 3]
+    response = rec.token_ids[-rec.response_length :]
+    covered = {}
+    for offset, head in rec.top_logprobs:
+        for i, row in enumerate(head.ids):
+            covered[offset + i] = row
+    # exactly the trained tokens carry a head, each from that token's own position
+    assert sorted(covered) == [i for i, m in enumerate(rec.loss_mask) if m]
+    assert all(row == [response[i] + j for j in range(3)] for i, row in covered.items())
+
+
+def test_top_logprobs_need_a_capable_backend():
+    gateway, _ = make_gateway(replies=[])
+    with pytest.raises(ValueError, match="FakeBackend cannot return top logprobs"):
+        gateway.create_session("s", num_top_logprobs=2)
+
+
+@pytest.mark.parametrize("path", ["/v1/chat/completions", "/v1/messages"])
+@pytest.mark.asyncio
+async def test_rejected_sampling_params_fail_the_turn_before_generation(path):
+    gateway, backend = make_gateway(replies=["unused"])
+    seen = []
+
+    def validate(params):
+        seen.append(params)
+        if params.get("temperature") != 1.0:
+            raise ValueError("temperature must be 1.0")
+
+    body = {"model": "m", "max_tokens": 16, "temperature": 0.5, "messages": [{"role": "user", "content": "hi"}]}
+    async with serve(gateway) as client:
+        gateway.create_session("s", sampling_defaults={"temperature": 1.0}, validate_sampling_params=validate)
+        resp = await client.post(path, json=body, headers=bearer("s"))
+        assert resp.status == 400
+        assert "temperature must be 1.0" in json.dumps(await resp.json())
+        resp = await client.post(path, json={**body, "temperature": 1.0}, headers=bearer("s"))
+        assert resp.status == 200
+    assert [p["temperature"] for p in seen] == [0.5, 1.0]  # the merged params, after the agent's override
+    assert len(backend.calls) == 1

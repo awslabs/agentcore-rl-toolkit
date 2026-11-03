@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import dataclasses
 import logging
+import os
 import signal
 import time
 from datetime import datetime
@@ -271,6 +272,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="GRPO training with rollout gateway + SageMaker Training Sessions")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     args = parser.parse_args()
+    # Identify the training program in AWS User-Agent headers, preserving an existing application ID.
+    os.environ.setdefault("AWS_SDK_UA_APP_ID", "agentcore-rl-toolkit")
     try:
         asyncio.run(train(load_config(args.config)))
     except asyncio.CancelledError:
