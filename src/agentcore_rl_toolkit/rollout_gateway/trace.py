@@ -43,6 +43,24 @@ class BaseTrace:
     label: Any = None
 
 
+@dataclass(frozen=True)
+class TopLogprobs:
+    """The sampler's ``K`` most likely tokens at each generated position.
+
+    ``ids`` and ``logprobs`` are ``(n, K)``: row ``i`` holds the head of the distribution
+    token ``i`` was sampled from, with logprobs normalized over the full vocabulary.
+    """
+
+    ids: Any
+    logprobs: Any
+
+    def __len__(self) -> int:
+        return len(self.ids)
+
+    def prefix(self, n: int) -> "TopLogprobs":
+        return TopLogprobs(self.ids[:n], self.logprobs[:n])
+
+
 @dataclass
 class TraceRecord:
     """One loss-masked training row emitted from a session's trajectory tree.
@@ -62,6 +80,8 @@ class TraceRecord:
     response: str = ""
     metadata: dict = field(default_factory=dict)
     status: Status = Status.COMPLETED
+    # (offset into the response region, sampler head) for trained tokens.
+    top_logprobs: list[tuple[int, TopLogprobs]] = field(default_factory=list)
 
     # Off-policy / MoE fields (weight_version, routed_experts) are intentionally
     # omitted for now; add them as optional fields if a consumer needs them.
@@ -78,4 +98,4 @@ class TraceRecord:
             )
 
 
-__all__ = ["BaseTrace", "Status", "TraceRecord"]
+__all__ = ["BaseTrace", "Status", "TopLogprobs", "TraceRecord"]
