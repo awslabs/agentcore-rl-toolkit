@@ -18,7 +18,7 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
-from .trace import AuxiliaryTokenSamples, BaseTrace, Status, TraceRecord
+from .trace import BaseTrace, Status, TopLogprobs, TraceRecord
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class TurnRecord:
     finish_reason: str
     output_log_probs: list[float] = dataclasses.field(default_factory=list)
     ill_formed: bool = False
-    output_auxiliary_token_samples: AuxiliaryTokenSamples | None = None
+    output_top_logprobs: TopLogprobs | None = None
 
 
 # ===========================================================================
@@ -168,7 +168,7 @@ class _SampleBuilder:
         self.tokens: list[int] = []
         self.loss_mask: list[int] = []
         self.logprobs: list[float] = []
-        self.auxiliary_token_samples: list[tuple[int, AuxiliaryTokenSamples]] = []
+        self.top_logprobs: list[tuple[int, TopLogprobs]] = []
         self.last_response_start_idx: int | None = None
         self.leading_prompt_len: int = 0
 
@@ -200,8 +200,8 @@ class _SampleBuilder:
 
         # --- append this turn's generated response (loss_mask=1 unless re-emitted as context) ---
         self.last_response_start_idx = len(self.tokens)
-        if trained and turn.output_auxiliary_token_samples is not None:
-            self.auxiliary_token_samples.append((self.last_response_start_idx, turn.output_auxiliary_token_samples))
+        if trained and turn.output_top_logprobs is not None:
+            self.top_logprobs.append((self.last_response_start_idx, turn.output_top_logprobs))
         self._append_tokens(
             turn.output_ids, loss_mask=int(trained), logprobs=turn.output_log_probs if trained else None
         )
@@ -226,15 +226,13 @@ class _SampleBuilder:
         tokens = list(self.tokens)
         loss_mask = self.loss_mask
         logprobs = self.logprobs
-        auxiliary_token_samples = self.auxiliary_token_samples
+        top_logprobs = self.top_logprobs
         if max_sample_tokens and len(tokens) > max_sample_tokens:
             tokens = tokens[:max_sample_tokens]
             loss_mask = loss_mask[:max_sample_tokens]
             logprobs = logprobs[:max_sample_tokens]
-            auxiliary_token_samples = [
-                (pos, s.prefix(max_sample_tokens - pos))
-                for pos, s in auxiliary_token_samples
-                if pos < max_sample_tokens
+            top_logprobs = [
+                (pos, head.prefix(max_sample_tokens - pos)) for pos, head in top_logprobs if pos < max_sample_tokens
             ]
         md = dict(extra_metadata or {})
         return TraceRecord(
@@ -247,7 +245,7 @@ class _SampleBuilder:
             response="",
             metadata=md,
             status=Status.COMPLETED,
-            auxiliary_token_samples=[(pos - start, samples) for pos, samples in auxiliary_token_samples],
+            top_logprobs=[(pos - start, head) for pos, head in top_logprobs],
         )
 
 

@@ -11,10 +11,10 @@ import sys
 import pytest
 
 from agentcore_rl_toolkit.rollout_gateway import (
-    AuxiliaryTokenSamples,
     BaseTrace,
     MessageNode,
     Status,
+    TopLogprobs,
     TraceRecord,
     TrajectoryManager,
     TurnRecord,
@@ -124,7 +124,7 @@ def test_clean_multiturn_masks_observation():
     assert r.rollout_id == 0
 
 
-def test_fork_produces_two_samples():
+def test_fork_produces_two_head():
     # Two turns whose prompts diverge early (no shared response prefix) -> two leaves.
     mgr = TrajectoryManager()
     mgr.record_turn(
@@ -211,18 +211,16 @@ def test_ill_formed_propagates_to_metadata():
     assert r.metadata["ill_formed"] is True
 
 
-def _samples(*tokens):
-    """Distinguishable 2-sample rows per output token: row i = [token, token + 100]."""
-    return AuxiliaryTokenSamples(ids=[[t, t + 100] for t in tokens], versions=[t % 3 for t in tokens])
+def _head(*tokens):
+    """Distinguishable 2-wide heads per output token: row i = [token, token + 100]."""
+    return TopLogprobs(ids=[[t, t + 100] for t in tokens], logprobs=[[-t / 10, -t] for t in tokens])
 
 
-def test_token_samples_follow_trained_responses():
+def test_top_logprobs_follow_trained_responses():
     mgr = TrajectoryManager()
     mgr.record_turn(
         "s",
-        turn=TurnRecord(
-            prompt_ids=[1, 2, 3], output_ids=[4, 5], finish_reason="stop", output_auxiliary_token_samples=_samples(4, 5)
-        ),
+        turn=TurnRecord(prompt_ids=[1, 2, 3], output_ids=[4, 5], finish_reason="stop", output_top_logprobs=_head(4, 5)),
         prompt_messages=[_um("hi")],
         response_message=_am("a"),
     )
@@ -232,24 +230,22 @@ def test_token_samples_follow_trained_responses():
             prompt_ids=[1, 2, 3, 4, 5, 6],
             output_ids=[7],
             finish_reason="stop",
-            output_auxiliary_token_samples=_samples(7),
+            output_top_logprobs=_head(7),
         ),
         prompt_messages=[_um("hi"), _am("a"), _um("more")],
         response_message=_am("b"),
     )
     r = mgr.get_trajectory("s", base_sample=BaseTrace(index=0))[0]
-    # response region [4, 5, 6, 7]: the observation 6 has no samples
+    # response region [4, 5, 6, 7]: the observation 6 has no head
     assert r.loss_mask == [1, 1, 0, 1]
-    assert [(offset, s.ids) for offset, s in r.auxiliary_token_samples] == [(0, [[4, 104], [5, 105]]), (3, [[7, 107]])]
+    assert [(offset, s.ids) for offset, s in r.top_logprobs] == [(0, [[4, 104], [5, 105]]), (3, [[7, 107]])]
 
 
-def test_token_samples_omitted_for_responses_reemitted_as_context():
+def test_top_logprobs_omitted_for_responses_reemitted_as_context():
     mgr = TrajectoryManager()
     mgr.record_turn(
         "s",
-        turn=TurnRecord(
-            prompt_ids=[1, 2, 3], output_ids=[4, 5], finish_reason="stop", output_auxiliary_token_samples=_samples(4, 5)
-        ),
+        turn=TurnRecord(prompt_ids=[1, 2, 3], output_ids=[4, 5], finish_reason="stop", output_top_logprobs=_head(4, 5)),
         prompt_messages=[_um("hi")],
         response_message=_am("a"),
     )
@@ -260,19 +256,19 @@ def test_token_samples_omitted_for_responses_reemitted_as_context():
                 prompt_ids=[1, 2, 3, 4, 5, obs],
                 output_ids=[out],
                 finish_reason="stop",
-                output_auxiliary_token_samples=_samples(out),
+                output_top_logprobs=_head(out),
             ),
             prompt_messages=[_um("hi"), _am("a"), _um(f"tool {obs}")],
             response_message=_am("b"),
         )
     first, second = mgr.get_trajectory("s", base_sample=BaseTrace(index=0))
-    assert [offset for offset, _ in first.auxiliary_token_samples] == [0, 3]
-    # the shared response trains on the first leaf only, so only the second leaf's own samples remain
+    assert [offset for offset, _ in first.top_logprobs] == [0, 3]
+    # the shared response trains on the first leaf only, so only the second leaf's own heads remain
     assert second.loss_mask == [0, 0, 0, 1]
-    assert [(offset, s.ids) for offset, s in second.auxiliary_token_samples] == [(3, [[9, 109]])]
+    assert [(offset, s.ids) for offset, s in second.top_logprobs] == [(3, [[9, 109]])]
 
 
-def test_token_samples_truncated_with_max_sample_tokens():
+def test_top_logprobs_truncated_with_max_sample_tokens():
     mgr = TrajectoryManager()
     mgr.record_turn(
         "s",
@@ -280,14 +276,14 @@ def test_token_samples_truncated_with_max_sample_tokens():
             prompt_ids=[1, 2],
             output_ids=[4, 5, 6],
             finish_reason="stop",
-            output_auxiliary_token_samples=_samples(4, 5, 6),
+            output_top_logprobs=_head(4, 5, 6),
         ),
         prompt_messages=[_um("hi")],
         response_message=_am("a"),
     )
     r = mgr.get_trajectory("s", base_sample=BaseTrace(index=0), max_sample_tokens=4)[0]
     assert r.loss_mask == [1, 1]
-    ((offset, samples),) = r.auxiliary_token_samples
+    ((offset, head),) = r.top_logprobs
     assert offset == 0
-    assert samples.ids == [[4, 104], [5, 105]]
-    assert samples.versions == [1, 2]
+    assert head.ids == [[4, 104], [5, 105]]
+    assert head.logprobs == [[-0.4, -4], [-0.5, -5]]

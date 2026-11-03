@@ -77,6 +77,12 @@ class OpenAIAdapter(BaseAdapter):
             status=400,
         )
 
+    def _invalid_request_error(self, message: str) -> web.Response:
+        return web.json_response(
+            {"error": {"message": message, "type": "invalid_request_error", "param": None, "code": None}},
+            status=400,
+        )
+
     async def _respond(self, request, body, reply, in_tok, out_tok, stream) -> web.StreamResponse:
         wire_message, wire_finish = reply.wire
         if stream:

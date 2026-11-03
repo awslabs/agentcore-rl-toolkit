@@ -22,10 +22,10 @@ from ..trajectory import TurnRecord
 class SamplingBackend(Protocol):
     """token_ids -> token_ids + logprobs, as a ``TurnRecord``.
 
-    A backend that accepts ``num_auxiliary_token_samples`` can also draw ``K`` extra tokens per
-    output token from the sampling distribution, returned as ``TurnRecord.output_auxiliary_token_samples``.
-    The gateway passes it only when a session asks for draws, and rejects such sessions
-    for backends whose ``generate`` lacks the parameter.
+    A backend that accepts ``num_top_logprobs`` can also return the sampler's ``K`` most
+    likely tokens at each output position, as ``TurnRecord.output_top_logprobs``. The gateway
+    passes it only when a session asks for them, and rejects such sessions for backends whose
+    ``generate`` lacks the parameter.
     """
 
     async def generate(
@@ -36,13 +36,13 @@ class SamplingBackend(Protocol):
         session_id: str | None = None,
         image_data: Any = None,
         video_data: Any = None,
-        num_auxiliary_token_samples: int = 0,
+        num_top_logprobs: int = 0,
     ) -> TurnRecord:
         ...
 
 
-def supports_auxiliary_token_samples(backend: Any) -> bool:
-    return "num_auxiliary_token_samples" in inspect.signature(backend.generate).parameters
+def supports_top_logprobs(backend: Any) -> bool:
+    return "num_top_logprobs" in inspect.signature(backend.generate).parameters
 
 
-__all__ = ["SamplingBackend", "supports_auxiliary_token_samples"]
+__all__ = ["SamplingBackend", "supports_top_logprobs"]

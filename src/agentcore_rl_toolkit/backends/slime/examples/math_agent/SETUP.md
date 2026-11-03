@@ -35,18 +35,26 @@ cp config.yaml.example config.yaml
 bash train.sh
 ```
 
-## Score function centering
+## Score centering
 
-[`score_centering.py`](../../integration/score_centering.py) implements
-[Tinker's StableReinforce](https://tinker-docs.thinkingmachines.ai/tinker/losses/stable-reinforce/)
-loss. SGLang draws the samples through the `sglang_token_samples` plugin, registered as a
-`sglang.srt.plugins` entry point (reinstall the package after pulling).
+slime implements score centering ([arXiv:2609.20807](https://arxiv.org/abs/2609.20807))
+behind `--use-score-centering`. With `--rollout-top-p 1` it centers each token's score over
+the sampler's top-`--score-centering-top-k` head and approximates the remaining tail. The
+gateway requests that head from SGLang for every model turn, and `generate` hands it to
+slime with the rest of the `Sample`. slime's exact top-p mode (`--rollout-top-p` below 1) is
+not supported through the gateway.
 
-Train with [`train_sfc.sh`](train_sfc.sh) instead of `train.sh`. It runs slime's `train_async.py` (separate
-`TRAINER_GPUS` and `ROLLOUT_GPUS`) through
-`python3 -m agentcore_rl_toolkit.backends.slime.train`, which registers the
-`--sfc-num-auxiliary-token-samples`, `--sfc-kl-beta`, and `--sfc-loss-agg-mode` flags, and
-sets the loss, the init hook, and `AGENTCORE_SGLANG_TOKEN_SAMPLES=1` for the SGLang engines.
+Train with [`train_score_centering.sh`](train_score_centering.sh) instead of `train.sh`. It
+adds slime's score centering flags (`--use-score-centering --pg-loss-type reinforce` with
+TIS) to the same colocated setup.
 
-Sampling must be untruncated (`--rollout-top-p 1.0`, `--rollout-top-k -1`, and no
-`top_p`/`top_k` from the agent); the gateway fails turns sampled otherwise.
+slime's fully-async rollout (`--flush-cache-interval 0` on separate rollout GPUs) cannot
+run with in-training eval at slime `540ea919`: eval and the fully-async worker share
+`GenerateState`'s `asyncio.Semaphore` from two event loops, and the worker fails the job
+at the first eval. Drop the `--eval-*` flags to use it. Its default `--flush-cache-interval 1`
+also aborts in-flight SGLang requests at each weight sync, and the agent continues from the
+truncated turn.
+
+Each turn's sampling params must match the rollout config (`--rollout-temperature`,
+`--rollout-top-p 1`, `--rollout-top-k -1`, no penalties). The gateway rejects a turn
+whose agent overrides `temperature`, `top_p`, or `top_k` with HTTP 400.

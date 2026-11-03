@@ -46,7 +46,8 @@ class Session:
 
     sampling_defaults: dict = dataclasses.field(default_factory=dict)
     max_context_tokens: int = 0
-    num_auxiliary_token_samples: int = 0
+    num_top_logprobs: int = 0
+    validate_sampling_params: Callable[[dict], None] | None = None
 
 
 @dataclasses.dataclass
@@ -218,6 +219,10 @@ class BaseAdapter:
         """Return this protocol's response when the input fills its context window."""
         raise NotImplementedError
 
+    def _invalid_request_error(self, message: str) -> web.Response:
+        """Return this protocol's HTTP 400 response for a request the session rejects."""
+        raise NotImplementedError
+
     async def _respond(
         self,
         request: web.Request,
@@ -237,7 +242,8 @@ class BaseAdapter:
         *,
         sampling_defaults: dict | None = None,
         max_context_tokens: int = 0,
-        num_auxiliary_token_samples: int = 0,
+        num_top_logprobs: int = 0,
+        validate_sampling_params: Callable[[dict], None] | None = None,
     ) -> None:
         """Register a fresh per-sid Session; sids must be unique."""
         if sid in self.store:
@@ -245,7 +251,8 @@ class BaseAdapter:
         self.store[sid] = Session(
             sampling_defaults=dict(sampling_defaults or {}),
             max_context_tokens=int(max_context_tokens or 0),
-            num_auxiliary_token_samples=num_auxiliary_token_samples,
+            num_top_logprobs=num_top_logprobs,
+            validate_sampling_params=validate_sampling_params,
         )
 
     async def shutdown_session(self, sid: str, *, wait_timeout: float = 5.0) -> None:
@@ -398,9 +405,13 @@ class BaseAdapter:
             if sid in self.closed:
                 return web.Response(status=503, text="session closed")
             sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
-            generate_kwargs = (
-                {"num_auxiliary_token_samples": s.num_auxiliary_token_samples} if s.num_auxiliary_token_samples else {}
-            )
+            if s.validate_sampling_params is not None:
+                try:
+                    s.validate_sampling_params(dict(sampling_params))
+                except ValueError as e:
+                    self.logger.warning("[%s] sid=%s rejected sampling params: %s", self.log_prefix, sid, e)
+                    return self._invalid_request_error(str(e))
+            generate_kwargs = {"num_top_logprobs": s.num_top_logprobs} if s.num_top_logprobs else {}
             # Context-budget clamp (backend-neutral): an input that leaves less room
             # than the backend can sample (1 token, or a backend-declared
             # ``min_new_tokens`` floor) is an input-context error, rather than a

@@ -44,21 +44,21 @@ class BaseTrace:
 
 
 @dataclass(frozen=True)
-class AuxiliaryTokenSamples:
-    """``K`` extra sampler draws per generated token, not appended to the sequence.
+class TopLogprobs:
+    """The sampler's ``K`` most likely tokens at each generated position.
 
-    ``ids`` is ``(n, K)``: row ``i`` holds tokens drawn from the distribution token ``i``
-    was sampled from. ``versions`` is the optional ``(n,)`` sampler weight version.
+    ``ids`` and ``logprobs`` are ``(n, K)``: row ``i`` holds the head of the distribution
+    token ``i`` was sampled from, with logprobs normalized over the full vocabulary.
     """
 
     ids: Any
-    versions: Any = None
+    logprobs: Any
 
     def __len__(self) -> int:
         return len(self.ids)
 
-    def prefix(self, n: int) -> "AuxiliaryTokenSamples":
-        return AuxiliaryTokenSamples(self.ids[:n], None if self.versions is None else self.versions[:n])
+    def prefix(self, n: int) -> "TopLogprobs":
+        return TopLogprobs(self.ids[:n], self.logprobs[:n])
 
 
 @dataclass
@@ -80,8 +80,8 @@ class TraceRecord:
     response: str = ""
     metadata: dict = field(default_factory=dict)
     status: Status = Status.COMPLETED
-    # (offset into the response region, draws) for trained tokens.
-    auxiliary_token_samples: list[tuple[int, AuxiliaryTokenSamples]] = field(default_factory=list)
+    # (offset into the response region, sampler head) for trained tokens.
+    top_logprobs: list[tuple[int, TopLogprobs]] = field(default_factory=list)
 
     # Off-policy / MoE fields (weight_version, routed_experts) are intentionally
     # omitted for now; add them as optional fields if a consumer needs them.
@@ -98,4 +98,4 @@ class TraceRecord:
             )
 
 
-__all__ = ["BaseTrace", "Status", "AuxiliaryTokenSamples", "TraceRecord"]
+__all__ = ["BaseTrace", "Status", "TopLogprobs", "TraceRecord"]

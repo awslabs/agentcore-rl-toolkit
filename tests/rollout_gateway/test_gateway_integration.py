@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from agentcore_rl_toolkit.rollout_gateway import AuxiliaryTokenSamples, BaseTrace, RolloutGateway
+from agentcore_rl_toolkit.rollout_gateway import BaseTrace, RolloutGateway, TopLogprobs
 from agentcore_rl_toolkit.rollout_gateway.render import ParsedOutput
 from agentcore_rl_toolkit.rollout_gateway.trajectory import TurnRecord
 
@@ -89,8 +89,8 @@ class FakeBackend:
         )
 
 
-class FakeSamplingBackend(FakeBackend):
-    """Also draws K extra tokens per output token when asked: row i = [token] * K."""
+class FakeTopLogprobsBackend(FakeBackend):
+    """Also returns a K-wide head per output token when asked: row i = [token, token + 1, ...]."""
 
     async def generate(
         self,
@@ -100,14 +100,15 @@ class FakeSamplingBackend(FakeBackend):
         session_id=None,
         image_data=None,
         video_data=None,
-        num_auxiliary_token_samples=0,
+        num_top_logprobs=0,
     ):
         turn = await super().generate(prompt_ids=prompt_ids, sampling_params=sampling_params, session_id=session_id)
-        self.calls[-1]["num_auxiliary_token_samples"] = num_auxiliary_token_samples
-        if not num_auxiliary_token_samples:
+        self.calls[-1]["num_top_logprobs"] = num_top_logprobs
+        if not num_top_logprobs:
             return turn
-        draws = AuxiliaryTokenSamples(ids=[[t] * num_auxiliary_token_samples for t in turn.output_ids])
-        return dataclasses.replace(turn, output_auxiliary_token_samples=draws)
+        ids = [[t + j for j in range(num_top_logprobs)] for t in turn.output_ids]
+        head = TopLogprobs(ids=ids, logprobs=[[-1.0] * num_top_logprobs for _ in ids])
+        return dataclasses.replace(turn, output_top_logprobs=head)
 
 
 def make_gateway(replies: list[str], **gateway_kwargs) -> tuple[RolloutGateway, FakeBackend]:
@@ -592,14 +593,14 @@ async def test_adapter_subset_mounts_only_requested_routes():
 
 
 @pytest.mark.asyncio
-async def test_token_samples_follow_trained_tokens():
+async def test_top_logprobs_follow_trained_tokens():
     renderer = FakeRenderer()
-    backend = FakeSamplingBackend(renderer, ["first reply", "second reply"])
+    backend = FakeTopLogprobsBackend(renderer, ["first reply", "second reply"])
     gateway = RolloutGateway(backend=backend, renderer=renderer, tokenizer=renderer)
     sid = "ep1"
 
     async with serve(gateway) as client:
-        gateway.create_session(sid, num_auxiliary_token_samples=3)
+        gateway.create_session(sid, num_top_logprobs=3)
         messages = [{"role": "user", "content": "hi"}]
         for _ in range(2):
             resp = await client.post(
@@ -610,18 +611,41 @@ async def test_token_samples_follow_trained_tokens():
             messages = messages + [reply, {"role": "user", "content": "more"}]
         (rec,) = await gateway.finish_session(sid, base_sample=BaseTrace(rollout_id=sid))
 
-    assert [call["num_auxiliary_token_samples"] for call in backend.calls] == [3, 3]
+    assert [call["num_top_logprobs"] for call in backend.calls] == [3, 3]
     response = rec.token_ids[-rec.response_length :]
     covered = {}
-    for offset, samples in rec.auxiliary_token_samples:
-        for i, row in enumerate(samples.ids):
+    for offset, head in rec.top_logprobs:
+        for i, row in enumerate(head.ids):
             covered[offset + i] = row
-    # exactly the trained tokens carry samples, each drawn at that token's own position
+    # exactly the trained tokens carry a head, each from that token's own position
     assert sorted(covered) == [i for i, m in enumerate(rec.loss_mask) if m]
-    assert all(row == [response[i]] * 3 for i, row in covered.items())
+    assert all(row == [response[i] + j for j in range(3)] for i, row in covered.items())
 
 
-def test_token_samples_need_a_capable_backend():
+def test_top_logprobs_need_a_capable_backend():
     gateway, _ = make_gateway(replies=[])
-    with pytest.raises(ValueError, match="FakeBackend cannot draw token samples"):
-        gateway.create_session("s", num_auxiliary_token_samples=2)
+    with pytest.raises(ValueError, match="FakeBackend cannot return top logprobs"):
+        gateway.create_session("s", num_top_logprobs=2)
+
+
+@pytest.mark.parametrize("path", ["/v1/chat/completions", "/v1/messages"])
+@pytest.mark.asyncio
+async def test_rejected_sampling_params_fail_the_turn_before_generation(path):
+    gateway, backend = make_gateway(replies=["unused"])
+    seen = []
+
+    def validate(params):
+        seen.append(params)
+        if params.get("temperature") != 1.0:
+            raise ValueError("temperature must be 1.0")
+
+    body = {"model": "m", "max_tokens": 16, "temperature": 0.5, "messages": [{"role": "user", "content": "hi"}]}
+    async with serve(gateway) as client:
+        gateway.create_session("s", sampling_defaults={"temperature": 1.0}, validate_sampling_params=validate)
+        resp = await client.post(path, json=body, headers=bearer("s"))
+        assert resp.status == 400
+        assert "temperature must be 1.0" in json.dumps(await resp.json())
+        resp = await client.post(path, json={**body, "temperature": 1.0}, headers=bearer("s"))
+        assert resp.status == 200
+    assert [p["temperature"] for p in seen] == [0.5, 1.0]  # the merged params, after the agent's override
+    assert len(backend.calls) == 1

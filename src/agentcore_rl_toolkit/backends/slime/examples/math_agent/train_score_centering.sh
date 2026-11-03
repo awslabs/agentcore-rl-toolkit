@@ -1,7 +1,6 @@
 #!/bin/bash
-# GSM8K with slime + ACR rollout gateway, trained with score function centering
-# (Tinker's StableReinforce loss; see ../../integration/score_centering.py), with
-# train_async.py: SGLang generates rollout r+1 while Megatron trains on rollout r.
+# GSM8K with slime + ACR rollout gateway, trained with slime's score centering
+# (--use-score-centering, arXiv:2609.20807).
 set -euo pipefail
 
 # === Paths (set these via env) ===
@@ -16,13 +15,10 @@ CONFIG="${CONFIG:-$(dirname "$0")/config.yaml}"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.0}"
 
 # Cleared at start; comment the rm to resume.
-CKPTS_DIR="${CKPTS_DIR:-checkpoints/exp_agentcore_sfc}"
+CKPTS_DIR="${CKPTS_DIR:-checkpoints/exp_agentcore_score_centering}"
 rm -rf "${CKPTS_DIR}"
 
-# Async training needs separate GPUs for Megatron and SGLang.
-TRAINER_GPUS="${TRAINER_GPUS:-4}"
-ROLLOUT_GPUS="${ROLLOUT_GPUS:-4}"
-NUM_GPUS=$((TRAINER_GPUS + ROLLOUT_GPUS))
+NUM_GPUS="${NUM_GPUS:-8}"
 
 pkill -9 sglang 2>/dev/null || true
 ray stop --force 2>/dev/null || true
@@ -60,12 +56,11 @@ export CUDNN_HOME
 export CUDNN_PATH="${CUDNN_HOME}"
 
 export PYTHONUNBUFFERED=1
-export AGENTCORE_SGLANG_TOKEN_SAMPLES=1  # SGLang draws the samples
 ray start --head --num-gpus ${NUM_GPUS} --disable-usage-stats
 
 source ${SLIME_DIR}/scripts/models/${MODEL_TYPE}.sh
 
-RUNTIME_ENV_JSON="{\"env_vars\": {\"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\", \"AGENTCORE_SGLANG_TOKEN_SAMPLES\": \"1\", \"CUDA_HOME\": \"${CUDA_HOME}\", \"CUDNN_HOME\": \"${CUDNN_HOME}\", \"CUDNN_PATH\": \"${CUDNN_PATH}\", \"CUDNN_FRONTEND_CUDART_LIB_NAME\": \"${CUDNN_FRONTEND_CUDART_LIB_NAME}\", \"LD_LIBRARY_PATH\": \"${LD_LIBRARY_PATH}\"}}"
+RUNTIME_ENV_JSON="{\"env_vars\": {\"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\", \"CUDA_HOME\": \"${CUDA_HOME}\", \"CUDNN_HOME\": \"${CUDNN_HOME}\", \"CUDNN_PATH\": \"${CUDNN_PATH}\", \"CUDNN_FRONTEND_CUDART_LIB_NAME\": \"${CUDNN_FRONTEND_CUDART_LIB_NAME}\", \"LD_LIBRARY_PATH\": \"${LD_LIBRARY_PATH}\"}}"
 
 # slime/ray/actor_group.py gives Megatron train actors their own runtime_env that drops
 # CUDA_HOME / CUDNN_* / LD_LIBRARY_PATH; --train-env-vars re-pins them for those actors.
@@ -73,7 +68,7 @@ TRAIN_ENV_VARS_JSON="{\"CUDA_HOME\": \"${CUDA_HOME}\", \"CUDNN_HOME\": \"${CUDNN
 
 ray job submit --address="http://127.0.0.1:8265" \
   --runtime-env-json="${RUNTIME_ENV_JSON}" \
-  -- python3 -m agentcore_rl_toolkit.backends.slime.train ${SLIME_DIR}/train_async.py \
+  -- python3 ${SLIME_DIR}/train.py \
   "${MODEL_ARGS[@]}" \
   --hf-checkpoint ${MODEL_DIR} \
   --ref-load ${MODEL_DIR} \
@@ -110,26 +105,24 @@ ray job submit --address="http://127.0.0.1:8265" \
   --attention-dropout 0.0 \
   --hidden-dropout 0.0 \
   --attention-backend fused \
-  --actor-num-gpus-per-node ${TRAINER_GPUS} \
-  --rollout-num-gpus ${ROLLOUT_GPUS} \
+  --actor-num-gpus-per-node ${NUM_GPUS} \
+  --colocate \
   --train-env-vars "${TRAIN_ENV_VARS_JSON}" \
   --custom-generate-function-path \
       agentcore_rl_toolkit.backends.slime.integration.rollout.generate \
   --custom-reward-post-process-path \
       agentcore_rl_toolkit.backends.slime.integration.rewards.normalize_episode_rewards \
   --custom-config-path ${CONFIG} \
-  --loss-type custom_loss \
-  --custom-loss-function-path \
-      agentcore_rl_toolkit.backends.slime.integration.score_centering.score_centering_loss \
-  --custom-megatron-init-path \
-      agentcore_rl_toolkit.backends.slime.integration.score_centering.install \
-  --sfc-num-auxiliary-token-samples 8 \
-  --sfc-kl-beta 0.3 \
-  --sfc-loss-agg-mode token-mean \
+  --use-score-centering \
+  --score-centering-top-k 128 \
+  --pg-loss-type reinforce \
+  --use-tis \
+  --tis-clip-low 0 \
+  --tis-clip 2 \
   --use-dynamic-batch-size \
   --save ${CKPTS_DIR} \
   --save-interval 100 \
   --save-hf ${CKPTS_DIR}/hf/{rollout_id} \
   --use-wandb \
   --wandb-project slime-art \
-  --wandb-group gsm8k-slime-sfc
+  --wandb-group gsm8k-slime-score-centering

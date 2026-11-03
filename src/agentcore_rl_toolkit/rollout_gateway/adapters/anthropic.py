@@ -75,6 +75,12 @@ class AnthropicAdapter(BaseAdapter):
             status=400,
         )
 
+    def _invalid_request_error(self, message: str) -> web.Response:
+        return web.json_response(
+            {"type": "error", "error": {"type": "invalid_request_error", "message": message}},
+            status=400,
+        )
+
     async def _respond(self, request, body, reply, in_tok, out_tok, stream) -> web.StreamResponse:
         blocks, stop_reason = reply.wire
         if stream:

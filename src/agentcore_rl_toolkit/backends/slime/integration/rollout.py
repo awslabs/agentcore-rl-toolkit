@@ -18,12 +18,17 @@
 Each rollout runs ``{**metadata.payload, "_config": {base_url, model_id, api_key}}``
 in its own ``RolloutSession`` and reads a scalar ``reward`` from the returned dict.
 With ``AgentCoreHttpSession``, the agent is an ``AgentCoreRuntimeApp``.
+
+With slime's ``--use-score-centering`` (``--rollout-top-p 1``), the gateway captures the
+sampler's top-``--score-centering-top-k`` head for every trained token, and each turn's
+sampling params must pass slime's ``score_centering_request`` checks.
 """
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import logging
 import uuid
 from argparse import Namespace
@@ -42,8 +47,6 @@ from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway
 from agentcore_rl_toolkit.rollout_gateway.sampling_backends.sglang_http import SglangHttpBackend
 from agentcore_rl_toolkit.rollout_session.errors import RolloutContractError
 from agentcore_rl_toolkit.rollout_session.factory import make_session, resolve_backend
-
-from . import score_centering
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +85,6 @@ class AgentCoreRLService(metaclass=SingletonMeta):
     def __init__(self, args: Namespace) -> None:
         self.config = AgentCoreRLConfig.from_args(args)
         self.model_id = self.config.model_id or args.hf_checkpoint
-        self.num_auxiliary_token_samples, kl_beta = score_centering.sfc_settings(args)
-        self.require_sample_versions = kl_beta > 0
-        if self.num_auxiliary_token_samples:
-            score_centering.validate(args, rollout=True)
 
         tokenizer = load_tokenizer(args.hf_checkpoint, trust_remote_code=True)
         router_url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}"
@@ -108,19 +107,23 @@ class AgentCoreRLService(metaclass=SingletonMeta):
         logger.info("[agentcore] gateway=%s sglang=%s model_id=%s", self.base_url, router_url, self.model_id)
 
 
-async def generate(
-    args: Namespace, sample: Sample, sampling_params: dict[str, Any], evaluation: bool = False
-) -> list[Sample]:
+async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, Any]) -> list[Sample]:
     """Run one rollout on an ACR agent, returning one Sample per trajectory leaf."""
     service = AgentCoreRLService(args)
-    num_samples = 0 if evaluation else service.num_auxiliary_token_samples
+    # slime clears use_score_centering in the args it passes for evaluation.
+    top_k = _score_centering_top_k(args)
     payload = _build_payload(sample)
     sid = str(uuid.uuid4())
     sample.session_id = sid
     # The session id doubles as the gateway's trajectory key, carried in the api-key slot.
     task = {**payload, "_config": {"base_url": service.base_url, "model_id": service.model_id, "api_key": sid}}
 
-    service.gateway.create_session(sid, sampling_defaults=sampling_params, num_auxiliary_token_samples=num_samples)
+    service.gateway.create_session(
+        sid,
+        sampling_defaults=sampling_params,
+        num_top_logprobs=top_k,
+        validate_sampling_params=_score_centering_validator(args) if top_k else None,
+    )
     try:
         result, error = await _run_agent(service, sid, task)
         if error:
@@ -129,16 +132,10 @@ async def generate(
         records = await service.gateway.finish_session(sid, base_sample=BaseTrace(index=sample.index))
         records = [r for r in records if r.token_ids and r.response_length]
         if not records:
-            return [_aborted(sample, error or "agent produced no LLM turns", num_samples)]
+            return [_aborted(sample, error or "agent produced no LLM turns", args, top_k)]
 
         reward = _agent_reward(result) if error is None else 0.0
-        samples = [_to_sample(sample, r, reward) for r in records]
-        if num_samples:
-            for s, r in zip(samples, records, strict=True):
-                s.multimodal_train_inputs = score_centering.train_inputs(
-                    r, num_samples, require_versions=service.require_sample_versions
-                )
-        return samples
+        return [_to_sample(sample, r, reward, args, top_k) for r in records]
     finally:
         await service.gateway.drop_session(sid)
 
@@ -189,8 +186,25 @@ def _agent_reward(result: dict[str, Any]) -> float | None:
     return float(reward)
 
 
-def _to_sample(base: Sample, record: TraceRecord, reward: float | None) -> Sample:
-    return Sample(
+def _score_centering_top_k(args: Namespace) -> int:
+    """The sampler head width slime's score centering trains on, or 0 when it is off."""
+    if not getattr(args, "use_score_centering", False):
+        return 0
+    if args.rollout_top_p < 1:
+        raise ValueError("Exact top-p score centering is not supported through the gateway; use --rollout-top-p 1.")
+    return args.score_centering_top_k
+
+
+def _score_centering_validator(args: Namespace):
+    from slime.utils.score_centering import score_centering_request
+
+    return functools.partial(score_centering_request, args)
+
+
+def _to_sample(
+    base: Sample, record: TraceRecord, reward: float | None, args: Namespace | None = None, top_k: int = 0
+) -> Sample:
+    sample = Sample(
         index=base.index,
         group_index=base.group_index,
         rollout_id=base.index,
@@ -206,9 +220,46 @@ def _to_sample(base: Sample, record: TraceRecord, reward: float | None) -> Sampl
         status=_STATUS[record.status.value],
         metadata={**(base.metadata or {}), "acr_session_id": base.session_id},
     )
+    if top_k:
+        _append_sampler_heads(sample, record, args, top_k)
+    return sample
 
 
-def _aborted(base: Sample, reason: str, num_auxiliary_token_samples: int = 0) -> Sample:
+def _append_sampler_heads(sample: Sample, record: TraceRecord, args: Namespace, top_k: int) -> None:
+    """Rebuild the response through slime's ``append_response_tokens``, one segment at a time.
+
+    Trained segments carry their sampler head as ``score_centering_topk``; slime fills
+    placeholder rows for the masked segments between them.
+    """
+    prompt_length = len(record.token_ids) - record.response_length
+    response = record.token_ids[prompt_length:]
+    sample.tokens = list(record.token_ids[:prompt_length])
+    sample.response_length = 0
+    sample.loss_mask = None
+    sample.rollout_log_probs = None
+    end = 0
+    for offset, head in record.top_logprobs:
+        if offset > end:
+            sample.append_response_tokens(
+                args, tokens=response[end:offset], trainable=False, update_terminal_info=False
+            )
+        end = offset + len(head)
+        if head.ids.shape != (end - offset, top_k):
+            raise RuntimeError(f"sampler head has shape {head.ids.shape}, expected {(end - offset, top_k)}")
+        sample.append_response_tokens(
+            args,
+            tokens=response[offset:end],
+            log_probs=record.logprobs[offset:end],
+            meta_info={"score_centering_topk": (head.ids, head.logprobs)},
+            update_terminal_info=False,
+        )
+    if end < len(response):
+        sample.append_response_tokens(args, tokens=response[end:], trainable=False, update_terminal_info=False)
+    if sample.loss_mask != list(record.loss_mask):
+        raise RuntimeError("trained tokens without a sampler head")
+
+
+def _aborted(base: Sample, reason: str, args: Namespace | None = None, top_k: int = 0) -> Sample:
     logger.warning("[agentcore] sample %s aborted: %s", base.index, reason)
     base.tokens = [0, 0]
     base.response = ""
@@ -220,7 +271,9 @@ def _aborted(base: Sample, reason: str, num_auxiliary_token_samples: int = 0) ->
     base.remove_sample = True
     base.status = Sample.Status.ABORTED
     base.metadata = {**(base.metadata or {}), "abort_reason": reason}
-    if num_auxiliary_token_samples:
-        # slime concatenates these across a micro-batch, so every sample needs them.
-        base.multimodal_train_inputs = score_centering.empty_train_inputs(1, num_auxiliary_token_samples)
+    if top_k:
+        # slime batches the sampler heads of every sample, so this one needs placeholders.
+        base.tokens, base.response_length, base.loss_mask, base.rollout_log_probs = [0], 0, None, None
+        base.rollout_topk_token_ids = base.rollout_topk_log_probs = None
+        base.append_response_tokens(args, tokens=[0], trainable=False, update_terminal_info=False)
     return base
