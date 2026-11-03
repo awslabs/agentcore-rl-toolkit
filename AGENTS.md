@@ -346,11 +346,6 @@ via two hook entry points, requiring no changes to slime itself:
   and normalizes within each group's unique rollouts. Active only when
   `advantage_estimator` is in `(grpo, gspo, cispo, reinforce_plus_plus_baseline)` and
   `rewards_normalization=True`; returns identity otherwise.
-- Score centering — with slime's `--use-score-centering` (top-K mode, `--rollout-top-p 1`),
-  `generate` asks the gateway for each trained token's top-`--score-centering-top-k` head
-  and rebuilds the `Sample` through slime's `append_response_tokens`; slime's
-  `score_centering_request` checks each turn's sampling params. Setup:
-  `examples/math_agent/SETUP.md`.
 - `integration/rollout.py:_agent_reward` — rewards are agent-owned (scalar `{"reward": ...}`
   in the returned dict). `None` is returned when the agent omits it, signalling slime to
   fall back to its own `rm_hub`; a non-numeric reward or non-dict result raises (broken
