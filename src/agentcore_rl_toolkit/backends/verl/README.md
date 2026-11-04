@@ -142,27 +142,6 @@ uv sync --extra verl --group verl-megatron
 
 - Use NVIDIA Megatron-Bridge with `megatron.use_mbridge=True`.
 
-#### Context parallelism on VL models: apply the megatron-bridge patch
-
-**Required for `context_parallel_size > 1` on a vision-language architecture** (e.g. Qwen3.6-27B / `Qwen3_5ForConditionalGeneration`, which carries a `vision_config` even when the task is text-only). Run it after every `uv sync`, since uv reinstalls the package and reverts the edit:
-
-```bash
-./patches/apply-megatron-bridge-cp-clamp.sh    # from the repo root; idempotent
-```
-
-To check whether it is currently applied:
-
-```bash
-grep -c "LOCAL PATCH (agentcore-rl-toolkit)" \
-  .venv/lib/python3.12/site-packages/megatron/bridge/models/qwen_vl/modelling_qwen3_vl/utils.py
-```
-
-What it fixes: megatron-bridge's `qwen_vl` `preprocess_packed_seqs` pads each sequence to `align_size = tp * cp * 2`, then slices chunk one of the zigzag-CP split by position in the *padded* sequence while reading a buffer that holds only real tokens. It clamps chunk two but not chunk one, so any row shorter than `tp * cp` raises `RuntimeError: The expanded size of the tensor (N) must match the existing size (M)` from `actor_rollout_compute_log_prob` — i.e. the rollout completes in full and then the first training-side forward pass dies, so a single short row costs the whole batch. The patch clamps chunk one the same way chunk two already is; it is a no-op on rows long enough to split, verified byte-identical on normal-length rows.
-
-Short rows are not avoidable from config: verl synthesizes `prompt_len=1 / response_len=1` samples itself in `trainer/ppo/padding_utils.py` to make the batch divisible by the dp size. Nor is any `cp > 1` layout safer than another — the alignment depends on the `tp * cp` product, not on either alone.
-
-Text-only models (e.g. `Qwen3MoeForCausalLM`) take verl's own THD path, never reach this function, and need none of this.
-
 ## Dataset contract: the `payload` column
 
 A training row carries the agent's exact ACR invoke payload in a single **`payload`**
@@ -223,7 +202,7 @@ the payload-first contract does not provide.
 ## Examples
 
 - [GSM8K with FSDP full fine-tuning](examples/math_agent/)
-- [MigrationBench with Megatron and LoRA](examples/migration_agent/)
+- [MigrationBench with Megatron and LoRA](../../../../examples/strands_migration_agent/train/verl/)
 - [Public setup guide](../../../../docs/site/src/content/docs/guides/verl-backend-setup.md)
 
 Each recipe separates verl configuration in its shell script from

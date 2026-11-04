@@ -2,7 +2,11 @@
 # GRPO on MigrationBench (Java 8->17) with rollouts on Bedrock AgentCore Runtime,
 # using verl's stock main_ppo entrypoint (v1 trainer) and the agentcore_agent loop.
 
-set -x
+set -euo pipefail
+: "${TRAIN_DATA_PATH:?Set the MigrationBench training Parquet path}"
+: "${VAL_DATA_PATH:?Set the MigrationBench validation Parquet path}"
+: "${AGENT_RUNTIME_ARN:?Set the MigrationBench Runtime ARN}"
+: "${CHECKPOINT_DIR:?Set a checkpoint directory}"
 
 export HYDRA_FULL_ERROR=1
 export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
@@ -10,21 +14,17 @@ export VERL_USE_EXTERNAL_MODULES=agentcore_rl_toolkit.backends.verl.trainer
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AGENT_LOOP_CONFIG=$SCRIPT_DIR/agentcore_agent.yaml
 
-# Where preprocess_migrationbench.py wrote the parquets. Defaults to alongside this
-# script (the sibling 30B recipe's convention); override for a shared data directory:
-#   DATA_DIR=/path/to/migrationbench ./megatron_lora_sync_grpo_qwen3.6-27b.sh
-DATA_DIR=${DATA_DIR:-$SCRIPT_DIR}
-train_files="['$DATA_DIR/migrationbench_agent_train.parquet']"
-test_files="['$DATA_DIR/migrationbench_agent_test.parquet']"
+train_files="['$TRAIN_DATA_PATH']"
+test_files="['$VAL_DATA_PATH']"
 
 MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3.6-27B}
 
-MAX_CONTEXT_LENGTH=131072
-MAX_PROMPT_LENGTH=8192
+MAX_CONTEXT_LENGTH=${MAX_CONTEXT_LENGTH:-131072}
+MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-8192}
 MAX_RESPONSE_LENGTH=$MAX_CONTEXT_LENGTH
 
-TP=4
-CP=2
+TP=${TP:-4}
+CP=${CP:-2}
 MAX_TOKENS_PER_GPU=$((MAX_CONTEXT_LENGTH / CP))
 
 LORA_RANK=64
@@ -32,7 +32,10 @@ LORA_ALPHA=128
 
 PROJECT_NAME=${PROJECT_NAME:-agentcore_grpo}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-migrationbench_qwen3.6_27B}
-CKPTS_DIR=${CKPTS_DIR:-checkpoints/${PROJECT_NAME}/${EXPERIMENT_NAME}}
+NNODES=${NNODES:-${SLURM_JOB_NUM_NODES:-1}}
+GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-32}
+ROLLOUT_N=${ROLLOUT_N:-16}
 
 
 python3 -m verl.trainer.main_ppo \
@@ -45,20 +48,20 @@ python3 -m verl.trainer.main_ppo \
     algorithm.rollout_correction.rollout_is_threshold=2.0 \
     data.train_files="$train_files" \
     data.val_files="$test_files" \
-    data.train_batch_size=32 \
+    data.train_batch_size="$TRAIN_BATCH_SIZE" \
     data.val_batch_size=128 \
     data.max_prompt_length=$MAX_PROMPT_LENGTH \
     data.max_response_length=$MAX_RESPONSE_LENGTH \
     data.custom_cls.path=pkg://agentcore_rl_toolkit.backends.verl.dataset \
     data.custom_cls.name=PayloadDataset \
     +data.apply_chat_template_kwargs.enable_thinking=false \
-    actor_rollout_ref.model.path=$MODEL_PATH \
+    actor_rollout_ref.model.path="$MODEL_PATH" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.lora.rank=$LORA_RANK \
     actor_rollout_ref.model.lora.alpha=$LORA_ALPHA \
     actor_rollout_ref.model.lora.merge=true \
     actor_rollout_ref.actor.optim.lr=1e-5 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_mini_batch_size="$TRAIN_BATCH_SIZE" \
     actor_rollout_ref.actor.use_dynamic_bsz=false \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
@@ -95,7 +98,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.data_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.70 \
     +actor_rollout_ref.rollout.engine_kwargs.vllm.moe_backend=triton \
-    actor_rollout_ref.rollout.n=16 \
+    actor_rollout_ref.rollout.n="$ROLLOUT_N" \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=false \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=$MAX_TOKENS_PER_GPU \
@@ -116,14 +119,14 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.megatron.context_parallel_size=$CP \
     actor_rollout_ref.ref.megatron.sequence_parallel=true \
     trainer.critic_warmup=0 \
-    trainer.default_local_dir=$CKPTS_DIR \
+    trainer.default_local_dir="$CHECKPOINT_DIR" \
     trainer.resume_mode=disable \
     trainer.logger='["console","wandb"]' \
     trainer.project_name="$PROJECT_NAME" \
     trainer.experiment_name="$EXPERIMENT_NAME" \
     trainer.val_before_train=true \
-    trainer.n_gpus_per_node=8 \
-    trainer.nnodes=1 \
+    trainer.n_gpus_per_node="$GPUS_PER_NODE" \
+    trainer.nnodes="$NNODES" \
     trainer.save_freq=15 \
     trainer.test_freq=15 \
     trainer.total_epochs=1 "$@"

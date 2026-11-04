@@ -4,10 +4,10 @@
     backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
     agentcore_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
   # Shared by all AgentLoopWorkers in this training job.
-  rollout_concurrency: 256
+  rollout_concurrency: ${oc.decode:${oc.env:ROLLOUT_CONCURRENCY,256}}
   tps_limit: 8
   # Per model call; cumulative context is configured in the training script.
-  max_tokens_per_turn: 8192
+  max_tokens_per_turn: ${oc.decode:${oc.env:MAX_TOKENS_PER_TURN,8192}}
   max_rollout_time: 1800
 
   history_mode: linear
