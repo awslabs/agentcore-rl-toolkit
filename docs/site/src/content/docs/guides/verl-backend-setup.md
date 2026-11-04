@@ -113,7 +113,7 @@ use OmegaConf environment interpolation.
 
 MigrationBench adds Megatron + LoRA, a Python 3.12 environment, and a two-stage
 data-preparation flow that packages the source repositories in S3. Follow the
-[`migration_agent` example](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/verl/examples/migration_agent)
+[Migration agent training recipes](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/examples/strands_migration_agent/train/verl)
 for the complete setup and training commands.
 
 ## Configuration constraints

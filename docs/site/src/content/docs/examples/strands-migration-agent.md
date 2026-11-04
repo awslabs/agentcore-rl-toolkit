@@ -53,3 +53,6 @@ For Java/Maven install, the CodeArtifact Maven
 mirror (avoids Maven Central rate limits), and full evaluation
 config, see the
 [full README on GitHub](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/examples/strands_migration_agent/README.md).
+
+For GRPO training, see the
+[verl recipes](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/examples/strands_migration_agent/train/verl).

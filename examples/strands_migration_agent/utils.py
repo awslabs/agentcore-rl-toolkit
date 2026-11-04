@@ -15,7 +15,7 @@ def configure_codeartifact_token():
     domain = os.environ.get("CODEARTIFACT_DOMAIN")
     owner = os.environ.get("CODEARTIFACT_OWNER")
     repo = os.environ.get("CODEARTIFACT_REPO")
-    region = os.environ.get("AWS_REGION", "us-west-2")
+    region = os.environ.get("CODEARTIFACT_REGION") or os.environ.get("AWS_REGION", "us-west-2")
     if not domain or not owner or not repo:
         return
     ca = boto3.client("codeartifact", region_name=region)

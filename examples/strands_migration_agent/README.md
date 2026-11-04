@@ -4,6 +4,8 @@ This agent tackles the problem of code migration from Java 8 to Java 17 as intro
 It builds upon the official [JavaMigrationAgent](https://github.com/amazon-science/JavaMigration/tree/main/java_migration_agent) with open source LLMs.
 This example is under active development alongside the `agentcore-rl-toolkit` library.
 
+See [Training with verl](train/verl/README.md) for GRPO training.
+
 ## Basic Setup
 
 Before running the agent, verify that Java 17 and Maven 3.9.6 are installed:
@@ -187,6 +189,10 @@ CODEARTIFACT_DOMAIN=migration-aws-maven-mirror
 CODEARTIFACT_OWNER=123456789012
 CODEARTIFACT_REPO=maven-central-cache
 ```
+
+Set `CODEARTIFACT_REGION` when the mirror is in a different AWS region from the
+agent.
+For Runtime deployment, pass it with `--env CODEARTIFACT_REGION=<mirror-region>`.
 
 When these environment variables are not set, the agent uses Maven Central directly (default behavior). At startup, `configure_codeartifact_token()` fetches an auth token via boto3 and generates `~/.m2/settings.xml` automatically.
 
