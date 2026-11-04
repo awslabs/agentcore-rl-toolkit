@@ -1,12 +1,12 @@
 """Response templates for ``tokenizer.parse_response`` and chat-template detection.
 
-The template dicts and the chat-template→template mapping are vendored from
-huggingface/trl ``trl/chat_template_utils.py`` (Apache-2.0; see NOTICE), baseline
-commit ``775de52a``. The hashes in ``_TEMPLATE_HASHES`` are sha256 over the bundled
-chat templates in ``trl/chat_templates/*.jinja`` at that commit — the same byte-exact
-template identity TRL's ``add_response_schema`` matches on, encoded as hashes so no
-template copies need to ship here. Re-sync workflow: diff the upstream file against
-the baseline commit, update the dicts/hashes, and bump the commit here and in NOTICE.
+The template dicts are adapted from huggingface/trl ``trl/chat_template_utils.py``
+(Apache-2.0; see NOTICE) at commit ``775de52a``, with local changes marked inline.
+The hashes in ``_TEMPLATE_HASHES`` are sha256 over the chat templates the model
+repos ship on the Hugging Face Hub, so detection needs no template copies here;
+test_template_hashes_live.py checks them against the hub. When adopting upstream TRL
+changes, keep the round-trip tests there passing: parsing a template's own rendering
+must recover the message exactly.
 
 A template is pure data in transformers' region-based ``response_template`` format
 (``transformers/utils/chat_parsing``): ``start_anchor`` locates the assistant turn in
@@ -18,7 +18,7 @@ tool-call arguments from the offered tools' JSON schemas.
 
 import hashlib
 
-# --- Response templates (vendored from TRL) ----------------------------------------
+# --- Response templates (adapted from TRL) -----------------------------------------
 
 # Qwen2.5 / Qwen3 (thinking) / Qwen3-Instruct-2507 / Qwen3-VL: JSON tool calls inside
 # <tool_call>...</tool_call>, optional <think> block, <|im_end|> end-of-turn.
@@ -47,9 +47,15 @@ QWEN3_TEMPLATE = {
 
 # XML tool-call formats render a string argument as raw text, so only the tool's JSON
 # schema (``parse_response(..., tools=...)``) can type it; values stay text otherwise.
-_XML_INLINE_VALUE_PARSER = {"name": "text"}
+# Local change: TRL strips the value; kept verbatim here (see QWEN3_5_TEMPLATE).
+_XML_INLINE_VALUE_PARSER = {"name": "text", "args": {"strip": False}}
 
 # Qwen3.5 / Qwen3.6 / Qwen3.8: XML tool calls (<function=...>/<parameter=...>).
+# Local change: TRL's parameter pattern strips all surrounding whitespace, but the
+# template renders ``<parameter=KEY>\nVALUE\n</parameter>``, so a value with leading
+# indentation or a trailing newline (e.g. a heredoc) re-renders differently from the
+# sampled tokens and the next turn's prompt forks the trajectory. The pattern consumes
+# only the template's own newline on each side.
 QWEN3_5_TEMPLATE = {
     "defaults": {"role": "assistant"},
     "start_anchor": "<|im_start|>assistant\n",
@@ -65,7 +71,7 @@ QWEN3_5_TEMPLATE = {
             "repeats": True,
             "content": "xml-inline",
             "content_args": {
-                "tag_pattern": r"<parameter=(?P<key>[^>\n]+)>\s*(?P<value>.*?)\s*</parameter>",
+                "tag_pattern": r"<parameter=(?P<key>[^>\n]+)>\n?(?P<value>.*?)\n?</parameter>",
                 "value_parser": _XML_INLINE_VALUE_PARSER,
             },
             "transform": {"type": "function", "function": {"name": "{name}", "arguments": "{content}"}},
@@ -118,8 +124,8 @@ RESPONSE_TEMPLATES: dict[str, dict] = {
 
 # --- Chat-template detection --------------------------------------------------------
 
-# sha256(chat_template) -> template name, for every chat template TRL maps to one of
-# the templates above. Byte-exact matching (no fuzzy predicates): fine-tunes inherit
+# sha256(chat_template) -> template name, for each hub chat template known to use one
+# of the templates above. Byte-exact matching (no fuzzy predicates): fine-tunes inherit
 # the template verbatim and keep matching; a template a vendor has revised stops
 # matching until its hash is added here — visible, never silently misparsed.
 _TEMPLATE_HASHES: dict[str, str] = {
@@ -132,7 +138,6 @@ _TEMPLATE_HASHES: dict[str, str] = {
     "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715": "qwen3_5",  # Qwen3.5 (think)
     "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259": "qwen3_5",  # Qwen3.6
     "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041": "qwen3_5",  # Qwen3.8
-    # Local additions without TRL equivalents; keep below the vendored entries.
     # Qwen3-Coder uses Qwen3.5's XML tool-call syntax.
     "5a38bfa05833266240066aedc497decc9b00cc0d3e3b8cceea98cf530196ab06": "qwen3_5",  # Qwen3-Coder
 }

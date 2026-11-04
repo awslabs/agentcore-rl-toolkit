@@ -8,6 +8,7 @@ Template-hash detection is covered by test_template_hashes_live.py, so tests ass
 the template directly.
 """
 
+import pytest
 from transformers import PreTrainedTokenizerBase
 
 from agentcore_rl_toolkit.rollout_gateway.render import HfTemplateRenderer, ParsedOutput
@@ -123,6 +124,30 @@ def test_xml_arguments_are_typed_by_the_offered_tools():
         {"name": "calculator", "input": {"expr": "007", "precision": 3}},
         {"name": "search", "input": {"limit": "5"}},
     ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["cat <<'EOF' > f\nhi\nEOF\n", "  echo indented", "echo a\n\n", "\nleading", ""],
+)
+def test_qwen3_5_parameter_value_keeps_its_whitespace(value):
+    # The template renders <parameter=K>\n{value}\n</parameter>; stripping more than
+    # those two newlines re-renders differently from the sampled tokens.
+    out = _parse(
+        f"<tool_call>\n<function=calculator>\n<parameter=expr>\n{value}\n</parameter>\n"
+        "</function>\n</tool_call><|im_end|>",
+        template="qwen3_5",
+    )
+    assert out.tool_uses == [{"name": "calculator", "input": {"expr": value}}]
+
+
+def test_qwen3_5_parameter_without_newlines_still_parses():
+    out = _parse(
+        "<tool_call>\n<function=calculator>\n<parameter=expr>1+1</parameter>"
+        "<parameter=precision>3</parameter>\n</function>\n</tool_call><|im_end|>",
+        template="qwen3_5",
+    )
+    assert out.tool_uses == [{"name": "calculator", "input": {"expr": "1+1", "precision": 3}}]
 
 
 def test_qwen3_5_template_parses_qwen3_coder_output():
