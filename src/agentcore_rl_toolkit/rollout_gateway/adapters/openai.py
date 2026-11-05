@@ -52,7 +52,13 @@ class OpenAIAdapter(BaseAdapter):
         if not isinstance(messages, list):
             raise web.HTTPBadRequest(text="messages must be a list")
         translated = _translate_messages(messages)
-        tools_schema = _tools_to_chat_tools(body.get("tools"))
+        try:
+            tools_schema = _parse_chat_completions_tools(body.get("tools"))
+        except ValueError as e:
+            raise web.HTTPBadRequest(
+                text=json.dumps(_invalid_request_body(str(e), param="tools")),
+                content_type="application/json",
+            ) from e
         return translated, tools_schema
 
     def _build_reply(self, parsed, raw_finish, translated, tools_schema) -> Reply:
@@ -78,16 +84,17 @@ class OpenAIAdapter(BaseAdapter):
         )
 
     def _invalid_request_error(self, message: str) -> web.Response:
-        return web.json_response(
-            {"error": {"message": message, "type": "invalid_request_error", "param": None, "code": None}},
-            status=400,
-        )
+        return web.json_response(_invalid_request_body(message), status=400)
 
     async def _respond(self, request, body, reply, in_tok, out_tok, stream) -> web.StreamResponse:
         wire_message, wire_finish = reply.wire
         if stream:
             return await _render_stream(request, body, wire_message, wire_finish, in_tok, out_tok)
         return web.json_response(_render_response(body, wire_message, wire_finish, in_tok, out_tok))
+
+
+def _invalid_request_body(message: str, *, param: str | None = None) -> dict[str, Any]:
+    return {"error": {"message": message, "type": "invalid_request_error", "param": param, "code": None}}
 
 
 # --- Translation (OpenAI wire -> chat-template messages) ---
@@ -180,45 +187,43 @@ def _translate_messages(messages: list[dict]) -> list[dict]:
     return translated
 
 
-def _tools_to_chat_tools(tools: list[dict] | None) -> list[dict] | None:
-    """Convert OpenAI tools list to tokenizer chat-template tool schema."""
-    if not tools:
+def _parse_chat_completions_tools(tools: Any) -> list[dict] | None:
+    """Convert a Chat-Completions ``tools`` list to the chat-template tool schema.
+
+    Each entry must be ``{"type": "function", "function": {"name": ..., ...}}``;
+    ``type`` may be omitted. Any other entry, including the Responses API's flat
+    ``{"type": "function", "name": ...}`` shape and non-function tool types, raises
+    ``ValueError`` naming the offending index: the chat template cannot render it,
+    and dropping it would sample the turn without that tool.
+    """
+    if tools is None:
         return None
+    if not isinstance(tools, list):
+        raise ValueError("tools must be a list")
+    expected = 'expected {"type": "function", "function": {"name": ...}}'
     normalized: list[dict] = []
-    for tool in tools:
+    for i, tool in enumerate(tools):
         if not isinstance(tool, dict):
-            continue
-        if tool.get("type") and tool.get("type") != "function":
-            continue
-        function = tool.get("function") if isinstance(tool.get("function"), dict) else None
-        if function is not None:
-            name = function.get("name")
-            if not name:
-                continue
-            normalized.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": function.get("description", ""),
-                        "parameters": function.get("parameters") or {"type": "object", "properties": {}},
-                    },
-                }
-            )
-        else:
-            name = tool.get("name")
-            if not name:
-                continue
-            normalized.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": tool.get("description", ""),
-                        "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
-                    },
-                }
-            )
+            raise ValueError(f"tools[{i}]: {expected}")
+        tool_type = tool.get("type", "function")
+        if tool_type != "function":
+            raise ValueError(f"tools[{i}]: unsupported tool type {tool_type!r}; {expected}")
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            raise ValueError(f"tools[{i}]: missing 'function' object; {expected}")
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"tools[{i}].function.name must be a non-empty string")
+        normalized.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": function.get("description", ""),
+                    "parameters": function.get("parameters") or {"type": "object", "properties": {}},
+                },
+            }
+        )
     return normalized or None
 
 
