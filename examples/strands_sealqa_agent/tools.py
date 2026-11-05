@@ -4,12 +4,13 @@
 - visit: an HTTP fetch with text extraction (HTML, PDF via pypdf, JSON as text), then a summary toward the agent's
   goal by a fixed summarizer model (gpt-oss-120b on Bedrock, reasoning dropped). The summarizer is part of the
   environment, the same for every policy. Wikipedia is fetched live unless WIKIPEDIA_SERVICE_URL names a service
-  that serves it from local dumps (GET <service>/fetch?url=<url> -> {"text"}), for large runs that would hit
-  Wikipedia's rate limits.
+  that serves it from local dumps (GET <service>/fetch?url=<url> -> {"text"}). Live Wikipedia often refuses
+  AgentCore Runtime's addresses; the refusal goes to the model like any page error.
 
 Leakage control: huggingface.co is excluded from search; results and pages of the benchmark's paper, or that hold
-its canary string, are dropped. Tool output is cut at 40,000 characters. Rate limiting and a failing gateway or
-summarizer are infrastructure: recorded in `state`, so the app fails the rollout instead of showing the model.
+its canary string, are dropped. Tool output is cut at 40,000 characters. Rate limiting (outside Wikimedia) and a
+failing gateway or summarizer are infrastructure: recorded in `state`, so the app fails the rollout instead of
+showing the model.
 """
 
 import io
@@ -169,9 +170,9 @@ def pdf_text(data: bytes) -> str:
 
 
 def fetch(url: str) -> str:
-    """Page text, or a string starting with 'Error:' (a property of the page, returned to the model). Rate
-    limiting is infrastructure: 429 anywhere, and 403 from Wikimedia sites (their answer to bursts), are retried
-    with backoff (4-32 s) and then raised, except on wikidata.org, where the HTTP error goes to the model."""
+    """Page text, or a string starting with 'Error:' (a property of the page, returned to the model). A 429 is
+    retried with backoff (4-32 s) and then raised as infrastructure. Wikimedia sites answer bursts, and often cloud
+    addresses such as AgentCore Runtime's, with 403 or 429: retried twice, then returned to the model."""
     host = host_of(url)
     if WIKIPEDIA_SERVICE_URL and on(host, ("wikipedia.org",)):
         try:
@@ -181,7 +182,8 @@ def fetch(url: str) -> str:
             raise InfraError(f"Wikipedia service: {type(e).__name__}") from None
         return r.json()["text"]
     wiki = on(host, WIKIMEDIA)
-    for attempt in range(5):
+    attempts = 3 if wiki else 5
+    for attempt in range(attempts):
         try:
             r = httpx.get(url, headers={"User-Agent": WIKI_UA if wiki else UA}, timeout=30, follow_redirects=True)
         except httpx.TimeoutException:
@@ -190,8 +192,8 @@ def fetch(url: str) -> str:
             return f"Error: could not fetch the page ({type(e).__name__})."
         if not (r.status_code == 429 or (wiki and r.status_code == 403)):
             break
-        if attempt == 4:
-            if on(host, ("wikidata.org",)):
+        if attempt == attempts - 1:
+            if wiki:
                 return f"Error: HTTP {r.status_code}."
             raise InfraError(f"fetch rate-limited (HTTP {r.status_code}): {url[:120]}")
         time.sleep(4 * 2**attempt)

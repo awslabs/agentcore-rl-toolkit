@@ -17,7 +17,7 @@ SealQA publishes no agent harness: the question is the whole prompt, with no sys
 context has no answer. The reward is the official grader (`reward.py`, `prompts/grader_template.txt`) with
 gpt-oss-120b at temperature 0 as the judge (officially GPT-4o-mini). Leakage control: searches exclude
 huggingface.co, and results and pages of the SealQA paper or with the dataset's canary string are dropped. Rate
-limiting and a failing gateway or summarizer fail the rollout.
+limiting (outside Wikimedia) and a failing gateway or summarizer fail the rollout.
 
 Accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 - Claude Opus 5 (high): TBD
@@ -56,9 +56,10 @@ Callers need `bedrock-agentcore:InvokeGateway` on the gateway. The Web Search To
 [acceptable use](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html#gateway-target-connector-web-search-tool-acceptable-use)
 applies to its results.
 
-Wikipedia is fetched live. For large runs that would hit Wikipedia's rate limits, set `WIKIPEDIA_SERVICE_URL` to a
-service that serves Wikipedia from local dumps (`GET <service>/fetch?url=<url>` returning `{"text": ...}`), such as
-the one in `examples/strands_widesearch_agent/env/`.
+Wikipedia is fetched live. Wikipedia often refuses AgentCore Runtime's addresses (HTTP 403); the agent then sees
+the error, as for any page it cannot open. To serve Wikipedia from local dumps instead, set `WIKIPEDIA_SERVICE_URL`
+to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`), such as the one in
+`examples/strands_widesearch_agent/env/`.
 
 ## Run Locally
 
