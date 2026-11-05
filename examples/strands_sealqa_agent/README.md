@@ -20,8 +20,8 @@ huggingface.co, and results and pages of the SealQA paper or with the dataset's 
 limiting (outside Wikimedia) and a failing gateway or summarizer fail the rollout.
 
 Accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
-- Claude Opus 5 (high): TBD
-- GPT-6 Astra (high): TBD
+- Claude Opus 5 (high): 70%
+- GPT-6 Astra (high): 74%
 
 ## Installation
 
