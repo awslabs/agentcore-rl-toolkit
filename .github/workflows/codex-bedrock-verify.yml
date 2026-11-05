@@ -1,0 +1,88 @@
+name: Verify Codex Bedrock OIDC
+
+on:
+  push:
+    branches: [codex/verify-bedrock-oidc]
+    paths: [.github/workflows/codex-bedrock-verify.yml]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/codex/verify-bedrock-oidc'
+    runs-on: ubuntu-24.04
+    environment: codex-review
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.CODEX_REVIEW_AWS_REGION }}
+      CODEX_MODEL: ${{ vars.CODEX_REVIEW_MODEL }}
+      CODEX_VERSION: "0.151.0"
+    steps:
+      - name: Validate settings
+        env:
+          REVIEW_ROLE: ${{ secrets.AWS_CODEX_REVIEW_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          test "$REVIEW_ROLE" = "arn:aws:iam::521102048267:role/AgentCoreRLToolkitCodexReview"
+          test "$AWS_REGION" = "us-west-2"
+          test "$CODEX_MODEL" = "openai.gpt-5.6-sol"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install pinned Codex
+        working-directory: ${{ runner.temp }}
+        run: npm install --global --ignore-scripts "@openai/codex@$CODEX_VERSION"
+
+      - name: Assume review role through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: ${{ secrets.AWS_CODEX_REVIEW_ROLE_ARN }}
+          role-session-name: codex-oidc-verify-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: "521102048267"
+          unset-current-credentials: true
+
+      - name: Verify assumed AWS identity
+        run: |
+          set -euo pipefail
+          identity="$(aws sts get-caller-identity --output json)"
+          test "$(jq -r '.Account' <<<"$identity")" = "521102048267"
+          arn="$(jq -r '.Arn' <<<"$identity")"
+          [[ "$arn" == arn:aws:sts::521102048267:assumed-role/AgentCoreRLToolkitCodexReview/* ]]
+          echo "Verified AWS identity: $arn"
+
+      - name: Invoke Bedrock through Codex
+        timeout-minutes: 4
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="$RUNNER_TEMP/codex-verify-home"
+          mkdir -m 700 -p "$CODEX_HOME"
+          timeout --signal=TERM --kill-after=15s 180s codex exec \
+            --skip-git-repo-check --ignore-user-config --ignore-rules --ephemeral \
+            --sandbox read-only \
+            --model "$CODEX_MODEL" \
+            --config 'model_provider="amazon-bedrock"' \
+            --config 'model_reasoning_effort="low"' \
+            --config 'web_search="disabled"' \
+            --config 'shell_environment_policy.exclude=["AWS_*","ACTIONS_*","GITHUB_*","GH_*"]' \
+            --output-last-message "$RUNNER_TEMP/bedrock-response.txt" \
+            "Do not use tools or inspect files. Reply with exactly BEDROCK_OIDC_OK."
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          response = (Path(os.environ["RUNNER_TEMP"]) / "bedrock-response.txt").read_text().strip()
+          if response != "BEDROCK_OIDC_OK":
+              raise SystemExit("Bedrock responded, but did not return the expected verification marker")
+          print(response)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("GitHub OIDC and Codex Bedrock invocation verified.\n\n")
+              summary.write("- Account: `521102048267`\n- Region: `us-west-2`\n")
+              summary.write("- Model: `openai.gpt-5.6-sol`\n- Response: `BEDROCK_OIDC_OK`\n")
+          PY
