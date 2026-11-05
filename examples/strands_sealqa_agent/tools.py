@@ -9,9 +9,8 @@
   any page error.
 
 Leakage control: huggingface.co is excluded from search; results and pages of the benchmark's paper, or that hold
-its canary string, are dropped. Tool output is cut at 40,000 characters. Rate limiting (outside Wikimedia) and a
-failing gateway or summarizer are infrastructure: recorded in `state`, so the app fails the rollout instead of
-showing the model.
+its canary string, are dropped. Tool output is cut at 40,000 characters. A failing gateway or summarizer is
+infrastructure: recorded in `state`, so the app fails the rollout instead of showing the model.
 """
 
 import io
@@ -68,7 +67,7 @@ _bedrock = boto3.client("bedrock-runtime", config=Config(retries={"max_attempts"
 
 
 class InfraError(Exception):
-    """A rate-limited site, the search gateway or the summarizer is unavailable: not the model's fault."""
+    """The search gateway or the summarizer is unavailable: not the model's fault."""
 
 
 def host_of(url: str) -> str:
@@ -172,8 +171,8 @@ def pdf_text(data: bytes) -> str:
 
 def fetch(url: str) -> str:
     """Page text, or a string starting with 'Error:' (a property of the page, returned to the model). A 429 is
-    retried with backoff (4-32 s) and then raised as infrastructure. Wikimedia sites answer bursts, and often cloud
-    addresses such as AgentCore Runtime's, with 403 or 429: retried twice, then returned to the model."""
+    retried with backoff (4-32 s); Wikimedia sites, which answer bursts with 403 or 429, twice. Some sites refuse
+    cloud addresses such as AgentCore Runtime's outright, so a site that still refuses goes to the model."""
     host = host_of(url)
     if WIKIPEDIA_SERVICE_URL and on(host, ("wikipedia.org",)):
         try:
@@ -195,11 +194,8 @@ def fetch(url: str) -> str:
             return f"Error: could not fetch the page ({type(e).__name__})."
         if not (r.status_code == 429 or (wiki and r.status_code == 403)):
             break
-        if attempt == attempts - 1:
-            if wiki:
-                return f"Error: HTTP {r.status_code}."
-            raise InfraError(f"fetch rate-limited (HTTP {r.status_code}): {url[:120]}")
-        time.sleep(4 * 2**attempt)
+        if attempt < attempts - 1:
+            time.sleep(4 * 2**attempt)
     if r.status_code >= 400:
         return f"Error: HTTP {r.status_code}."
     ctype = r.headers.get("content-type", "").lower()

@@ -16,8 +16,8 @@ SealQA publishes no agent harness: the question is the whole prompt, with no sys
 8K output tokens per turn, 128K context, tool output cut at 40,000 characters; an episode that runs out of turns or
 context has no answer. The reward is the official grader (`reward.py`, `prompts/grader_template.txt`) with
 gpt-oss-120b at temperature 0 as the judge (officially GPT-4o-mini). Leakage control: searches exclude
-huggingface.co, and results and pages of the SealQA paper or with the dataset's canary string are dropped. Rate
-limiting (outside Wikimedia) and a failing gateway or summarizer fail the rollout.
+huggingface.co, and results and pages of the SealQA paper or with the dataset's canary string are dropped. A failing
+gateway or summarizer fails the rollout.
 
 Accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 - Claude Opus 5 (high): 70%

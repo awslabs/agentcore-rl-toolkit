@@ -3,8 +3,7 @@
 SealQA publishes no agent harness, so the question is the whole prompt (no system prompt, as officially) and the
 tools are a live-web `search` and `visit`. 40 turns, 8K output tokens per turn, 128K context; there is no forced
 answer, so an episode that runs out of turns or context has no answer. The reward is the official grader's verdict
-(reward.py). A failing search gateway, summarizer or rate-limited site fails the rollout instead of reaching the
-model.
+(reward.py). A failing search gateway or summarizer fails the rollout instead of reaching the model.
 """
 
 import logging
