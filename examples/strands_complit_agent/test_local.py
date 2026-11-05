@@ -19,8 +19,11 @@ def main():
     parser.add_argument("--model_id", required=True)
     parser.add_argument("--base_url", help="OpenAI-compatible endpoint; without it, model_id is a Bedrock model")
     parser.add_argument("--bedrock_fields", type=json.loads, help="additionalModelRequestFields of a Bedrock model")
+    parser.add_argument("--simulator_model_id", help="Cumulative: the simulated researcher's Bedrock model")
     args = parser.parse_args()
     config = {"model_id": args.model_id, "base_url": args.base_url, "bedrock_fields": args.bedrock_fields}
+    if args.simulator_model_id:
+        config["simulator_model_id"] = args.simulator_model_id
     for task in load_split(args.split):
         result = invoke_agent({**task, "_config": config})
         print(

@@ -44,6 +44,7 @@ async def evaluate(args, jobs, result_path):
         "model_id": args.model_id,
         "bedrock_fields": args.bedrock_fields,
         "sampling_params": args.sampling_params or {},
+        "simulator_model_id": args.simulator_model_id,
     }
 
     async def run_one(task, repeat):
@@ -124,7 +125,16 @@ def main():
         default=eval_config.get("sampling_params"),
         help="Sampling parameters as JSON (e.g. '{\"temperature\": 0.7}')",
     )
-    parser.add_argument("--split", default="implicit", help="standard, implicit, unmet, pilot50 or smoke2")
+    parser.add_argument(
+        "--split",
+        default="implicit",
+        help="standard, implicit, unmet or cumulative, optionally with _pilot50 or _smoke2 (pilot50, smoke2: Implicit)",
+    )
+    parser.add_argument(
+        "--simulator_model_id",
+        default=eval_config.get("simulator_model_id"),
+        help="Cumulative: the simulated researcher's Bedrock model (default: rl_app.SIMULATOR_MODEL)",
+    )
     parser.add_argument("--repeats", type=int, default=1, help="invocations per task (avg@repeats)")
     parser.add_argument("--exp_id", default="eval_async", help="Experiment ID for organizing results")
     parser.add_argument("--max_concurrent", type=int, default=32, help="Max concurrent ACR sessions")

@@ -2,14 +2,17 @@
 
 Names, descriptions and parameters are upstream's (complit/tools/arxiv.py, dayoon-ko/CompLit@2654a93f, MIT). An
 unreachable service or a 503 (ar5iv unavailable after retries) is recorded in `state`, so the app stops the episode
-and fails the rollout instead of showing the error to the model.
+and fails the rollout instead of showing the error to the model. When `state["tools_left"]` is set (the Cumulative
+setting's budget per researcher turn), a call beyond it returns upstream's TOOL_BUDGET_MSG.
 """
 
 import json
 import os
+import threading
 import urllib.error
 import urllib.request
 
+from prompts import TOOL_BUDGET_MSG
 from strands import tool
 
 ENV_URL = os.environ.get("COMPLIT_ENV_URL", "http://127.0.0.1:18731")
@@ -50,7 +53,14 @@ READ = {
 
 
 def make_tools(state: dict) -> list:
+    budget_lock = threading.Lock()  # parallel tool calls run in threads
+
     def call(name: str, args: dict) -> str:
+        with budget_lock:
+            if state.get("tools_left") is not None:
+                if state["tools_left"] <= 0:
+                    return TOOL_BUDGET_MSG
+                state["tools_left"] -= 1
         request = urllib.request.Request(
             f"{ENV_URL}/{name}", data=json.dumps(args).encode(), headers={"Content-Type": "application/json"}
         )

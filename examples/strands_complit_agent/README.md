@@ -24,6 +24,15 @@ Protocol (upstream's setup with web search off):
 | Environment failure | the rollout fails (it is not shown to the model) |
 | Model refusal | the episode ends without an answer (`stop: refusal`), reward 0, as upstream scores no answer |
 
+**Cumulative** (`--split cumulative`) is multi-turn: the same 220 Implicit queries, with the requirements arriving
+over 3-5 messages from a simulated researcher (`simulator.py`, upstream's simulator). Each message is the prepared
+text from the dataset; when the agent's last reply asked something or proposed a paper, the simulator model
+delivers it with one added sentence that answers the agent. Per researcher message the agent gets 10 tool calls
+and 15 turns; a reply without text gets upstream's nudge for one more turn. Tool calls and results are dropped
+between messages, and the answer is the last reply that holds the answer JSON. The simulator model is a Bedrock
+model at temperature 0, `us.anthropic.claude-haiku-4-5-20251001-v1:0` by default (`--simulator_model_id`;
+upstream: gpt-5.4-mini).
+
 Search ranks with BM25 over title, authors, abstract, comments, journal reference and categories, not with arXiv's
 own engine.
 
@@ -90,7 +99,8 @@ agentcore deploy --agent strands_complit_agent --env COMPLIT_ENV_URL=http://PRIV
 ```
 
 Use the subnets and security groups from which the environment service (and, for training, the inference server)
-is reachable. The runtime's execution role needs Bedrock model access for Bedrock models.
+is reachable. The runtime's execution role needs Bedrock model access for Bedrock models, and for the Cumulative
+setting for the simulator model.
 
 ## Evaluate
 
@@ -100,13 +110,16 @@ cp config.example.toml config.toml        # set agent_arn and the model
 # Implicit, avg@4
 python evaluate.py --split implicit --repeats 4 --exp_id implicit_opus5 --max_concurrent 32
 
+# Cumulative (multi-turn)
+python evaluate.py --split cumulative --exp_id cumulative_opus5 --max_concurrent 32
+
 # Quick test
 python evaluate.py --split smoke2 --exp_id smoke
 ```
 
-Splits: the settings `standard` (350), `implicit` (220) and `unmet` (300), and `pilot50` / `smoke2` (50 and 2
-Implicit tasks, seed 0). Records go to `$TMPDIR/strands_complit_agent-evaluations/<exp_id>.jsonl`; the summary
-line is the mean reward.
+Splits: the settings `standard` (350), `implicit` (220), `unmet` (300) and `cumulative` (220), and subsets drawn
+with seed 0: `pilot50` / `smoke2` (50 and 2 Implicit tasks), `cumulative_pilot50` / `cumulative_smoke2`. Records go
+to `$TMPDIR/strands_complit_agent-evaluations/<exp_id>.jsonl`; the summary line is the mean reward.
 
 ## File Structure
 
@@ -115,6 +128,7 @@ rl_app.py            the Strands agent: tools, budget, forced answer; @app.entry
 tools.py             arxiv_search and read_paper, as clients of the environment service
 reward.py            upstream's scoring
 prompts.py           upstream's prompts
+simulator.py         upstream's simulated researcher (Cumulative), on a Bedrock model
 models.py            the typed invocation payload
 tasks.py             CompLit from Hugging Face (dayoon/CompLit, pinned revision) and the splits
 evaluate.py          evaluation on AgentCore Runtime
