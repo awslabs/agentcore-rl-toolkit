@@ -1,0 +1,23 @@
+[project]
+name = "strands-sealqa-agent-example"
+version = "0.1.0"
+description = "Example: Strands Seal-Hard web research agent using Bedrock AgentCore RL Toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agentcore-rl-toolkit[core]==0.2.0",
+    "bedrock-agentcore>=1.0.3",
+    "boto3>=1.40.55",
+    "strands-agents[openai]>=1.63.0",
+    "httpx",
+    "beautifulsoup4",
+    "lxml",
+    "pypdf",
+]
+
+[project.optional-dependencies]
+# evaluate.py, test_local.py: the Seal-Hard tasks from Hugging Face
+eval = ["datasets"]
+
+[tool.setuptools]
+py-modules = ["rl_app", "reward", "models", "tools"]
