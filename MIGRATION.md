@@ -58,12 +58,6 @@ see the [Runtime storage contract](designs/agentcore_runtime_app.md#filesystem-s
 
 ## Update training configuration
 
-The rollout gateway and training entry points now default to `history_mode: linear`.
-This preserves served token prefixes across replayed assistant turns, keeping an
-append-only rollout in one training record. Set `history_mode: tree` explicitly to
-retain full-history rendering and splitting on token drift. See the
-[linear-history design](designs/gateway_linear.md) for branching and fallback behavior.
-
 For verl and slime, replace the old top-level Runtime ARN and result bucket with:
 
 ```yaml
