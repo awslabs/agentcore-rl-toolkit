@@ -1,0 +1,21 @@
+[project]
+name = "strands-bird-interact-agent-example"
+version = "0.1.0"
+description = "Example: Strands BIRD-Interact interactive text-to-SQL agent using Bedrock AgentCore RL Toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agentcore-rl-toolkit[core]==0.2.0",
+    "bedrock-agentcore>=1.0.3",
+    "boto3>=1.40.55",
+    "strands-agents[openai]>=1.63.0",
+]
+
+[project.optional-dependencies]
+# evaluate.py, test_local.py: the task ids from Hugging Face
+eval = ["huggingface_hub"]
+# env/: the environment service and its databases
+env = ["psycopg2-binary==2.9.10", "sqlglot==26.16.4", "huggingface_hub"]
+
+[tool.setuptools]
+py-modules = ["rl_app", "reward", "models", "tools"]
