@@ -2,39 +2,23 @@
 
 An RL-trainable [CompLit](https://github.com/dayoon-ko/CompLit) agent using Bedrock AgentCore RL Toolkit. A
 researcher describes, in their own words, a paper they want to find; the agent searches arXiv, reads candidate
-papers, and answers with the one paper that meets every requirement, or says that none does. The reward is
-deterministic: 1 if the answer's arXiv id matches the gold paper (for the Unmet setting, if the agent declines or
-flags the requirement the closest paper misses), else 0.
+papers, and answers with the one paper that meets every requirement, or says that none does. The reward is 1 if
+the answer's arXiv id matches the gold paper, else 0.
 
-The agent has two tools, `arxiv_search` and `read_paper`. They are served by an environment service (`env/`) on a
-host the runtime reaches in its VPC:
-- **Search** runs over a local index of the full arXiv metadata (3.2M papers), so rollouts do not depend on the
-  rate-limited arXiv API.
-- **Full text** comes from [ar5iv](https://ar5iv.labs.arxiv.org/) through one cache and one request pace for every
-  session.
+The two tools are served by an environment service (`env/`) on a host the runtime reaches in its VPC:
+- `arxiv_search` runs over a local BM25 index of the full arXiv metadata (3.2M papers), so rollouts do not depend
+  on the rate-limited arXiv API.
+- `read_paper` fetches [ar5iv](https://ar5iv.labs.arxiv.org/) full text through one cache and one request pace.
 
-Protocol (upstream's setup with web search off):
+## Protocol
 
-| Setting | Value |
-|---|---|
-| Prompt | upstream's user prompt, no system prompt (`prompts.py`, verbatim) |
-| Budget | 15 turns (upstream's limit of 30 messages), 8K output tokens per turn, 128K context |
-| Budget exhausted | upstream's forced-answer prompt gets one more turn, tools still attached |
-| Reward | upstream's scoring (`reward.py`, verbatim) |
-| Environment failure | the rollout fails (it is not shown to the model) |
-| Model refusal | the episode ends without an answer (`stop: refusal`), reward 0, as upstream scores no answer |
+Upstream's setup with web search off: upstream's prompts and scoring (`prompts.py`, `reward.py`), 15 turns, 8K
+output tokens per turn, 128K context, and a forced answer when the budget runs out. A model refusal scores 0; an
+unavailable environment fails the rollout.
 
-**Cumulative** (`--split cumulative`) is multi-turn: the same 220 Implicit queries, with the requirements arriving
-over 3-5 messages from a simulated researcher (`simulator.py`, upstream's simulator). Each message is the prepared
-text from the dataset; when the agent's last reply asked something or proposed a paper, the simulator model
-delivers it with one added sentence that answers the agent. Per researcher message the agent gets 10 tool calls
-and 15 turns; a reply without text gets upstream's nudge for one more turn. Tool calls and results are dropped
-between messages, and the answer is the last reply that holds the answer JSON. The simulator model is a Bedrock
-model at temperature 0, `us.anthropic.claude-haiku-4-5-20251001-v1:0` by default (`--simulator_model_id`;
-upstream: gpt-5.4-mini).
-
-Search ranks with BM25 over title, authors, abstract, comments, journal reference and categories, not with arXiv's
-own engine.
+**Cumulative** (`--split cumulative`) is multi-turn: the Implicit queries, with the requirements arriving over 3-5
+messages from upstream's simulated researcher (`simulator.py`). The simulator runs on a Bedrock model at
+temperature 0, Claude Haiku 4.5 by default (`--simulator_model_id`; upstream: gpt-5.4-mini).
 
 Accuracy on AgentCore Runtime:
 
@@ -43,9 +27,8 @@ Accuracy on AgentCore Runtime:
 | Claude Opus 5 (high) | 63.0% | 54.0% |
 | GPT-6 Astra (high) | 78.5% | 14.0% |
 
-Claude Opus 5 refuses some epidemic-modeling tasks (4 of the 50 Implicit tasks in every attempt, 6 of the 50
-Cumulative tasks); they count as wrong. In Cumulative, GPT-6 Astra mostly answers that no paper meets every
-requirement (41 of 50).
+Claude Opus 5 refuses some epidemic-modeling tasks; in Cumulative, GPT-6 Astra mostly answers that no paper meets
+every requirement.
 
 ## Installation
 
