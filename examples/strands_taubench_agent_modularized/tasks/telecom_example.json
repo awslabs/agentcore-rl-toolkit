@@ -1,0 +1,75 @@
+{
+  "id": "[service_issue]airplane_mode_on[PERSONA:None]",
+  "description": {
+    "purpose": "Test resolution path: No Service/Connection Issues.",
+    "relevant_policies": null,
+    "notes": null
+  },
+  "user_scenario": {
+    "persona": null,
+    "instructions": {
+      "domain": "telecom",
+      "reason_for_call": "Your phone has been showing 'No Service' for the past few hours.",
+      "known_info": "You are John Smith with phone number 555-123-2002.",
+      "unknown_info": null,
+      "task_instructions": "If the agent suggests actions that don't immediately fix the issue, follow their guidance but express mild frustration after the first unsuccessful attempt. You will consider the issue resolved when the status bar shows that you have signal. Always check the status bar if the agent asks you for status information. If the agent asks you to pay a bill, you accept. If the tool call does not return updated status information, you might need to perform another tool call to get the updated status. \nWhenever the agent asks you about your device, always ground your responses on the results of tool calls. \nFor example: If the agent asks what the status bar shows, always ground your response on the results of the `get_status_bar` tool call. If the agent asks if you are able to send an MMS message, always ground your response on the results of the `can_send_mms` tool call.\nNever make up the results of tool calls, always ground your responses on the results of tool calls.\nIf you are unsure about whether an action is necessary, always ask the agent for clarification.\n"
+    }
+  },
+  "ticket": "The user is experiencing issues with their phone service. They are unable to make or receive calls, and the status bar shows 'No Service'. Customer name: John Smith, phone number: 555-123-2002. They gave permission to pay all their overdue bills. They will consider the issue resolved when the status bar shows that they have signal.",
+  "initial_state": {
+    "initialization_data": null,
+    "initialization_actions": [
+      {
+        "env_type": "user",
+        "func_name": "set_user_info",
+        "arguments": {
+          "name": "John Smith",
+          "phone_number": "555-123-2002"
+        }
+      },
+      {
+        "env_type": "user",
+        "func_name": "turn_airplane_mode_on",
+        "arguments": {}
+      }
+    ],
+    "message_history": null
+  },
+  "evaluation_criteria": {
+    "actions": [
+      {
+        "action_id": "toggle_airplane_mode_0",
+        "requestor": "user",
+        "name": "toggle_airplane_mode",
+        "arguments": {},
+        "info": null,
+        "compare_args": null
+      }
+    ],
+    "env_assertions": [
+      {
+        "env_type": "user",
+        "func_name": "assert_service_status",
+        "arguments": {
+          "expected_status": "connected"
+        },
+        "assert_value": true,
+        "message": "Service status is not as expected"
+      },
+      {
+        "env_type": "assistant",
+        "func_name": "assert_no_overdue_bill",
+        "arguments": {
+          "overdue_bill_id": "B1234321"
+        },
+        "assert_value": true,
+        "message": "Overdue bill is not as expected"
+      }
+    ],
+    "communicate_info": null,
+    "nl_assertions": null,
+    "reward_basis": [
+      "ENV_ASSERTION"
+    ]
+  }
+}
