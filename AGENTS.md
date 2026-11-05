@@ -91,8 +91,12 @@ The rollout gateway captures token IDs, logprobs, and loss masks independently.
 - `background=True` runs requests without `_agentcore_runtime` in the background
   with generated invocation IDs; ordinary retries may execute again. Explicit
   envelopes retain their protocol behavior. See the
-  [SageMaker RFT example](designs/agentcore_runtime_app.md#sagemaker-rft-example)
+  [SageMaker RFT example](designs/agentcore_runtime_app.md#sagemaker-rft)
   and [integration tests](tests/runtime/test_sagemaker_rft.py).
+- `@sagemaker_mtrl` (`runtime/sagemaker_mtrl.py`, `[sagemaker_mtrl]` extra), beneath `@app.entrypoint`,
+  lets a `_config` entrypoint also serve SageMaker RFT: it rebuilds the row into `_config`, routes
+  inference through a loopback proxy that adds SageMaker's token and headers, and reports the reward.
+  See [the design](designs/sagemaker_mtrl.md).
 - Requests with `_agentcore_runtime` use versioned `start/get`, foreground/background execution, and session-scoped invocation IDs.
 - Records live under configurable `state_dir`, defaulting to `.agentcore_runtime` under the OS temporary directory (`TMPDIR`).
 - One app process serves one Runtime session; live tasks are keyed by invocation ID. Filesystem records retain session-specific paths; use a managed mount for stop/resume persistence.

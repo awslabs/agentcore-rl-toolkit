@@ -85,30 +85,12 @@ Explicit envelopes, including those sent by
 response may execute the handler again. Deduplication requires the caller to
 reuse an invocation ID through the envelope within the same Runtime session.
 
-### SageMaker RFT example
+### SageMaker RFT
 
-The same decorator composition works with `AgentCoreRuntimeApp()` for ordinary
-foreground requests. Setting `background=True` runs the entire decorated
-handler in the background, including the SDK's completion and reward reporting.
-
-Given application functions `run_agent` and `compute_reward`:
-
-```python
-from agentcore_rl_toolkit import AgentCoreRuntimeApp
-from sagemaker.train.rft import sagemaker_rft_handler
-
-app = AgentCoreRuntimeApp(background=True)  # omit setting background=True to run quick rollouts in the foreground.
-
-@app.entrypoint
-@sagemaker_rft_handler
-def invoke(payload):
-    result = run_agent(payload)
-    return {"reward": compute_reward(result)}
-```
-
-Use the SDK's single-argument handler signature and follow the
-[SageMaker agent integration guide](https://docs.aws.amazon.com/sagemaker/latest/dg/model-customize-mtrl-agent.html)
-for model authentication, tracking headers, and inference parameters.
+`sagemaker_mtrl` lets one entrypoint written for the `_config` contract also
+serve SageMaker RFT requests. `background=True` runs completion and reward
+reporting in the background with the handler. See
+[SageMaker MTRL](./sagemaker_mtrl.md) for its contract and decisions.
 
 ## HTTP mapping
 
