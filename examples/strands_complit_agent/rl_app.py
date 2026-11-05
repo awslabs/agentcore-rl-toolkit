@@ -13,6 +13,7 @@ unavailable environment fails the rollout instead of reaching the model.
 """
 
 import logging
+import re
 
 import simulator as sim
 from models import InvocationRequest
@@ -23,6 +24,7 @@ from strands.agent.conversation_manager import NullConversationManager
 from strands.hooks import BeforeModelCallEvent, HookProvider
 from strands.models import BedrockModel
 from strands.models.openai import OpenAIModel
+from strands.types.exceptions import MaxTokensReachedException
 from tools import make_tools
 
 from agentcore_rl_toolkit import AgentCoreRuntimeApp
@@ -38,6 +40,10 @@ MAX_TOKENS = 8192
 MAX_CONTEXT = 131072  # prompt + maximum output, the vLLM rule
 FORCE_MARGIN = 512  # output tokens a forced reply gives up, so its longer prompt still fits
 TOOLS_PER_RESEARCHER_TURN = 10  # Cumulative
+# what Strands writes in place of a tool call cut off at the output limit
+TRUNCATED_TOOL_USE = re.compile(
+    r"The selected tool .+'s tool use was incomplete due to maximum token limits being reached\."
+)
 SIMULATOR_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"  # Cumulative, at temperature 0; upstream: gpt-5.4-mini
 
 
@@ -87,15 +93,31 @@ def set_max_tokens(agent: Agent, state: dict, n: int):
         agent.model.update_config(max_tokens=n)
 
 
+def call(agent: Agent, prompt: str | None, turns: int) -> str:
+    """agent(prompt) for up to `turns` turns -> its stop reason. A reply cut off at the output limit stays in the
+    history as written, without its truncated tool calls."""
+    try:
+        return agent(prompt, limits={"turns": turns}).stop_reason
+    except MaxTokensReachedException:
+        last = agent.messages[-1]
+        last["content"] = [b for b in last["content"] if not TRUNCATED_TOOL_USE.fullmatch(b.get("text", ""))]
+        if not last["content"]:
+            agent.messages.pop()
+        return "max_tokens"
+
+
 def run(agent: Agent, state: dict, prompt: str, turns: int) -> str:
-    """The agent on `prompt` for up to `turns` turns -> completed | max_turns | context_exceeded | refusal. After
-    context_exceeded, the history is back at the last call that fit."""
-    result = agent(prompt, limits={"turns": turns})
+    """The agent on `prompt` for up to `turns` turns -> completed | max_turns | max_tokens | context_exceeded |
+    refusal. A reply cut off at the output limit counts as the reply (completed); a turn cut off before any text
+    is max_tokens. After context_exceeded, the history is back at the last call that fit."""
+    reason = call(agent, prompt, turns)
     if state.pop("context_exceeded", False):
         del agent.messages[state["fit_len"] :]
         return "context_exceeded"
+    if reason == "max_tokens":
+        return "completed" if agent.messages[-1]["role"] == "assistant" else "max_tokens"
     # content_filtered: the model refused (e.g. Claude on some epidemic-modeling requests): no answer
-    return {"limit_turns": "max_turns", "content_filtered": "refusal"}.get(result.stop_reason, "completed")
+    return {"limit_turns": "max_turns", "content_filtered": "refusal"}.get(reason, "completed")
 
 
 def force_reply(agent: Agent, state: dict, prompt: str):
@@ -107,9 +129,9 @@ def force_reply(agent: Agent, state: dict, prompt: str):
         last = agent.messages[-1]
         if last["role"] == "user":
             last["content"].append({"text": prompt})
-            agent(None, limits={"turns": 1})
+            call(agent, None, 1)
         else:
-            agent(prompt, limits={"turns": 1})
+            call(agent, prompt, 1)
         if not state.pop("context_exceeded", False):
             break
         del agent.messages[state["fit_len"] :]
@@ -129,7 +151,7 @@ def last_text(messages: list) -> str:
 
 def single_turn(agent: Agent, state: dict, request: InvocationRequest) -> tuple[str, str, bool]:
     stop = run(agent, state, build_prompt(request.question, use_read_paper=True, use_web_search=False), MAX_TURNS)
-    forced = stop in ("max_turns", "context_exceeded") and "infra_error" not in state
+    forced = stop in ("max_turns", "max_tokens", "context_exceeded") and "infra_error" not in state
     if forced:
         force_reply(agent, state, FORCED_ANSWER)
     final = next((m for m in reversed(agent.messages) if m["role"] == "assistant"), {})
