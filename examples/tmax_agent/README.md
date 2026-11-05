@@ -167,6 +167,3 @@ bash examples/tmax_agent/train/verl/megatron_lora_sync_grpo.sh
 
 Training parameters are in [`megatron_lora_sync_grpo.sh`](train/verl/megatron_lora_sync_grpo.sh);
 rollout settings are in [`agentcore_agent.yaml`](train/verl/agentcore_agent.yaml).
-The recipe uses `history_mode: linear` to preserve the served token prefix across
-mini-swe-agent turns. This keeps append-only conversations in one training
-trajectory when replaying parsed tool calls changes their token representation.
