@@ -22,12 +22,12 @@ a step check whose correct steps earn discounted credit. Training data must not 
 of the 8 incidents (drawn with seed 0: 39, 166, 322) are held out for evaluation. An unavailable database fails the
 rollout.
 
-On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
+On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime; all 100 invocations successful):
 
 | Model | Success | Reward |
 |---|---|---|
-| Claude Opus 5 (high) | TBD | TBD |
-| GPT-6 Astra (high) | TBD | TBD |
+| Claude Opus 5 (high) | 84% | 0.84 |
+| GPT-6 Astra (high) | 86% | 0.86 |
 
 ## Installation
 
