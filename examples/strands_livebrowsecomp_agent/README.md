@@ -6,17 +6,15 @@ identify one entity; the answer is short. The agent searches the live web and re
 official judge finds the answer correct, else 0.
 
 The agent has two tools:
-- `search`, through the [AgentCore Gateway Web Search Tool](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html), 10 results.
-- `visit`, an HTTP fetch (HTML, PDF, JSON) whose text a fixed model (gpt-oss-120b on Bedrock) summarizes toward the
-  agent's goal. The summarizer is part of the environment, the same for every policy.
+- `search`, through the [AgentCore Gateway Web Search Tool](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html).
+- `visit`, a page fetch whose text a fixed model (gpt-oss-120b on Bedrock) summarizes toward the agent's goal; the
+  summarizer is the same for every policy.
 
 ## Protocol
 
-The paper's protocol (Appendix C): its default system prompt, answer in `<answer></answer>` (`prompts/`), 250 steps,
-8K output tokens per turn, 256K context, tool output cut at 40,000 characters. When the steps or the context run
-out, the paper's force-answer prompt gets one more turn. The reward is the official judge (`reward.py`): the
-BrowseComp grader template with gpt-oss-120b, as in the paper. Questions and answers are encrypted in the dataset
-and decrypted in memory. Leakage control: searches exclude huggingface.co and the benchmark's site, and results and
+The paper's protocol (Appendix C): its default system prompt, 250 steps, 8K output tokens per turn, 256K context.
+When the steps or the context run out, the paper's force-answer prompt gets one more turn. The reward is the
+official judge: the BrowseComp grader template with gpt-oss-120b, as in the paper. Leakage control: searches exclude huggingface.co and the benchmark's site, and results and
 pages of its repository and paper, or with its canary string, are dropped. A failing gateway or summarizer fails the
 rollout.
 
@@ -58,9 +56,7 @@ Callers need `bedrock-agentcore:InvokeGateway` on the gateway. The Web Search To
 applies to its results.
 
 Wikipedia is fetched live. Wikipedia often refuses AgentCore Runtime's addresses (HTTP 403); the agent then sees
-the error, as for any page it cannot open. To serve Wikipedia from local dumps instead, set `WIKIPEDIA_SERVICE_URL`
-to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`, or 404 for a language
-it has no dump of, which is then fetched live), such as the one in `examples/strands_widesearch_agent/env/`.
+the error, as for any page it cannot open.
 
 ## Run Locally
 
