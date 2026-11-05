@@ -12,17 +12,13 @@ service (`env/`).
 
 ## Protocol
 
-Upstream's setup (microsoft/SecRL@a1b234f7): its system prompt adapted to tool calling (`prompts/system.md`), the
-question's context and question as the user message, 25 turns, 8K output tokens per turn, 128K context, tool output
-cut at 100,000 characters. There is no forced answer. As upstream's SQL action, a query runs for at most 30 s, and a
-result over 100,000 characters shows its first 15 rows. The questions are upstream's latest set
-(`secgym/questions/opus5/`). The reward is upstream's evaluator (`reward.py`, prompts in `prompts/`), with
-gpt-oss-120b on Bedrock as the judge (upstream: GPT-4o): an answer check with reflection, then, for a wrong answer,
-a step check whose correct steps earn discounted credit. Training data must not touch an evaluated database, so 3
-of the 8 incidents (drawn with seed 0: 39, 166, 322) are held out for evaluation. An unavailable database fails the
-rollout.
+Upstream's setup (microsoft/SecRL@a1b234f7): its system prompt adapted to tool calling, its latest question set,
+its SQL action limits, 25 turns, 8K output tokens per turn, 128K context, and no forced answer. The reward is
+upstream's evaluator with gpt-oss-120b on Bedrock as the judge (upstream: GPT-4o). Training data must not touch an
+evaluated database, so 3 of the 8 incidents (drawn with seed 0: 39, 166, 322) are held out for evaluation. An
+unavailable database fails the rollout.
 
-On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime; all 100 invocations successful):
+On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 
 | Model | Success | Reward |
 |---|---|---|
@@ -48,15 +44,14 @@ On a host in the VPC the runtime will use, with Docker and about 10 GB of disk:
 ```bash
 # Download upstream's data (pinned revision) and load the 8 incidents into MySQL 9.0, published on 127.0.0.1
 python env/db.py start /data/excytin
-python env/db.py check /data/excytin       # per incident: tables, rows, and that its reader can only read it
+python env/db.py check /data/excytin
 
 # Serve it on the host's private address (never a public one)
 python env/serve.py --host PRIVATE_IP --data /data/excytin
 curl http://PRIVATE_IP:18733/health
 ```
 
-Allow TCP 18733 from the runtime's security group only. The service connects to each incident as a MySQL user that
-may only read that incident's database; the passwords are generated into `/data/excytin/secrets/`.
+Allow TCP 18733 from the runtime's security group only. Each episode can only read its own incident's database.
 
 ## Run Locally
 
