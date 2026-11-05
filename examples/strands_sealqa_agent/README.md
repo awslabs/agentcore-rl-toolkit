@@ -6,16 +6,15 @@ conflicting, noisy or unhelpful results for them. The agent searches the live we
 if the official grader judges the answer correct, else 0.
 
 The agent has two tools:
-- `search`, through the [AgentCore Gateway Web Search Tool](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html), 10 results.
-- `visit`, an HTTP fetch (HTML, PDF, JSON) whose text a fixed model (gpt-oss-120b on Bedrock) summarizes toward the
-  agent's goal. The summarizer is part of the environment, the same for every policy.
+- `search`, through the [AgentCore Gateway Web Search Tool](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html).
+- `visit`, a page fetch whose text a fixed model (gpt-oss-120b on Bedrock) summarizes toward the agent's goal; the
+  summarizer is the same for every policy.
 
 ## Protocol
 
 SealQA publishes no agent harness: the question is the whole prompt, with no system prompt, as officially. 40 turns,
-8K output tokens per turn, 128K context, tool output cut at 40,000 characters; an episode that runs out of turns or
-context has no answer. The reward is the official grader (`reward.py`, `prompts/grader_template.txt`) with
-gpt-oss-120b at temperature 0 as the judge (officially GPT-4o-mini). Leakage control: searches exclude
+8K output tokens per turn, 128K context; an episode that runs out of turns or context has no answer. The reward is
+the official grader with gpt-oss-120b at temperature 0 as the judge (officially GPT-4o-mini). Leakage control: searches exclude
 huggingface.co, and results and pages of the SealQA paper or with the dataset's canary string are dropped. A failing
 gateway or summarizer fails the rollout.
 
@@ -57,9 +56,7 @@ Callers need `bedrock-agentcore:InvokeGateway` on the gateway. The Web Search To
 applies to its results.
 
 Wikipedia is fetched live. Wikipedia often refuses AgentCore Runtime's addresses (HTTP 403); the agent then sees
-the error, as for any page it cannot open. To serve Wikipedia from local dumps instead, set `WIKIPEDIA_SERVICE_URL`
-to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`, or 404 for a language
-it has no dump of, which is then fetched live), such as the one in `examples/strands_widesearch_agent/env/`.
+the error, as for any page it cannot open.
 
 ## Run Locally
 
