@@ -21,8 +21,8 @@ pages of its repository and paper, or with its canary string, are dropped. A fai
 rollout.
 
 Accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
-- Claude Opus 5 (high): TBD
-- GPT-6 Astra (high): TBD
+- Claude Opus 5 (high): 36%
+- GPT-6 Astra (high): 48%
 
 ## Installation
 
