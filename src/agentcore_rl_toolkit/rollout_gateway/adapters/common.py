@@ -148,7 +148,7 @@ class BaseAdapter:
         renderer: Renderer,
         tokenizer=None,
         max_turns_per_sid: int | None = None,
-        history_mode: str = "tree",
+        history_mode: str = "linear",
         linear_on_nonlinear: str = "reset",
         healer: LinearHealer | None = None,
         debug_callback: Callable[..., None] | None = None,

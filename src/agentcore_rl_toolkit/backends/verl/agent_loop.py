@@ -75,7 +75,7 @@ class AgentCoreAgentLoop(AgentLoopBase):
         gateway_public_host: str | None = None,
         gateway_adapters: list[str] | None = None,
         max_turns_per_sid: int | None = None,
-        history_mode: str = "tree",
+        history_mode: str = "linear",
         linear_on_nonlinear: str = "reset",
         reward_mode: str = "built_in",
         reward_extra_info_defaults: dict | None = None,

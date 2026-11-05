@@ -160,7 +160,7 @@ eval_temperature: 0.0
 # --- Gateway ---
 gateway_port: 0              # 0 = OS-assigned; pin it to open a narrow inbound
                              # security-group rule (see Networking)
-history_mode: tree           # tree | linear; linear heals re-tokenization drift so each branch of
+history_mode: linear         # default; heals re-tokenization drift so each branch of
                              # the session tree is one record (an append-only rollout is one record)
 chat_template_kwargs: {}     # passed to apply_chat_template, e.g. {enable_thinking: false}
 

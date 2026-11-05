@@ -173,6 +173,57 @@ async def test_close_during_async_render_does_not_generate(history_mode):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "linear", "tree"], ids=["default", "linear", "tree"])
+@pytest.mark.parametrize("second_protocol", ["openai", "anthropic"])
+async def test_history_mode_preserves_served_tokens_on_replay(mode, second_protocol):
+    """An echoed assistant message changes tokens when rendered again: defaults heal
+    it before sampling; explicitly selecting tree keeps the full replay and forks."""
+
+    class DriftingRenderer(FakeRenderer):
+        async def render(self, messages, **kwargs):
+            replayed = [
+                {**m, "content": (m.get("content") or "").lower()} if m["role"] == "assistant" else m for m in messages
+            ]
+            return await super().render(replayed, **kwargs)
+
+    renderer = DriftingRenderer()
+    backend = FakeBackend(renderer, ["RAW answer", "second answer"])
+    gateway = RolloutGateway(
+        backend=backend, renderer=renderer, tokenizer=renderer, **({"history_mode": mode} if mode else {})
+    )
+    assert all(adapter.healer is gateway.healer for adapter in gateway.adapters)
+    assert (gateway.healer is None) == (mode == "tree")
+    sid = "replayed-history"
+    messages = [{"role": "user", "content": "question"}]
+    async with serve(gateway) as client:
+        gateway.create_session(sid)
+        first = await client.post(
+            "/v1/chat/completions", json={"model": "m", "messages": messages}, headers=bearer(sid)
+        )
+        assert first.status == 200
+        reply = (await first.json())["choices"][0]["message"]
+        messages += [reply, {"role": "user", "content": "continue"}]
+        route = "/v1/chat/completions" if second_protocol == "openai" else "/v1/messages"
+        second = await client.post(
+            route, json={"model": "m", "messages": messages, "max_tokens": 32}, headers=bearer(sid)
+        )
+        assert second.status == 200
+        records = await gateway.finish_session(sid, reward=1.0)
+
+    served = backend.calls[0]["prompt_ids"] + renderer._encode("RAW answer")
+    extends_served = backend.calls[1]["prompt_ids"][: len(served)] == served
+    assert extends_served == (mode != "tree")
+    assert len(records) == (2 if mode == "tree" else 1)
+    trained, logprobs = [], []
+    for record in records:
+        tail = record.token_ids[-record.response_length :]
+        trained.extend(t for t, mask in zip(tail, record.loss_mask, strict=True) if mask)
+        logprobs.extend(p for p, mask in zip(record.logprobs, record.loss_mask, strict=True) if mask)
+    assert trained == renderer._encode("RAW answer second answer")
+    assert logprobs == [-0.5] * len(trained)
+
+
+@pytest.mark.asyncio
 async def test_openai_tool_loop_end_to_end():
     gateway, backend = make_gateway(replies=["CALL calculator expr=2+2", "the answer is 4"])
     tools = [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}]

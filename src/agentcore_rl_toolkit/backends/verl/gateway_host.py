@@ -83,7 +83,7 @@ def get_or_start_gateway(
     public_host: str | None = None,
     adapters: list[str] | None = None,
     max_turns_per_sid: int | None = None,
-    history_mode: str = "tree",
+    history_mode: str = "linear",
     chat_template_kwargs: dict | None = None,
     linear_on_nonlinear: str = "reset",
 ) -> GatewayHandle:

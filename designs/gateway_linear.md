@@ -9,7 +9,7 @@
 
 ## Summary
 
-`history_mode="linear"` is an opt-in gateway mode for agents where cosmetic
+`history_mode="linear"` is the default gateway mode for agents where cosmetic
 re-tokenization drift of a previously-generated assistant turn is
 out-of-distribution-insignificant. In that mode the gateway heals drift at generation time:
 before each `backend.generate` it substitutes the exact token ids it already served for the
@@ -19,7 +19,9 @@ Each recorded prompt then extends the turn it continues exactly, so every branch
 every generated turn trained on its true multi-turn context; retries, edits, parallel
 branches, and sub-agent forks that reuse the session id add one sample per branch.
 
-Default behavior (`history_mode="tree"`) is unchanged.
+Set `history_mode="tree"` explicitly to render each replayed conversation in full
+and split records when its tokens diverge from the previously served sequence.
+The gateway, standalone adapters, and trainer entry points share the linear default.
 
 The design is implemented in `src/agentcore_rl_toolkit/rollout_gateway/linear.py`
 (`LinearHealer`), wired through `RolloutGateway` and `BaseAdapter`, with anchors read from
@@ -161,7 +163,7 @@ correctly not treated as closer.
 
 ### Config surface
 
-- `history_mode`: `"tree"` (default) | `"linear"`. Gateway-global; sessions of different
+- `history_mode`: `"linear"` (default) | `"tree"`. Gateway-global; sessions of different
   modes do not coexist within a run.
 - `linear_on_nonlinear`: `"reset"` (default) | `"error"` | `"passthrough"` — behavior when
   a request does not extend the session's latest turn (see below).
