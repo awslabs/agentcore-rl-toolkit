@@ -67,7 +67,7 @@ is append-only at the **message level** may no longer be append-only at the
 **token level**. Similar issues are discussed in
 [No Token Left Behind](https://www.lmsys.org/blog/2026-05-13-no-token-left-behind/).
 
-ART's default tree capture preserves the actual inference history. If a replayed
+ART's `history_mode="tree"` capture preserves the actual inference history. If a replayed
 prompt diverges from the previous token sequence, it forks the trajectory into
 another training row. Earlier generations retain their original contexts; the
 new row uses the context actually sent for the next generation. Shared history
@@ -306,7 +306,8 @@ receiving token-level trajectories.
 
 Start with the [verl setup guide](/agentcore-rl-toolkit/guides/verl-backend-setup/)
 and the [MigrationBench example](/agentcore-rl-toolkit/examples/strands-migration-agent/).
-Linear mode is selected with `history_mode="linear"` on the rollout gateway.
+The rollout gateway defaults to `history_mode="linear"`. Set `history_mode="tree"`
+explicitly to render replayed conversations in full.
 The implementation details and supported behavior are documented in the
 [variable-row batching design](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/designs/verl_variable_trajectory_batching.md)
 and [linear-history design](https://github.com/awslabs/agentcore-rl-toolkit/blob/main/designs/gateway_linear.md).

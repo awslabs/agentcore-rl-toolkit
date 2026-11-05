@@ -46,7 +46,7 @@ class Config:
     tokenizer_revision: str | None = None
     chat_template_kwargs: dict = dataclasses.field(default_factory=dict)
     gateway_port: int = 0
-    history_mode: str = "tree"
+    history_mode: str = "linear"
     steps: int = 3
     batch_size: int = 4
     group_size: int = 4

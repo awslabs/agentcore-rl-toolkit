@@ -63,6 +63,7 @@ class AgentCoreRLConfig:
     max_rollout_time: float = 1800.0
     tps_limit: int = 25
     gateway_port: int = 0
+    history_mode: str = "linear"
 
     @classmethod
     def from_args(cls, args: Namespace) -> AgentCoreRLConfig:
@@ -92,6 +93,7 @@ class AgentCoreRLService(metaclass=SingletonMeta):
             backend=SglangHttpBackend(router_url),
             renderer=HfTemplateRenderer(tokenizer),
             tokenizer=tokenizer,
+            history_mode=self.config.history_mode,
         )
         self.server = ThreadedGatewayServer(
             self.gateway,

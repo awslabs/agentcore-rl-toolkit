@@ -42,7 +42,7 @@ class RolloutGateway:
         adapters: which wire protocols to mount — names ("openai", "anthropic") or
             ``BaseAdapter`` subclasses. Defaults to both.
         max_turns_per_sid / debug_callback: forwarded to the adapters.
-        history_mode: ``"tree"`` (default) or ``"linear"``. In linear mode the gateway
+        history_mode: ``"linear"`` (default) or ``"tree"``. In linear mode the gateway
             heals re-tokenization drift at generation time via one shared ``LinearHealer``
             so every branch of the session tree stays CLEAN (one sample per append-only
             session). See ``linear.py``.
@@ -58,7 +58,7 @@ class RolloutGateway:
         renderer: Renderer,
         tokenizer=None,
         adapters: list[str | type[BaseAdapter]] | None = None,
-        history_mode: str = "tree",
+        history_mode: str = "linear",
         linear_on_nonlinear: str = "reset",
         max_turns_per_sid: int | None = None,
         debug_callback: Any = None,
@@ -87,6 +87,7 @@ class RolloutGateway:
                 backend=backend,
                 renderer=renderer,
                 tokenizer=tokenizer,
+                history_mode=history_mode,
                 max_turns_per_sid=max_turns_per_sid,
                 debug_callback=debug_callback,
                 manager=self.manager,  # SHARED across adapters -> one tree per sid

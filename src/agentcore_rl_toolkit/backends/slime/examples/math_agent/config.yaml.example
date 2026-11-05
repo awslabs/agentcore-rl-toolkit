@@ -16,5 +16,6 @@ rollout_session_backend:
 
 # Toolkit tunables
 gateway_port: 9090                  # rollout gateway port
+history_mode: linear                # default; tree renders replayed history in full
 max_rollout_time: 900               # per-session rollout timeout (s)
 tps_limit: 5                        # new rollout sessions per second

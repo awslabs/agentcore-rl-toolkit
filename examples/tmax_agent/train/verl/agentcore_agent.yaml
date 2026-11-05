@@ -1,5 +1,7 @@
 - name: agentcore_agent
   _target_: agentcore_rl_toolkit.backends.verl.agent_loop.AgentCoreAgentLoop
+  history_mode: linear
+  linear_on_nonlinear: reset
   rollout_session_backend:
     backend: agentcore_rl_toolkit.rollout_session.agentcore_http_session.AgentCoreHttpSession
     agentcore_runtime_arn: ${oc.env:AGENT_RUNTIME_ARN}
