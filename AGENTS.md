@@ -35,6 +35,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
 | `examples/strands_appworld_agent/` | AppWorld API interaction agent example |
+| `examples/strands_excytin_agent/` | ExCyTIn security incident investigation agent example |
 
 ### Migrating from v0.1.x
 
