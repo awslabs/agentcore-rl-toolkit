@@ -36,11 +36,16 @@ upstream: gpt-5.4-mini).
 Search ranks with BM25 over title, authors, abstract, comments, journal reference and categories, not with arXiv's
 own engine.
 
-Accuracy on 50 Implicit tasks (`--split pilot50`, avg@4, on AgentCore Runtime):
-- Claude Opus 5 (high): 63.0%
-- GPT-6 Astra (high): 78.5%
+Accuracy on AgentCore Runtime:
 
-Claude Opus 5 refuses 4 of the 50 tasks (epidemic modeling) in every attempt; they count as wrong.
+| Model | Implicit (`--split pilot50`, avg@4) | Cumulative (`--split cumulative_pilot50`, 1 attempt) |
+|---|---|---|
+| Claude Opus 5 (high) | 63.0% | 54.0% |
+| GPT-6 Astra (high) | 78.5% | 14.0% |
+
+Claude Opus 5 refuses some epidemic-modeling tasks (4 of the 50 Implicit tasks in every attempt, 6 of the 50
+Cumulative tasks); they count as wrong. In Cumulative, GPT-6 Astra mostly answers that no paper meets every
+requirement (41 of 50).
 
 ## Installation
 
