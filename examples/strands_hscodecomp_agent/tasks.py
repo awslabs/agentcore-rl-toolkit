@@ -1,6 +1,6 @@
 """HSCodeComp tasks as invocation payloads, from the Hugging Face dataset at a pinned revision.
 
-Splits: `all` (632 tasks); `pilot100`, 100 tasks drawn with seed 0; `smoke2`, the first two of them.
+Splits: `all` (632 tasks); `pilot100`, 100 tasks drawn with seed 0; `pilot50` and `smoke2`, the first 50 and 2.
 """
 
 import random
@@ -20,6 +20,7 @@ def load_split(name: str) -> list[dict]:
     if name == "all":
         return [tasks[t] for t in sorted(tasks)]
     pilot = sorted(random.Random(0).sample(sorted(tasks), 100))
-    if name in ("pilot100", "smoke2"):
-        return [tasks[t] for t in (pilot if name == "pilot100" else pilot[:2])]
-    raise ValueError(f"split must be all, pilot100 or smoke2, got {name!r}")
+    subsets = {"pilot100": 100, "pilot50": 50, "smoke2": 2}
+    if name in subsets:
+        return [tasks[t] for t in pilot[: subsets[name]]]
+    raise ValueError(f"split must be all, pilot100, pilot50 or smoke2, got {name!r}")

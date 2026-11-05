@@ -124,7 +124,7 @@ def main():
         default=eval_config.get("sampling_params"),
         help="Sampling parameters as JSON (e.g. '{\"temperature\": 0.7}')",
     )
-    parser.add_argument("--split", default="all", help="all, pilot100 or smoke2")
+    parser.add_argument("--split", default="all", help="all, pilot100, pilot50 or smoke2")
     parser.add_argument("--repeats", type=int, default=1, help="invocations per task (avg@repeats)")
     parser.add_argument("--exp_id", default="eval_async", help="Experiment ID for organizing results")
     parser.add_argument("--max_concurrent", type=int, default=32, help="Max concurrent ACR sessions")

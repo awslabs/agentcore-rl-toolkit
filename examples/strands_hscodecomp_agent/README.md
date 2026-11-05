@@ -19,7 +19,7 @@ forced answer: an episode that runs out of turns or context has no answer. The r
 searches exclude huggingface.co, and results under github.com/AIDC-AI are dropped. An unavailable search gateway
 fails the rollout.
 
-10-digit accuracy on 100 tasks (`--split pilot100`, 1 attempt, on AgentCore Runtime):
+10-digit accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 - Claude Opus 5 (high): TBD
 - GPT-6 Astra (high): TBD
 
@@ -98,8 +98,9 @@ python evaluate.py --split all --repeats 4 --exp_id all_opus5 --max_concurrent 3
 python evaluate.py --split smoke2 --exp_id smoke
 ```
 
-Splits: `all` (632 tasks); `pilot100`, 100 tasks drawn with seed 0; `smoke2`, the first two of them. Records go to
-`$TMPDIR/strands_hscodecomp_agent-evaluations/<exp_id>.jsonl`; the summary line is the mean reward.
+Splits: `all` (632 tasks); `pilot100`, 100 tasks drawn with seed 0; `pilot50` and `smoke2`, the first 50 and 2 of
+them. Records go to `$TMPDIR/strands_hscodecomp_agent-evaluations/<exp_id>.jsonl`; the summary line is the mean
+reward.
 
 ## File Structure
 
