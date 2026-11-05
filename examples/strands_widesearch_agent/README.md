@@ -5,24 +5,19 @@ Bedrock AgentCore RL Toolkit. Each query asks for every entity of a set with its
 the World Bank GDP growth of every Sub-Saharan African country for 2022-2024), which takes many searches and reads.
 The reward is the item F1 of the agent's table against the gold table, from the official evaluation.
 
-The agent has the official tools (`prompts/tools_en.json`):
-- `search_global`, through the [AgentCore Gateway Web Search Tool](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html),
-  `count` results (10 by default, at most 25).
-- `text_browser_view`, an HTTP fetch (HTML, PDF, JSON) whose text a fixed model (gpt-oss-120b on Bedrock) summarizes
-  toward the agent's description of what it needs, keeping list and table entries verbatim. The summarizer is part
-  of the environment, the same for every policy.
+The agent has the official tools:
+- `search_global`, through the [AgentCore Gateway Web Search Tool](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html).
+- `text_browser_view`, a page fetch whose text a fixed model (gpt-oss-120b on Bedrock) summarizes toward the agent's
+  description of what it needs; the summarizer is the same for every policy.
 
 ## Protocol
 
-The official single-agent setup: its English system prompt (`prompts/system_en.md`) and tools, 50 turns, 32K output
-tokens per turn, 256K context, tool output cut at 40,000 characters. When the turns run out, the official
-`[Max Step]` message gets one more turn; an episode that runs out of context has no answer. The reward is the official
-evaluation (`widesearch_eval/`, vendored from `src/evaluation/`): the response's table is aligned with the gold
-table on the primary-key columns and each cell is checked by its column's metric (exact match, number or date match,
-URL match, or an LLM judge). The LLM judge is Claude Sonnet 4.5 on Bedrock in place of GPT-4.1. Besides item F1, the
-result reports row F1 and success (the whole table correct). Leakage control: searches exclude huggingface.co and
-the benchmark's site, and results and pages of its repository and paper are dropped. A failing gateway or summarizer
-fails the rollout.
+The official single-agent setup: its English system prompt and tools, 50 turns, 32K output tokens per turn, 256K
+context. When the turns run out, the official `[Max Step]` message gets one more turn; an episode that runs out of
+context has no answer. The reward is the official evaluation, with Claude Sonnet 4.5 on Bedrock as its LLM judge in
+place of GPT-4.1; besides item F1, it reports row F1 and success (the whole table correct). Leakage control:
+searches exclude huggingface.co and the benchmark's site, and results and pages of its repository and paper are
+dropped. A failing gateway or summarizer fails the rollout.
 
 On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 
@@ -68,8 +63,8 @@ applies to its results.
 
 Wikipedia is fetched live by default. Wikipedia often refuses AgentCore Runtime's addresses (HTTP 403); the agent
 then sees the error, as for any page it cannot open. `env/` serves Wikipedia from [Kiwix](https://download.kiwix.org/zim/wikipedia/)
-ZIM dumps instead: article pages, search and the read APIs, as the live site would return them. Run it on a host in
-the runtime's VPC, bound to the host's private address, with a security group that admits only the runtime:
+ZIM dumps instead. Run it on a host in the runtime's VPC, bound to the host's private address, with a security
+group that admits only the runtime:
 
 ```bash
 uv pip install -e ".[env]"
