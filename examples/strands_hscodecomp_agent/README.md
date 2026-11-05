@@ -19,9 +19,12 @@ forced answer: an episode that runs out of turns or context has no answer. The r
 searches exclude huggingface.co, and results under github.com/AIDC-AI are dropped. An unavailable search gateway
 fails the rollout.
 
-10-digit accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
-- Claude Opus 5 (high): TBD
-- GPT-6 Astra (high): TBD
+Accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
+
+| Model | 10 digits | 2 / 4 / 6 / 8 digits |
+|---|---|---|
+| Claude Opus 5 (high) | 56% | 90 / 84 / 80 / 58 |
+| GPT-6 Astra (high) | 64% | 92 / 82 / 76 / 64 |
 
 ## Installation
 
