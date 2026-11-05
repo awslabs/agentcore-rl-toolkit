@@ -34,8 +34,8 @@ On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 
 | Model | Reward | Phase 1 | Phase 2 |
 |---|---|---|---|
-| Claude Opus 5 (high) | TBD | TBD | TBD |
-| GPT-6 Astra (high) | TBD | TBD | TBD |
+| Claude Opus 5 (high) | 0.632 | 68% | 52% |
+| GPT-6 Astra (high) | 0.606 | 66% | 48% |
 
 ## Installation
 
