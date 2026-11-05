@@ -28,8 +28,8 @@ On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 
 | Model | Item F1 | Row F1 | Success |
 |---|---|---|---|
-| Claude Opus 5 (high) | TBD | TBD | TBD |
-| GPT-6 Astra (high) | TBD | TBD | TBD |
+| Claude Opus 5 (high) | 0.68 | 0.44 | 12% |
+| GPT-6 Astra (high) | 0.64 | 0.42 | 12% |
 
 ## Installation
 
