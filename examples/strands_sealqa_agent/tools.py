@@ -4,8 +4,9 @@
 - visit: an HTTP fetch with text extraction (HTML, PDF via pypdf, JSON as text), then a summary toward the agent's
   goal by a fixed summarizer model (gpt-oss-120b on Bedrock, reasoning dropped). The summarizer is part of the
   environment, the same for every policy. Wikipedia is fetched live unless WIKIPEDIA_SERVICE_URL names a service
-  that serves it from local dumps (GET <service>/fetch?url=<url> -> {"text"}). Live Wikipedia often refuses
-  AgentCore Runtime's addresses; the refusal goes to the model like any page error.
+  that serves it from local dumps (GET <service>/fetch?url=<url> -> {"text"}, 404 for a language without a dump,
+  then fetched live). Live Wikipedia often refuses AgentCore Runtime's addresses; the refusal goes to the model like
+  any page error.
 
 Leakage control: huggingface.co is excluded from search; results and pages of the benchmark's paper, or that hold
 its canary string, are dropped. Tool output is cut at 40,000 characters. Rate limiting (outside Wikimedia) and a
@@ -177,10 +178,12 @@ def fetch(url: str) -> str:
     if WIKIPEDIA_SERVICE_URL and on(host, ("wikipedia.org",)):
         try:
             r = httpx.get(f"{WIKIPEDIA_SERVICE_URL}/fetch?url={quote(url, safe='')}", timeout=60)
-            r.raise_for_status()
         except httpx.HTTPError as e:
             raise InfraError(f"Wikipedia service: {type(e).__name__}") from None
-        return r.json()["text"]
+        if r.status_code == 200:
+            return r.json()["text"]
+        if r.status_code != 404:  # 404: no dump of this language, so the page is fetched live
+            raise InfraError(f"Wikipedia service HTTP {r.status_code}")
     wiki = on(host, WIKIMEDIA)
     attempts = 3 if wiki else 5
     for attempt in range(attempts):

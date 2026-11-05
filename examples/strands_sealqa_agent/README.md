@@ -58,8 +58,8 @@ applies to its results.
 
 Wikipedia is fetched live. Wikipedia often refuses AgentCore Runtime's addresses (HTTP 403); the agent then sees
 the error, as for any page it cannot open. To serve Wikipedia from local dumps instead, set `WIKIPEDIA_SERVICE_URL`
-to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`), such as the one in
-`examples/strands_widesearch_agent/env/`.
+to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`, or 404 for a language
+it has no dump of, which is then fetched live), such as the one in `examples/strands_widesearch_agent/env/`.
 
 ## Run Locally
 
