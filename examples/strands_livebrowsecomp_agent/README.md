@@ -16,9 +16,9 @@ The paper's protocol (Appendix C): its default system prompt, answer in `<answer
 8K output tokens per turn, 256K context, tool output cut at 40,000 characters. When the steps or the context run
 out, the paper's force-answer prompt gets one more turn. The reward is the official judge (`reward.py`): the
 BrowseComp grader template with gpt-oss-120b, as in the paper. Questions and answers are encrypted in the dataset
-and decrypted in memory. Leakage control: searches exclude huggingface.co and the benchmark's site, and results
-and pages of its repository and paper, or with its canary string, are dropped. Rate limiting (outside Wikimedia)
-and a failing gateway or summarizer fail the rollout.
+and decrypted in memory. Leakage control: searches exclude huggingface.co and the benchmark's site, and results and
+pages of its repository and paper, or with its canary string, are dropped. A failing gateway or summarizer fails the
+rollout.
 
 Accuracy on 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 - Claude Opus 5 (high): TBD
@@ -59,8 +59,8 @@ applies to its results.
 
 Wikipedia is fetched live. Wikipedia often refuses AgentCore Runtime's addresses (HTTP 403); the agent then sees
 the error, as for any page it cannot open. To serve Wikipedia from local dumps instead, set `WIKIPEDIA_SERVICE_URL`
-to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`), such as the one in
-`examples/strands_widesearch_agent/env/`.
+to a service that returns pages (`GET <service>/fetch?url=<url>` returning `{"text": ...}`, or 404 for a language
+it has no dump of, which is then fetched live), such as the one in `examples/strands_widesearch_agent/env/`.
 
 ## Run Locally
 
