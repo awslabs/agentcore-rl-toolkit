@@ -7,28 +7,18 @@ knowledge base, asks a simulated user to resolve the ambiguities, and submits SQ
 submission brings a follow-up question. The reward is upstream's: 0.7 for the first question, plus 0.3 for the
 follow-up.
 
-The agent has upstream's nine actions as tools, each with its cost in the user's patience: `execute`, `get_schema`,
-`get_all_column_meanings`, `get_column_meaning`, `get_all_external_knowledge_names`, `get_knowledge_definition`,
-`get_all_knowledge_definitions` (the database environment), `ask` and `submit` (the user). The environment service
-(`env/`) runs them.
+The agent has upstream's nine actions as tools (`execute`, `get_schema`, the column-meaning and knowledge lookups,
+`ask`, `submit`), served by the environment service (`env/`).
 
 ## Protocol
 
-Upstream's a-Interact (BIRD-Interact@451fe2c, `bird_interact_agent/batch_run_bird_interact/`): its system prompt,
-adapted to tool calling (`prompts/system.md`: the text action format and its toy example are dropped; the task
-description, costs and tips are kept), the action costs, and the budget: 6 plus 2 per labeled ambiguity plus
-patience 6, as in upstream's official runs. When the budget runs out, the next action must be `submit`, and that
-submission ends the task. `execute` and `submit` run on a freshly reset copy of the task's database, as upstream
-resets the database before each. A query's answer is checked by comparing result sets with the gold SQL; a data
-management task's by upstream's test cases. The user simulator is upstream's two-stage one (v2 prompts: the encoder
-classifies the question against the labeled ambiguities, the decoder answers in the user's words) with Claude
-Haiku 4.5 on Bedrock at temperature 0 (upstream: gemini-2.0-flash). 60 turns (upstream's official runs), 8K output
-tokens per turn, 128K context; a reply without a tool call costs 0.2 and gets an error, as upstream answers a reply
-without an action. An unavailable database or user simulator fails the rollout.
+Upstream's a-Interact (BIRD-Interact@451fe2c): its system prompt adapted to tool calling (`prompts/system.md`), its
+action costs and patience budget (patience 6), a freshly reset database for every `execute` and `submit`, and its
+tests. The user simulator is upstream's two-stage one on Claude Haiku 4.5 (upstream: gemini-2.0-flash). 60 turns,
+8K output tokens per turn, 128K context. An unavailable database or user simulator fails the rollout.
 
-**Gold.** The authors withhold the gold SQL and test cases to prevent leakage; request them as upstream's README
-describes. The environment service reads them from your path and keeps them: invocation payloads carry only the
-task id. Do not commit or publish the gold file.
+**Gold.** The authors withhold the gold SQL and test cases; request them as upstream's README describes. The
+environment service reads them from your path and never returns them. Do not commit or publish the gold file.
 
 On 50 tasks (`--split pilot50`, 1 attempt, on AgentCore Runtime):
 
