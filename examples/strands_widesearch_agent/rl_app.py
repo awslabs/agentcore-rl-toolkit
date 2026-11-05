@@ -11,6 +11,7 @@ import logging
 import re
 from pathlib import Path
 
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from models import InvocationRequest
 from reward import WideSearchReward, evaluate
@@ -78,6 +79,7 @@ def make_model(config: dict):
     return BedrockModel(
         model_id=config["model_id"],
         region_name=config.get("region", "us-west-2"),
+        boto_client_config=Config(read_timeout=600),  # a 32K-token turn can think for minutes before streaming
         max_tokens=MAX_TOKENS,
         additional_request_fields=config.get("bedrock_fields"),
         **sampling,
