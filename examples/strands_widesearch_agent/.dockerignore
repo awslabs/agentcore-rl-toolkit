@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+test_local.py
+evaluate.py
+tasks.py
+.env
+config.toml
+uv.lock
+.env.*
+.git/
+env/
