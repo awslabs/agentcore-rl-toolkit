@@ -19,7 +19,7 @@ cd /path/to/agentcore-rl-toolkit
 uv venv --python=3.12
 source .venv/bin/activate
 
-uv pip install sagemaker-train
+uv pip install "sagemaker-train>=1.27"
 uv pip install -e ".[rollout,gateway]"
 ```
 

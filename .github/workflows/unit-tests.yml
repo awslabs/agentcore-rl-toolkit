@@ -65,7 +65,7 @@ jobs:
           AWS_DEFAULT_REGION: us-west-2
 
   sagemaker-rft:
-    name: SageMaker RFT SDK Tests
+    name: SageMaker SDK Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -80,7 +80,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --extra server --group sagemaker-integration
 
-      - name: Run SageMaker RFT tests
-        run: uv run --no-sync pytest tests/runtime/test_sagemaker_rft.py -v
+      - name: Run SageMaker tests
+        run: uv run --no-sync pytest tests/runtime/test_sagemaker_rft.py tests/backends/sagemaker/ -v
         env:
           AWS_DEFAULT_REGION: us-west-2

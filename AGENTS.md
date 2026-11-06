@@ -197,7 +197,7 @@ package exports are loaded on first access. The gateway lives behind extras:
   environment. The synchronous recipe and instructions for connecting to an existing endpoint are in
   `src/agentcore_rl_toolkit/backends/tinker_api/README.md`.
 - For the SageMaker backend (`SageMakerSdkBackend`), install the Training Sessions SDK
-  (`uv sync --group sagemaker-integration`, or `pip install sagemaker-train`). Unlike the other
+  (`uv sync --group sagemaker-integration`, or `pip install "sagemaker-train>=1.27"`). Unlike the other
   sampling backends it imports `sagemaker.train.training_session` at module scope, so the
   module is only importable with the SDK present; nothing else in the gateway imports it.
 

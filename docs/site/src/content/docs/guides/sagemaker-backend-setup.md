@@ -92,7 +92,7 @@ cd /path/to/agentcore-rl-toolkit
 uv venv --python=3.12
 source .venv/bin/activate
 
-uv pip install sagemaker-train          # SageMaker Training Sessions SDK
+uv pip install "sagemaker-train>=1.27"  # SageMaker Training Sessions SDK
 uv pip install -e ".[rollout,gateway]"  # rollout client and token capture
 uv pip install wandb                    # optional, for training curves
 ```

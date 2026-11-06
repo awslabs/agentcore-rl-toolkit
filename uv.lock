@@ -197,6 +197,8 @@ conflicts = [[
     { package = "agentcore-rl-toolkit", group = "sagemaker-integration" },
 ]]
 
+[manifest]
+
 [[manifest.dependency-metadata]]
 name = "megatron-bridge"
 version = "0.6.2"
@@ -459,7 +461,7 @@ sagemaker-integration = [
     { name = "openai", specifier = ">=1.0" },
     { name = "pytest", specifier = ">=7.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "sagemaker-train", specifier = ">=1.13.0" },
+    { name = "sagemaker-train", specifier = ">=1.27" },
 ]
 swe-agent = [
     { name = "aws-bedrock-token-generator", specifier = ">=1.1.0" },
@@ -7741,7 +7743,7 @@ wheels = [
 
 [[package]]
 name = "sagemaker-core"
-version = "2.24.0"
+version = "2.29.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -7771,9 +7773,9 @@ dependencies = [
     { name = "tblib" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/87/06/7ebc922acb484ec27374e5d9974fc879545d78d79e51c5b6dacfb7f250d2/sagemaker_core-2.24.0.tar.gz", hash = "sha256:63127df4cbb481f8ca12921e87b429ab3882faec36e388f9d70d49cdd14bc655", size = 1135442, upload-time = "2026-10-07T20:28:11.348Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/e1/63600a7f0cbb3fc0baa9131d7517b12e1bc0ffdc5ea33e48dc4efbc575b0/sagemaker_core-2.29.0.tar.gz", hash = "sha256:022d1fd9a953adff76ccf8c213f3ebd7cafb1de2b6b371efc999d30d26688bd6", size = 1156346, upload-time = "2026-11-05T01:13:17.239Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/ba/4cdf827b0f6267910c096ad6e2b00cd801d3d0102950f1146fb462b210bb/sagemaker_core-2.24.0-py3-none-any.whl", hash = "sha256:df988cb957df5c90fa014d82488071506e1b57d96d147298e1b69f89f0408a6e", size = 1384371, upload-time = "2026-10-07T20:28:09.92Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/42/2a344a0202f5a97ad253c927e46d15c250fbe5a7025f97497abdcb808da2/sagemaker_core-2.29.0-py3-none-any.whl", hash = "sha256:a9f9007426d095994d40387544737354fd60010fa469d9949d5c0a26af7f172d", size = 1405275, upload-time = "2026-11-05T01:13:15.083Z" },
 ]
 
 [[package]]
@@ -7791,7 +7793,7 @@ wheels = [
 
 [[package]]
 name = "sagemaker-train"
-version = "1.24.0"
+version = "1.29.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "graphene" },
@@ -7807,9 +7809,9 @@ dependencies = [
     { name = "tblib" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/01/e348c7ddb707c32b128b8d018b53c33c03147a02797346349c599fba7f54/sagemaker_train-1.24.0.tar.gz", hash = "sha256:627ce100092bfd2afc6c354f1ef28b11d4faec4014e02239e6fb58a3f526e9ed", size = 382573, upload-time = "2026-10-07T21:03:06.435Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/76/a8e0bb06898c5e6a7b9313a99132ada5fadd676f66e99f45b1e4aa269f95/sagemaker_train-1.29.0.tar.gz", hash = "sha256:cb2930c03f3a90f5b4c85d290ed547a64c14c76f41ad0c3d3fa60af4dad1a976", size = 475412, upload-time = "2026-11-05T02:19:07.317Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f0/51/911166a840f85dfc48419c68e44c5a1ca4a638d11e1922f94119851fac1d/sagemaker_train-1.24.0-py3-none-any.whl", hash = "sha256:75ab696ad79abf112d095ccdce0dec0f157214cf60c95c8a184e6185aecf671a", size = 460894, upload-time = "2026-10-07T21:03:04.861Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/cf/7b3137126c77bdffa445510fc14aff5635f0b46cd22ee5632e87606227bf/sagemaker_train-1.29.0-py3-none-any.whl", hash = "sha256:e89508e1c32ef1848e4a1aaea7a018b54673d69c653ff1acc2b5ea631dd1dcf3", size = 563818, upload-time = "2026-11-05T02:19:05.783Z" },
 ]
 
 [[package]]
