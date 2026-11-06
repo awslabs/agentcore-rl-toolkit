@@ -12,7 +12,7 @@ Reads the same config.yaml as ``train_grpo.py``; the DAPO-only fields in ``DapoC
 defaults, so they are optional in the YAML.
 
 Usage:
-    python -m agentcore_rl_toolkit.backends.experimental.sagemaker.train_dapo --config path/to/config.yaml
+    python -m agentcore_rl_toolkit.backends.sagemaker.train_dapo --config path/to/config.yaml
 """
 
 import argparse
@@ -29,10 +29,10 @@ from typing import Any
 import numpy as np
 from sagemaker.train.training_session import AdamParams, ServiceClient
 
-from agentcore_rl_toolkit.backends.experimental.sagemaker.config import Config, load_config
-from agentcore_rl_toolkit.backends.experimental.sagemaker.datum import trace_record_to_datum
-from agentcore_rl_toolkit.backends.experimental.sagemaker.rollout import load_dataset, local_ip, run_one_rollout
-from agentcore_rl_toolkit.backends.experimental.sagemaker.train_grpo import _init_wandb, compute_grpo_advantages
+from agentcore_rl_toolkit.backends.sagemaker.config import Config, load_config
+from agentcore_rl_toolkit.backends.sagemaker.datum import trace_record_to_datum
+from agentcore_rl_toolkit.backends.sagemaker.rollout import load_dataset, local_ip, run_one_rollout
+from agentcore_rl_toolkit.backends.sagemaker.train_grpo import _init_wandb, compute_grpo_advantages
 from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 from agentcore_rl_toolkit.rollout_gateway import HfTemplateRenderer, TraceRecord
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway

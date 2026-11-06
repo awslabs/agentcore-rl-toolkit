@@ -3,7 +3,7 @@ the same YAML into a ``Config`` subclass that adds its own fields."""
 
 from dataclasses import dataclass
 
-from agentcore_rl_toolkit.backends.experimental.sagemaker.config import Config, load_config
+from agentcore_rl_toolkit.backends.sagemaker.config import Config, load_config
 
 
 @dataclass

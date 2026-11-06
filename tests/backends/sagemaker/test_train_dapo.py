@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("sagemaker.train.training_session", reason="needs sagemaker-train>=1.27 (SageMaker extras)")
 
-import agentcore_rl_toolkit.backends.experimental.sagemaker.train_dapo as td  # noqa: E402
+import agentcore_rl_toolkit.backends.sagemaker.train_dapo as td  # noqa: E402
 from agentcore_rl_toolkit.rollout_gateway import TraceRecord  # noqa: E402
 
 MIXED = [1.0, 0.0]  # informative: rewards differ

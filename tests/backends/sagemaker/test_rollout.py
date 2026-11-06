@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from agentcore_rl_toolkit.backends.experimental.sagemaker import rollout
+from agentcore_rl_toolkit.backends.sagemaker import rollout
 from agentcore_rl_toolkit.rollout_gateway import TraceRecord
 from agentcore_rl_toolkit.rollout_session.wire import RolloutDumpResponse
 

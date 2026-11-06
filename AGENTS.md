@@ -25,7 +25,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/reward_function.py` | `RewardFunction` base class |
 | `src/agentcore_rl_toolkit/rollout_gateway/` | In-repo token-level trajectory capture layer: `RolloutGateway`, `Renderer`, `SamplingBackend`, `TraceRecord` (see [Rollout Gateway](#rollout-gateway)) |
 | `src/agentcore_rl_toolkit/backends/experimental/verl/` | Experimental verl extras that have not graduated into `backends/verl/`: `RolloutSessionAgentLoop` (sandbox-session rollouts, used by the SWE agent example), its task runner, and trainer mixins |
-| `src/agentcore_rl_toolkit/backends/experimental/sagemaker/` | Experimental SageMaker Training Sessions backend: single-process GRPO loop (`train_grpo.py`) over the rollout gateway, no local GPUs |
+| `src/agentcore_rl_toolkit/backends/sagemaker/` | SageMaker Training Sessions backend: single-process GRPO loop (`train_grpo.py`) over the rollout gateway, no local GPUs |
 | `src/agentcore_rl_toolkit/backends/verl/` | verl backend: `AgentCoreAgentLoop` plugged into verl's standard main_ppo entrypoint via the rollout gateway |
 | `src/agentcore_rl_toolkit/backends/tinker_api/` | CPU training loop over a Tinker-compatible endpoint, with HF rendering and synchronous group-relative updates |
 | `src/agentcore_rl_toolkit/backends/slime/` | slime backend: `generate` + `normalize_episode_rewards` hooks for slime's `--custom-generate-function-path` / `--custom-reward-post-process-path` (see [slime backend](#slime-backend-backendsslime)) |
@@ -208,8 +208,8 @@ importing the package never requires aiohttp. Tests live in `tests/rollout_gatew
 **Status.** The capture layer above is implemented and tested. Training-backend consumers:
 the **verl backend** (`backends/verl/`, see below), the **Tinker API backend**
 (`backends/tinker_api/`), the **slime backend**
-(`backends/slime/`, see below), and the **experimental SageMaker backend**
-(`backends/experimental/sagemaker/`, see below). Other
+(`backends/slime/`, see below), and the **SageMaker backend**
+(`backends/sagemaker/`, see below). Other
 backends' dispatch/reward-join glue is not yet on the main branch — a prototype
 dispatcher is parked on the `wip/online-rl-dispatch` branch.
 
@@ -226,7 +226,7 @@ The verl backend connects AgentCore rollouts to verl through `AgentCoreAgentLoop
 and the rollout gateway. See `backends/verl/README.md` for its architecture, setup,
 contracts, limitations, and troubleshooting.
 
-### Experimental SageMaker backend (`backends/experimental/sagemaker/`)
+### SageMaker backend (`backends/sagemaker/`)
 
 GRPO against **Amazon SageMaker Training Sessions**: SageMaker hosts the policy weights,
 the sampler, and the optimizer behind an SDK, so **no local GPU cluster is needed** — the
@@ -254,7 +254,7 @@ Key pieces:
   Both are covered in `tests/rollout_gateway/test_sagemaker_sdk_backend.py`, which stubs
   the `sagemaker` module so the tests need no SDK wheel and no AWS calls.
 - `train_grpo.py` — the loop, run as
-  `python -m agentcore_rl_toolkit.backends.experimental.sagemaker.train_grpo --config config.yaml`.
+  `python -m agentcore_rl_toolkit.backends.sagemaker.train_grpo --config config.yaml`.
   Per step: pop `batch_size` payloads, run `responses_per_prompt` ACR rollouts per payload
   concurrently, center/normalize rewards within each group, convert every trajectory-tree
   leaf to a datum, `forward_backward(loss_fn=...)` + `optim_step(AdamParams(...))`, then

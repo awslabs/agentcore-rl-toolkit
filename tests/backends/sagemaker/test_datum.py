@@ -1,7 +1,7 @@
 """``trace_record_to_datum`` unit tests: the TraceRecord -> SageMaker datum shift,
 the prompt-span left-padding, and loss-mask propagation into every masked field."""
 
-from agentcore_rl_toolkit.backends.experimental.sagemaker.datum import trace_record_to_datum
+from agentcore_rl_toolkit.backends.sagemaker.datum import trace_record_to_datum
 from agentcore_rl_toolkit.rollout_gateway import TraceRecord
 
 
