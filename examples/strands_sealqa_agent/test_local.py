@@ -1,4 +1,4 @@
-"""Run the Seal-Hard agent locally, without AgentCore Runtime: the entrypoint is called in this process.
+"""Run the SealQA agent locally, without AgentCore Runtime: the entrypoint is called in this process.
 
 Needs SEALQA_GATEWAY_URL and AWS credentials for Bedrock (the agent, the summarizer, the judge) and the gateway.
 

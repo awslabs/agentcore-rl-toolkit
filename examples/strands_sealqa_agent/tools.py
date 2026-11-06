@@ -1,4 +1,4 @@
-"""Seal-Hard's tools: `search` and `visit` on the live web.
+"""SealQA's tools: `search` and `visit` on the live web.
 
 - search: the AgentCore Gateway Web Search Tool (SEALQA_GATEWAY_URL, IAM authorization), 10 results.
 - visit: an HTTP fetch with text extraction (HTML, PDF via pypdf, JSON as text), then a summary toward the agent's

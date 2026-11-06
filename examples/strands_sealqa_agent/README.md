@@ -1,7 +1,7 @@
-# Strands Seal-Hard Agent
+# Strands SealQA Agent
 
-An RL-trainable agent for Seal-Hard, the hard split of [SealQA](https://huggingface.co/datasets/vtllms/sealqa)
-(254 questions), using Bedrock AgentCore RL Toolkit. The questions are fact-seeking, and web search returns
+An RL-trainable agent for [SealQA](https://huggingface.co/datasets/vtllms/sealqa), on its Seal-Hard split (254
+questions), using Bedrock AgentCore RL Toolkit. The questions are fact-seeking, and web search returns
 conflicting, noisy or unhelpful results for them. The agent searches the live web and reads pages; the reward is 1
 if the official grader judges the answer correct, else 0.
 
@@ -110,7 +110,7 @@ tools.py                   search (the gateway) and visit (fetch and summarize) 
 reward.py                  the official grader, with a Bedrock judge
 prompts/grader_template.txt  the official grader template
 models.py                  the typed invocation payload
-tasks.py                   Seal-Hard from Hugging Face (vtllms/sealqa, pinned revision) and the splits
+tasks.py                   SealQA's Seal-Hard from Hugging Face (vtllms/sealqa, pinned revision) and the splits
 evaluate.py                evaluation on AgentCore Runtime
 test_local.py              local run, without AgentCore Runtime
 ```

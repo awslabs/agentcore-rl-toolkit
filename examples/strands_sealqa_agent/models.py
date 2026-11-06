@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvocationRequest(BaseModel):
-    """One Seal-Hard task. Typed fields reject non-string input (e.g. toolUse blocks) before it reaches the agent."""
+    """One SealQA task. Typed fields reject non-string input (e.g. toolUse blocks) before it reaches the agent."""
 
     model_config = ConfigDict(populate_by_name=True)
 

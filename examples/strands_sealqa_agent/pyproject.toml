@@ -1,7 +1,7 @@
 [project]
 name = "strands-sealqa-agent-example"
 version = "0.1.0"
-description = "Example: Strands Seal-Hard web research agent using Bedrock AgentCore RL Toolkit"
+description = "Example: Strands SealQA web research agent using Bedrock AgentCore RL Toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# evaluate.py, test_local.py: the Seal-Hard tasks from Hugging Face
+# evaluate.py, test_local.py: the SealQA tasks from Hugging Face
 eval = ["datasets"]
 
 [tool.setuptools]

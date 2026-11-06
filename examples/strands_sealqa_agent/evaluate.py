@@ -1,4 +1,4 @@
-"""Evaluate the Seal-Hard agent on AgentCore Runtime through background HTTP invocations.
+"""Evaluate the SealQA agent on AgentCore Runtime through background HTTP invocations.
 
 One invocation per (task, repeat); records go to OUTPUT_DIR/EXP_ID.jsonl. The reported metric is the mean reward
 (accuracy, the share graded A), avg@repeats.
@@ -104,7 +104,7 @@ def main():
     agentcore_config = config.get("agentcore", {})
     eval_config = config.get("eval", {})
 
-    parser = argparse.ArgumentParser(description="Async evaluation of the Seal-Hard agent")
+    parser = argparse.ArgumentParser(description="Async evaluation of the SealQA agent")
     parser.add_argument("--agent_arn", default=agentcore_config.get("agent_arn"), help="AgentCore Runtime ARN")
     parser.add_argument("--model_id", default=eval_config.get("model_id"), help="Model ID for inference")
     parser.add_argument(

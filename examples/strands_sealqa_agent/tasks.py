@@ -1,4 +1,4 @@
-"""Seal-Hard tasks as invocation payloads: seal-hard.parquet of the Hugging Face dataset vtllms/sealqa at a pinned
+"""SealQA tasks as invocation payloads: seal-hard.parquet of the Hugging Face dataset vtllms/sealqa at a pinned
 revision. task_id is the row index.
 
 Splits: `all` (254 tasks); `pilot50` and `smoke2`, 50 and 2 tasks drawn with seed 0.

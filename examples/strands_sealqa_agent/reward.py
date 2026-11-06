@@ -1,4 +1,4 @@
-"""Seal-Hard's scoring, the official grader (the SealQA Colab; the template is also in the paper's Appendix C):
+"""SealQA's scoring, the official grader (the SealQA Colab; the template is also in the paper's Appendix C):
 the judge grades the answer A (correct), B (incorrect) or C (not attempted); the grade is the first A, B or C in its
 reply, and a reply without one counts as C. The judge is gpt-oss-120b on Bedrock at temperature 0 (officially
 GPT-4o-mini). An episode without an answer is C without a judge call."""
