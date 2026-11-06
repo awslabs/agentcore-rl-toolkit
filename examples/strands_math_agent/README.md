@@ -89,7 +89,7 @@ reads model config from `_config`, and returns `{"reward": float}`. It supports 
 [verl](../../src/agentcore_rl_toolkit/backends/verl/README.md),
 [Tinker API](../../src/agentcore_rl_toolkit/backends/tinker_api/README.md),
 [slime](../../docs/site/src/content/docs/guides/slime-backend-setup.md), and
-[SageMaker](../../src/agentcore_rl_toolkit/backends/experimental/sagemaker/SETUP.md) backends.
+[SageMaker](../../src/agentcore_rl_toolkit/backends/sagemaker/SETUP.md) backends.
 
 ```bash
 python rl_app.py

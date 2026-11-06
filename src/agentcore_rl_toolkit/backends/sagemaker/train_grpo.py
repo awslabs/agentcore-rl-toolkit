@@ -1,7 +1,7 @@
 """GRPO training with the rollout gateway + SageMaker Training Sessions.
 
 Usage:
-    python -m agentcore_rl_toolkit.backends.experimental.sagemaker.train_grpo --config path/to/config.yaml
+    python -m agentcore_rl_toolkit.backends.sagemaker.train_grpo --config path/to/config.yaml
 """
 
 import argparse
@@ -17,9 +17,9 @@ from typing import Any
 import numpy as np
 from sagemaker.train.training_session import AdamParams, ServiceClient
 
-from agentcore_rl_toolkit.backends.experimental.sagemaker.config import Config, load_config
-from agentcore_rl_toolkit.backends.experimental.sagemaker.datum import trace_record_to_datum
-from agentcore_rl_toolkit.backends.experimental.sagemaker.rollout import load_dataset, local_ip, run_one_rollout
+from agentcore_rl_toolkit.backends.sagemaker.config import Config, load_config
+from agentcore_rl_toolkit.backends.sagemaker.datum import trace_record_to_datum
+from agentcore_rl_toolkit.backends.sagemaker.rollout import load_dataset, local_ip, run_one_rollout
 from agentcore_rl_toolkit.concurrency.rate_limiter import LocalRateLimiter
 from agentcore_rl_toolkit.rollout_gateway import HfTemplateRenderer, TraceRecord
 from agentcore_rl_toolkit.rollout_gateway.gateway import RolloutGateway

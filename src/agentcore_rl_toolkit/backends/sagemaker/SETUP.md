@@ -19,14 +19,14 @@ cd /path/to/agentcore-rl-toolkit
 uv venv --python=3.12
 source .venv/bin/activate
 
-uv pip install sagemaker-train
+uv pip install "sagemaker-train>=1.27"
 uv pip install -e ".[rollout,gateway]"
 ```
 
 ## 2. Prepare training dataset
-Scripts for preparing AgentCore-compatible dataset are in `src/agentcore_rl_toolkit/backends/experimental/sagemaker/prepare_datasets`. For example, to prepare a `gsm8k` dataset, run:
+Scripts for preparing AgentCore-compatible dataset are in `src/agentcore_rl_toolkit/backends/sagemaker/prepare_datasets`. For example, to prepare a `gsm8k` dataset, run:
 ```bash
-python src/agentcore_rl_toolkit/backends/experimental/sagemaker/prepare_datasets/prepare_gsm8k.py \
+python src/agentcore_rl_toolkit/backends/sagemaker/prepare_datasets/prepare_gsm8k.py \
     --output-dir /path/to/data/gsm8k
 ```
 
@@ -44,7 +44,7 @@ cp config.yaml.example config.yaml
 ## 4. Run the training
 
 ```bash
-cd src/agentcore_rl_toolkit/backends/experimental/sagemaker
+cd src/agentcore_rl_toolkit/backends/sagemaker
 python train_grpo.py --config config.yaml
 ```
 

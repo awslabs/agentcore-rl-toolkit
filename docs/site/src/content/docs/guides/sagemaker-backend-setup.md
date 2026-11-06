@@ -15,7 +15,7 @@ The host does need to be network-reachable *from* your ACR runtime, so a laptop
 does not work with this setup — see [Networking](#networking) before you deploy.
 
 The loop is implemented in-repo at
-[`src/agentcore_rl_toolkit/backends/experimental/sagemaker/`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/experimental/sagemaker)
+[`src/agentcore_rl_toolkit/backends/sagemaker/`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/sagemaker)
 and is driven by a single YAML config:
 
 | File | Role |
@@ -92,7 +92,7 @@ cd /path/to/agentcore-rl-toolkit
 uv venv --python=3.12
 source .venv/bin/activate
 
-uv pip install sagemaker-train          # SageMaker Training Sessions SDK
+uv pip install "sagemaker-train>=1.27"  # SageMaker Training Sessions SDK
 uv pip install -e ".[rollout,gateway]"  # rollout client and token capture
 uv pip install wandb                    # optional, for training curves
 ```
@@ -106,14 +106,14 @@ prompt column. Put every per-rollout field your agent needs (prompt,
 ground-truth answer, task IDs, resource URIs) inside `payload`.
 
 Preprocessing scripts live in
-[`prepare_datasets/`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/experimental/sagemaker/prepare_datasets).
+[`prepare_datasets/`](https://github.com/awslabs/agentcore-rl-toolkit/tree/main/src/agentcore_rl_toolkit/backends/sagemaker/prepare_datasets).
 
 ## Configuration
 
 Copy the template and fill in the required ARNs:
 
 ```bash
-cd src/agentcore_rl_toolkit/backends/experimental/sagemaker
+cd src/agentcore_rl_toolkit/backends/sagemaker
 cp config.yaml.example config.yaml
 ```
 
@@ -182,7 +182,7 @@ rollout_log_path: ""         # JSONL of per-rollout diagnostics; auto-named if e
 ## Launch training
 
 ```bash
-cd src/agentcore_rl_toolkit/backends/experimental/sagemaker
+cd src/agentcore_rl_toolkit/backends/sagemaker
 python train_grpo.py --config config.yaml
 ```
 

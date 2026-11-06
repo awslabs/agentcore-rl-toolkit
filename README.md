@@ -176,7 +176,7 @@ for token-level trajectory capture.
 | **slime** | Self-hosted training with slime | [Setup guide](src/agentcore_rl_toolkit/backends/slime/examples/math_agent/SETUP.md) |
 | **SkyRL** | Self-hosted training through its Tinker-compatible API | [Training guide](src/agentcore_rl_toolkit/backends/tinker_api/README.md) · [Deployment example](src/agentcore_rl_toolkit/backends/tinker_api/skyrl/README.md) |
 | **Tinker** | Managed training through the official Tinker API | [Training guide](src/agentcore_rl_toolkit/backends/tinker_api/README.md) |
-| **SageMaker** | Managed training through Amazon SageMaker Training Sessions | [Setup guide](src/agentcore_rl_toolkit/backends/experimental/sagemaker/SETUP.md) |
+| **SageMaker** | Managed training through Amazon SageMaker Training Sessions | [Setup guide](src/agentcore_rl_toolkit/backends/sagemaker/SETUP.md) |
 
 SkyRL and Tinker share the toolkit's Tinker-compatible API integration.
 
