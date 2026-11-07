@@ -1,0 +1,47 @@
+{
+ "search_global": {
+  "name": "search_global",
+  "description": "This is a search tool. Enter search queries, and it will return a list of web pages along with their corresponding summary information. Search queries should be concise and clear; complex questions should be broken down into multiple steps and searched step by step. If no useful pages are found, you can adjust the question description (such as reducing qualifiers or changing the search approach) and search again. The quality of search results is related to the language: for Chinese resources, you can try entering Chinese queries; for non-Chinese resources, you can try using English or the corresponding language.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "question to be searched."
+    },
+    "count": {
+     "type": "integer",
+     "description": "The number of results to return. Must be less than 200, and default is 10",
+     "default": 10
+    },
+    "summary_type": {
+     "type": "string",
+     "description": "Summary type, optional values are: short, long. Default is short",
+     "default": "short"
+    },
+    "use_english": {
+     "type": "boolean",
+     "description": "Whether to use English for search, default is false",
+     "default": false
+    }
+   }
+  }
+ },
+ "text_browser_view": {
+  "name": "text_browser_view",
+  "description": "This is a link reading tool that can open links (which can be web pages, PDFs, etc.) and summarize all relevant information on the page according to the requirement description. This tool can be called to obtain information for all valuable links. Valuable links include but are not limited to the following types: 1. URLs explicitly provided in the task; 2. URLs with relevant summaries provided in search results; 3. URLs contained in the content returned by previous calls to TextBrowserView that are judged to potentially contain useful information. Please try to avoid constructing links out of thin air by yourself.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "Target link: should be a complete URL (starting with http)"
+    },
+    "description": {
+     "type": "string",
+     "description": "Requirement description text: a detailed description of the content to be obtained within the current URL"
+    }
+   }
+  }
+ }
+}
