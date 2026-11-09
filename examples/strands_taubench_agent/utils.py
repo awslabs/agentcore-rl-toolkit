@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 
-from constants import TOOL_RESULT_KEY, TOOL_USE_KEY
+from constants import ORCHESTRATOR_CONFIG, TOOL_RESULT_KEY, TOOL_USE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +237,48 @@ def log_turn(turn: int, role: str, global_messages: list[Message], orchestrator_
     )
     logger.debug("[%s-turn %d] full messages:\n%s", role, turn, json.dumps(msgs, indent=2, default=str))
     return msgs
+
+
+def run_agent_turn(
+    turn: int, role: str, global_messages: list[Message], model: Any, tools: list, system_prompt: str
+) -> tuple[Any, list[Message]]:
+    """Run one ReAct turn for the given agent.
+
+    Builds an ``Agent`` from ``role``'s perspective of the shared history, runs a
+    single turn, and tags every newly produced message with ``from=role``.
+    ``global_messages`` is not mutated; the caller appends the returned messages.
+
+    Args:
+        turn: Zero-based turn index (for logging).
+        role: Which agent acts this turn — "user" or "assistant".
+        global_messages: The shared conversation history.
+        model: The Strands model backing this agent.
+        tools: Tools available to this agent.
+        system_prompt: System prompt for this agent.
+
+    Returns:
+        A tuple ``(response, new_messages)``: the Strands ``AgentResult`` for the
+        turn (its ``.message`` holds the final reply) and the messages the turn
+        produced, in order.
+    """
+    from strands import Agent
+    from strands.agent.conversation_manager import NullConversationManager
+
+    messages = log_turn(turn, role, global_messages, ORCHESTRATOR_CONFIG)
+    agent = Agent(
+        model=model,
+        tools=tools,
+        system_prompt=system_prompt,
+        messages=messages,
+        conversation_manager=NullConversationManager(),  # avoid context moving window of 40 turns
+    )
+    logger.debug("%s MESSAGE RAW:\n%s", role.upper(), json.dumps(agent.messages, indent=4))
+    prev_len = len(agent.messages)
+    response = agent()
+    new_messages = agent.messages[prev_len:]
+    for m in new_messages:
+        m["from"] = role
+    return response, new_messages
 
 
 def to_real_world_roles(global_messages: list[Message]) -> list[Message]:

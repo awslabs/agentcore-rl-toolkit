@@ -11,4 +11,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["rl_app", "reward", "utils", "constants"]
+py-modules = ["rl_app", "reward", "utils", "constants", "user_simulator"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
