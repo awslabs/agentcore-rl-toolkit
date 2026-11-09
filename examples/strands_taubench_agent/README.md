@@ -30,7 +30,6 @@ computed deterministically at the end of the rollout.
 | `pyproject.toml` | Example dependencies (tau2-bench is installed separately via the Dockerfile) |
 | `test_local.py` | Smoke test — runs one task against a local server or a deployed ACR agent |
 | `tasks/` | Sample tau2-bench tasks, one per domain (airline / retail / telecom) |
-| `tests/`, `conftest.py` | Golden rollout test with scripted models (see [Tests](#tests)) |
 
 ## User simulator
 
@@ -167,29 +166,3 @@ python test_local.py --task tasks/retail_example.json --acr \
 The result contains the reward, conversation, and metadata. Swap `--task` to any of
 `tasks/{airline,retail,telecom}_example.json` to exercise a different domain —
 the same image serves all three.
-
-## Tests
-
-`tests/rollout_parity_test.py` runs 9 scripted rollouts across airline, retail,
-and telecom. Each runs `invoke_agent` against the real tau2 environment, tools,
-and reward, with both models replaced by recorded replies, and compares every
-model call's input, the conversation, the reward, and the returned result
-against a golden in `tests/golden/`. The goldens were recorded before the user
-simulator was extracted from `rl_app.py`.
-
-The test needs no GPU, network, or AWS access. With tau2-bench installed locally
-(see [Test the agent](#3-test-the-agent)):
-
-```bash
-# from examples/strands_taubench_agent, with .venv active
-uv pip install pytest
-python -m pytest tests/
-```
-
-The goldens were recorded with `strands-agents` 1.57.1; a Strands release that
-changes message shapes requires re-recording them. Re-record only for an
-intended behavior change, and review the golden diff:
-
-```bash
-TAUBENCH_RECORD_GOLDEN=1 python -m pytest tests/
-```
