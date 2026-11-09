@@ -30,6 +30,7 @@ computed deterministically at the end of the rollout.
 | `pyproject.toml` | Example dependencies (tau2-bench is installed separately via the Dockerfile) |
 | `test_local.py` | Smoke test — runs one task against a local server or a deployed ACR agent |
 | `tasks/` | Sample tau2-bench tasks, one per domain (airline / retail / telecom) |
+| `tests/` | Contract tests for `user_simulator.py` (see [Tests](#tests)) |
 
 ## User simulator
 
@@ -166,3 +167,16 @@ python test_local.py --task tasks/retail_example.json --acr \
 The result contains the reward, conversation, and metadata. Swap `--task` to any of
 `tasks/{airline,retail,telecom}_example.json` to exercise a different domain —
 the same image serves all three.
+
+## Tests
+
+`tests/test_user_simulator.py` checks the `UserSimulator` contract against a
+scripted user model: `reset`, `step`, `describe`, termination, and user tools
+acting on the episode's environment. It needs tau2-bench installed locally (see
+[Test the agent](#3-test-the-agent)) but no AWS access:
+
+```bash
+# from examples/strands_taubench_agent, with .venv active
+uv pip install pytest
+pytest tests/
+```
