@@ -9,7 +9,9 @@ Each rollout is a multi-turn conversation between two models:
 - **Assistant** — the vLLM-served model being trained (a customer-service agent
   that follows the domain policy and calls tau-bench tools).
 - **User simulator** — a Bedrock Claude model that plays the customer, driven by
-  the task's scenario.
+  the task's scenario. It sits behind the [`UserSimulator`](#user-simulator)
+  interface, so a training framework that owns the conversation loop can drive
+  it directly.
 
 Tool calls execute against a fresh tau-bench environment (DB + tools); telecom
 additionally exposes user-side tools (device actions). The reward follows
@@ -20,13 +22,39 @@ computed deterministically at the end of the rollout.
 
 | File | Purpose |
 |------|---------|
-| `rl_app.py` | Multi-turn agent and user simulator |
+| `rl_app.py` | Entrypoint and conversation loop: assistant turns, termination, reward |
+| `user_simulator.py` | `UserSimulator` interface, `UserTurnResult`, and `TauBenchUserSimulator` |
 | `reward.py` | `TauBenchReward` — DB / COMMUNICATE / ENV_ASSERTION / ACTION axes, dispatched per task by `reward_basis` |
-| `utils.py` | Strands tool wrapping, message-role conversion, thinking-token handling |
+| `utils.py` | Strands tool wrapping, one-turn agent runner, message-role conversion, thinking-token handling |
 | `constants.py` | System prompts, user-model config, orchestrator config, `DOMAINS_USER_TOOLS` |
 | `pyproject.toml` | Example dependencies (tau2-bench is installed separately via the Dockerfile) |
 | `test_local.py` | Smoke test — runs one task against a local server or a deployed ACR agent |
 | `tasks/` | Sample tau2-bench tasks, one per domain (airline / retail / telecom) |
+| `tests/`, `conftest.py` | Golden rollout test with scripted models (see [Tests](#tests)) |
+
+## User simulator
+
+`rl_app.py` runs the conversation loop and calls the user only through the
+`UserSimulator` protocol in `user_simulator.py`:
+
+```python
+class UserSimulator(Protocol):
+    def reset(self, task: dict, env: Any) -> None: ...               # bind one episode's task and env
+    def step(self, conversation: list[dict]) -> UserTurnResult: ...  # next user turn; does not mutate
+    def describe(self) -> dict: ...                                  # saved as meta.user_model
+```
+
+`step` returns a `UserTurnResult` with the turn's messages (tagged
+`from="user"`), the final text, and whether the user ended the conversation
+(`###STOP###`, `###TRANSFER###`, or `###OUT-OF-SCOPE###`). The caller appends
+the messages to its own history.
+
+`TauBenchUserSimulator` implements the protocol for tau2-bench. It owns the
+Bedrock user model, the user system prompt, the user's view of the history
+(assistant tool calls and reasoning hidden), the telecom user tools, and
+termination detection. `reset(task, env)` binds the user tools to the episode's
+environment, so user and assistant tools act on the same state (telecom's
+`sync_tools` depends on this).
 
 ## Prerequisites
 
@@ -139,3 +167,29 @@ python test_local.py --task tasks/retail_example.json --acr \
 The result contains the reward, conversation, and metadata. Swap `--task` to any of
 `tasks/{airline,retail,telecom}_example.json` to exercise a different domain —
 the same image serves all three.
+
+## Tests
+
+`tests/rollout_parity_test.py` runs 9 scripted rollouts across airline, retail,
+and telecom. Each runs `invoke_agent` against the real tau2 environment, tools,
+and reward, with both models replaced by recorded replies, and compares every
+model call's input, the conversation, the reward, and the returned result
+against a golden in `tests/golden/`. The goldens were recorded before the user
+simulator was extracted from `rl_app.py`.
+
+The test needs no GPU, network, or AWS access. With tau2-bench installed locally
+(see [Test the agent](#3-test-the-agent)):
+
+```bash
+# from examples/strands_taubench_agent, with .venv active
+uv pip install pytest
+python -m pytest tests/
+```
+
+The goldens were recorded with `strands-agents` 1.57.1; a Strands release that
+changes message shapes requires re-recording them. Re-record only for an
+intended behavior change, and review the golden diff:
+
+```bash
+TAUBENCH_RECORD_GOLDEN=1 python -m pytest tests/
+```
