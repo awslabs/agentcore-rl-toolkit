@@ -173,13 +173,15 @@ Trainer environments use `[rollout]` without the server SDK. Root and runtime
 package exports are loaded on first access. The gateway lives behind extras:
 - `uv sync --extra gateway` → `aiohttp` + `transformers` + `tokenizers`
   + `jinja2`.
-- Tool/reasoning parsing: when the tokenizer's chat template is recognized (sha256 hash
-  lookup in `rollout_gateway/response_templates.py`), `HfTemplateRenderer` derenders the
-  whole output in one pass with transformers' response-template parser — reasoning,
-  text, and tool calls in the model family's actual format (Qwen2.5/3/3.5/3.6, GPT-OSS;
-  templates adapted from huggingface/trl, see NOTICE). A truncated turn or a parse
+- Tool/reasoning parsing: when the tokenizer ships a `response_template` (in
+  `tokenizer_config.json`, e.g. Qwen3.6/3.8) or its chat template is recognized (sha256
+  hash lookup in `rollout_gateway/response_templates.py`), `HfTemplateRenderer` derenders
+  the whole output in one pass with transformers' response-template parser — reasoning,
+  text, and tool calls in the model family's actual format. The shipped template wins;
+  the vendored templates (Qwen2.5/3/3.5/3.6, GPT-OSS; adapted from huggingface/trl, see
+  NOTICE) cover models that ship none. A truncated turn or a parse
   failure degrades to raw text with `ill_formed=True`, never an exception.
-  Unrecognized templates fall back to a `</think>` split for tool-free parsing, but
+  Without either, tool-free output falls back to a `</think>` split, but
   tool-bearing requests are **rejected** (there is no implicit tool parser — the
   dependency-free `<tool_call><function=...>` XML regex understands one format and
   would silently miss every other; opt into it explicitly with
@@ -306,9 +308,9 @@ are adapted from [trl](https://github.com/huggingface/trl)'s `trl/chat_template_
 at commit `775de52a` (Apache-2.0; see `NOTICE`), with local changes marked inline. The
 `_TEMPLATE_HASHES` entries are sha256 hashes of the chat templates shipped by hub model
 repos; `tests/rollout_gateway/test_template_hashes_live.py` checks each against its
-repo. To support a new chat template, add its hash and a representative repo to that
-test. When adopting upstream TRL template changes, keep the round-trip tests in that
-file passing.
+repo. To support a new chat template that ships no `response_template`, add its hash
+and a representative repo to that test. When adopting upstream TRL template changes,
+keep the round-trip tests in that file passing.
 
 ### slime backend (`backends/slime/`)
 

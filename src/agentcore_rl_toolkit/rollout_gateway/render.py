@@ -10,7 +10,7 @@ HF rendering behind the :class:`Renderer` protocol:
 
 * :class:`HfTemplateRenderer` (default, lightweight) — renders with the HF tokenizer's
   ``apply_chat_template``. Derendering picks the strongest available path: when the
-  tokenizer's chat template is recognized
+  tokenizer ships a response template, or its chat template is recognized
   (:func:`response_templates.resolve_template_name`), the whole output is parsed in one
   pass by transformers' response parser — reasoning, text, and tool calls together, in
   the model's actual format. Otherwise it falls back to two stages — a reasoning parser
@@ -109,9 +109,10 @@ class HfTemplateRenderer:
 
     Depends only on a HF tokenizer (``transformers``). Derendering:
 
-    * **Template path (default when the chat template is recognized).** The tokenizer's
-      chat template is hashed against the vendored registry in ``response_templates``.
-      The response parser reads the generation prompt as ``prefix`` (so
+    * **Template path (default when a response template is available).** The
+      tokenizer's own ``response_template`` (shipped in ``tokenizer_config.json``) is
+      used when present; otherwise the chat template is hashed against the vendored
+      registry in ``response_templates``. The response parser reads the generation prompt as ``prefix`` (so
       template-prefilled regions such as an opening ``<think>`` are recognized) and
       extracts reasoning, text, and tool calls in one pass, in the model family's actual
       output format (e.g. Qwen3's JSON ``<tool_call>``). Offered tools type the
@@ -176,8 +177,14 @@ class HfTemplateRenderer:
         self._reasoning_key: str | None = reasoning_key(template_name)
         if reasoning_parser is None and tool_parser is None:
             # The response-template parser (prefix= and tools=) is guaranteed by the
-            # transformers>=5.16.1 floor (the [gateway] extra).
-            if template_name is not None:
+            # transformers>=5.16.1 floor (the [gateway] extra). A template the model
+            # ships in tokenizer_config.json is maintained with its chat template, so
+            # it wins over the vendored one and needs no registered hash.
+            shipped = getattr(tokenizer, "response_template", None)
+            if isinstance(shipped, dict):
+                self._template = shipped
+                logger.info("using the response template shipped with the tokenizer")
+            elif template_name is not None:
                 self._template = RESPONSE_TEMPLATES[template_name]
         # The parser reads only the text after the template's last start anchor: the
         # generation prompt, which depends on the template and chat_template_kwargs alone

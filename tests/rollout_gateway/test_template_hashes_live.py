@@ -5,11 +5,12 @@ it (test_response_templates.py assigns templates directly) — so a mistranscrib
 or a vendor revising a template on the hub, would silently drop real models into
 the no-template rejection. These tests fetch each family's actual chat template from
 the hub (a few KB per repo, never model weights) and assert it still resolves to
-the expected template. A failure means the upstream template changed or a registry
+the expected template, skipping repos that ship their own response template, which
+the gateway uses instead. A failure means the upstream template changed or a registry
 hash is stale: check the revised template, then register its hash in
 response_templates.py. The Qwen3.5-family test renders a tool call with each hub
-template and asserts that parsing it with QWEN3_5_TEMPLATE recovers the exact
-arguments.
+template and asserts that parsing it with the response template the gateway would
+use (the repo's shipped one, else QWEN3_5_TEMPLATE) recovers the exact arguments.
 """
 
 import hashlib
@@ -49,8 +50,19 @@ def _fetch_chat_template(repo: str) -> str:
             return json.load(f)["chat_template"]
 
 
+def _shipped_response_template(repo: str) -> dict | None:
+    with open(hf_hub_download(repo, "tokenizer_config.json")) as f:
+        return json.load(f).get("response_template")
+
+
+def _response_template(repo: str, vendored: str) -> dict:
+    return _shipped_response_template(repo) or RESPONSE_TEMPLATES[vendored]
+
+
 @pytest.mark.parametrize("repo,expected", REPO_EXPECTATIONS)
 def test_hub_template_hash_resolves(repo, expected):
+    if _shipped_response_template(repo) is not None:
+        pytest.skip("ships a response template, which the gateway uses instead of the registry")
     template = _fetch_chat_template(repo)
     digest = hashlib.sha256(template.encode("utf-8")).hexdigest()
     assert _TEMPLATE_HASHES.get(digest) == expected, (
@@ -86,5 +98,5 @@ def test_qwen3_5_tool_call_round_trips_through_hub_template(repo, value):
     )
     assert full.startswith(prompt)
     generated = full[len(prompt) : full.rindex("<|im_end|>") + len("<|im_end|>")]
-    parsed = parse_response(generated, RESPONSE_TEMPLATES["qwen3_5"], prefix=prompt, tools=[SHELL_TOOL])
+    parsed = parse_response(generated, _response_template(repo, "qwen3_5"), prefix=prompt, tools=[SHELL_TOOL])
     assert parsed["tool_calls"][0]["function"]["arguments"] == {"command": value}

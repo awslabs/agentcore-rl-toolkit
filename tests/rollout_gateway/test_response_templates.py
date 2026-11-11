@@ -4,6 +4,7 @@ by the token limit degrade to raw text flagged ``ill_formed``, never an exceptio
 a silently dropped call).
 
 The parsing engine is transformers' real tokenizer parsing; only decode is canned.
+A response template the tokenizer ships takes precedence over the vendored ones.
 Template-hash detection is covered by test_template_hashes_live.py, so tests assign
 the template directly.
 """
@@ -160,6 +161,35 @@ def test_qwen3_5_template_parses_qwen3_coder_output():
     assert out.text == "I'll list the directory."
     assert out.tool_uses == [{"name": "shell", "input": {"command": "ls -la"}}]
     assert out.ill_formed is False
+
+
+# A shipped template distinguishable from every vendored one by its end-of-turn marker.
+SHIPPED_TEMPLATE = {
+    "defaults": {"role": "assistant"},
+    "start_anchor": "<|im_start|>assistant\n",
+    "fields": {"content": {"close_pattern": r"<END>", "content": "text"}},
+}
+
+
+class ShippedTemplateTokenizer(TemplateStubTokenizer):
+    response_template = SHIPPED_TEMPLATE
+
+    def apply_chat_template(self, *args, **kwargs):
+        return "<|im_start|>user\n.<|im_end|>\n<|im_start|>assistant\n"
+
+
+@pytest.mark.parametrize("registered", [None, "qwen3"])
+def test_shipped_response_template_wins(monkeypatch, registered):
+    # With no registered hash, or over a vendored template the hash selects.
+    monkeypatch.setattr("agentcore_rl_toolkit.rollout_gateway.render.resolve_template_name", lambda tok: registered)
+    r = HfTemplateRenderer(ShippedTemplateTokenizer("Done.<END>"))
+    assert r._template is SHIPPED_TEMPLATE
+    assert r.parse([OUTPUT_ID], finish_reason="stop", tools_schema=TOOLS).text == "Done."
+
+
+def test_injected_parser_overrides_shipped_response_template():
+    r = HfTemplateRenderer(ShippedTemplateTokenizer("Done.<END>"), reasoning_parser=lambda raw: ("", raw))
+    assert r._template is None
 
 
 def test_gptoss_template_parses_generated_and_rendered_tool_call_headers():

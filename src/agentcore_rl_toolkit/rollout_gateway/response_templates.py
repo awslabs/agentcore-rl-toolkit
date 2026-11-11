@@ -1,7 +1,9 @@
 """Response templates for ``tokenizer.parse_response`` and chat-template detection.
 
-The template dicts are adapted from huggingface/trl ``trl/chat_template_utils.py``
-(Apache-2.0; see NOTICE) at commit ``775de52a``, with local changes marked inline.
+These are fallbacks: ``HfTemplateRenderer`` uses a model's own ``response_template``
+(shipped in ``tokenizer_config.json``) when present. The template dicts are adapted
+from huggingface/trl ``trl/chat_template_utils.py`` (Apache-2.0; see NOTICE) at commit
+``775de52a``, with local changes marked inline.
 The hashes in ``_TEMPLATE_HASHES`` are sha256 over the chat templates the model
 repos ship on the Hugging Face Hub, so detection needs no template copies here;
 test_template_hashes_live.py checks them against the hub. When adopting upstream TRL
