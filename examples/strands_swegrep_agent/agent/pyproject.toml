@@ -1,0 +1,29 @@
+[project]
+name = "swegrep-agent"
+version = "1.0.0"
+description = "SWE-grep code-region retrieval agent (Strands) for AgentCore RL training."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+# Pinned to the versions in the agent image that trained and evaluated the published model.
+dependencies = [
+    "agentcore-rl-toolkit[server]",
+    "bedrock-agentcore==1.24.0",
+    "strands-agents[openai]==1.52.0",
+    "boto3==1.43.108",  # repo snapshots from S3 (rollout/repo_store.py)
+    "openai==2.54.0",  # AsyncOpenAI client to the rollout gateway / vLLM
+    "aws-opentelemetry-distro==0.21.0",  # AgentCore observability (opentelemetry-instrument)
+]
+
+[tool.uv]
+# Same botocore as the root uv.lock (aiobotocore caps it there), so the trainer and the image agree.
+constraint-dependencies = ["botocore==1.43.117"]
+
+[tool.uv.sources]
+# Upstream AgentCore RL toolkit, unmodified, pinned by commit.
+agentcore-rl-toolkit = { url = "https://github.com/awslabs/agentcore-rl-toolkit/archive/0e5c08fae4be73a511ab6dbe8a796ca194cbeee2.tar.gz" }
+
+[tool.setuptools]
+# rl_app.py is the image's entrypoint script; everything it imports lives in rollout/ and scoring/.
+py-modules = ["rl_app"]
+packages = ["rollout", "scoring"]

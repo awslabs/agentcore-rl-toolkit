@@ -1,0 +1,18 @@
+{
+  "train.jsonl": {
+    "rows": 1098,
+    "sha256": "304bcf1dfb8dc60f37bd7ecf158cbc91d4207b6b84423be99450eb22c3f95b65"
+  },
+  "val.jsonl": {
+    "rows": 100,
+    "sha256": "e0709a00c66bd1f12f02da6d3c2030225011ab895de04afc53a48223026b6d2d"
+  },
+  "swe-explore.jsonl": {
+    "rows": 848,
+    "sha256": "1c3b13845eaddc44e277a1ad39b15206990880e93d6ade075ffb5089c0e74512"
+  },
+  "contextbench-lite.jsonl": {
+    "rows": 500,
+    "sha256": "9d1e56c912d6513f3b6424c3adadf0f53ae87cbbbd2feeb71635ba301f547845"
+  }
+}

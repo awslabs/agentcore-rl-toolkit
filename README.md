@@ -71,6 +71,12 @@ repositories, office applications, and stateful customer-service environments.
       <td><strong>52% → 83%</strong> (SFT + RL)</td>
       <td><a href="https://awslabs.github.io/agentcore-rl-toolkit/blog/data-synthesis-v0/">BMW collaboration</a></td>
     </tr>
+    <tr>
+      <td><strong>Code retrieval</strong><br/>Strands · SWE-Explore</td>
+      <td><a href="https://huggingface.co/Qwen/Qwen3.5-9B">Qwen3.5-9B</a></td>
+      <td><strong>17.5 → 30.5</strong> (line F1)</td>
+      <td><a href="examples/strands_swegrep_agent/">Agent code</a></td>
+    </tr>
   </tbody>
 </table>
 
@@ -199,6 +205,7 @@ for installation, configuration, and training.
 | Customer service · τ²-Bench | Strands | [Guide](examples/strands_taubench_agent/README.md) |
 | Software engineering · SWE-Gym | OpenHands | [Guide](examples/openhands_swe_agent/README.md) |
 | Terminal tasks · Harbor / TMax | mini-swe-agent | [Guide](examples/tmax_agent/README.md) |
+| Code retrieval · SWE-Explore, ContextBench | Strands | [Guide](examples/strands_swegrep_agent/README.md) |
 
 **Terminal agents with separate sandboxes.** The
 [terminal agent example](examples/tmax_agent/README.md) uses the Sandbox SDK to

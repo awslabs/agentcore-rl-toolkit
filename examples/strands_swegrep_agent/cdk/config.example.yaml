@@ -1,0 +1,24 @@
+# Copy to config.yaml and fill in. Each key is described in swegrep_agent_stack.py and can be
+# overridden with `bash cdk/deploy.sh -c key=value`.
+
+awsAccount: "123456789012"
+awsRegion: "us-east-1"
+
+# The runtime must be in the GPU host's VPC to reach the rollout gateway on its private IP.
+vpcId: "vpc-..."
+subnetType: "public"  # public | private-egress | private-isolated; a default VPC has only public subnets
+# The GPU host's security group: the stack opens the gateway port and 8399 (benchmarks) to the runtime.
+# Leave "" to add those rules yourself, from the RuntimeSecurityGroupId output.
+gatewaySecurityGroupId: "sg-..."
+gatewayPort: 9090
+
+# If another stack already created the S3, ECR and logs endpoints in this VPC, set false and give their
+# security group.
+createVpcEndpoints: true
+# endpointSecurityGroupId: "sg-..."
+
+retainRuntimeSg: true
+# runtimeSecurityGroupId: "sg-..."
+runtimeName: "swegrep_agent"
+recipe: "recipes/final.json"  # its beta goes to the runtime; redeploy with an ablation's recipe to train it
+# corpusBucket: "..."  # reuse an existing snapshot bucket
