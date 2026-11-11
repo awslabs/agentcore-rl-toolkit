@@ -6,7 +6,7 @@ description: Training Qwen3.5-9B with RL to retrieve code using only grep, glob 
 _By [Alexander Newton](https://github.com/xandernewton) · November 10, 2026_
 
 :::note[TL;DR]
-We trained Qwen3.5-9B with RL to be a SWE-Grep agent, a small fast agent that only uses grep, glob and read to find the code needed to solve coding queries. We used the [AgentCore RL Toolkit](https://github.com/awslabs/agentcore-rl-toolkit) to run agent rollouts on [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) and used [SkyRL's Tinker API server](https://docs.skyrl.ai/docs/tinker/overview) as the model trainer. 
+We trained Qwen3.5-9B with RL to be a SWE-Grep agent, a small fast agent that only uses grep, glob and read to find the code needed to solve coding queries. We used the [AgentCore RL Toolkit](https://github.com/awslabs/agentcore-rl-toolkit) to run agent rollouts on [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) and used [SkyRL's Tinker API server](https://docs.skyrl.ai/docs/tinker/overview) as the model trainer.
 
 After 30 training steps line F1 rose from 17.5 to 30.5 on [SWE-Explore](https://arxiv.org/abs/2606.07297) and from 28.0 to 36.0 on [ContextBench Lite](https://arxiv.org/abs/2602.05892). The finetuned 9B model beats Claude Sonnet 5 on both benchmarks and Claude Sonnet 5.5 on SWE-Explore and ties Sonnet 5.5 on ContextBench.
 
