@@ -20,8 +20,13 @@ import hashlib
 
 # --- Response templates (adapted from TRL) -----------------------------------------
 
+# Local change: Qwen models stop on <|endoftext|> as well as <|im_end|>, and output is
+# decoded with special tokens kept, so TRL's <|im_end|>-only close leaves a literal
+# <|endoftext|> in the turn's content.
+_QWEN_END_OF_TURN = r"(?:<\|im_end\|>|<\|endoftext\|>)\s*"
+
 # Qwen2.5 / Qwen3 (thinking) / Qwen3-Instruct-2507 / Qwen3-VL: JSON tool calls inside
-# <tool_call>...</tool_call>, optional <think> block, <|im_end|> end-of-turn.
+# <tool_call>...</tool_call>, optional <think> block, <|im_end|> or <|endoftext|> end-of-turn.
 QWEN3_TEMPLATE = {
     "defaults": {"role": "assistant"},
     "start_anchor": "<|im_start|>assistant\n",
@@ -39,7 +44,7 @@ QWEN3_TEMPLATE = {
             "transform": {"type": "function", "function": "{content}"},
         },
         "content": {
-            "close_pattern": r"<\|im_end\|>\s*",
+            "close_pattern": _QWEN_END_OF_TURN,
             "content": "text",
         },
     },
@@ -77,7 +82,7 @@ QWEN3_5_TEMPLATE = {
             "transform": {"type": "function", "function": {"name": "{name}", "arguments": "{content}"}},
         },
         "content": {
-            "close_pattern": r"<\|im_end\|>\s*",
+            "close_pattern": _QWEN_END_OF_TURN,
             "content": "text",
         },
     },

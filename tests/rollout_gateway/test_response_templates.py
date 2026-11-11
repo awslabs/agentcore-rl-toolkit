@@ -162,6 +162,50 @@ def test_qwen3_5_template_parses_qwen3_coder_output():
     assert out.ill_formed is False
 
 
+@pytest.mark.parametrize(
+    "template,tool_call",
+    [
+        ("qwen3", '<tool_call>\n{"name": "calculator", "arguments": {"expr": "1+1"}}\n</tool_call>'),
+        (
+            "qwen3_5",
+            "<tool_call>\n<function=calculator>\n<parameter=expr>\n1+1\n</parameter>\n</function>\n</tool_call>",
+        ),
+    ],
+)
+@pytest.mark.parametrize("end", ["<|im_end|>", "<|endoftext|>"])
+def test_qwen_turn_ends_at_either_stop_token(template, tool_call, end):
+    # Qwen generation configs stop on both tokens, and the stop token is decoded with
+    # the output, so either must close the turn rather than leak into its content.
+    out = _parse(f"<think>\nr\n</think>\n\nDone.{end}", template=template)
+    assert (out.reasoning, out.text, out.ill_formed) == ("r", "Done.", False)
+    out = _parse(f"{tool_call}{end}", template=template)
+    assert (out.text, out.tool_uses) == ("", [{"name": "calculator", "input": {"expr": "1+1"}}])
+
+
+@pytest.mark.parametrize(
+    "reasoning,value",
+    [
+        ("I will emit <tool_call> next.", "1+1"),
+        ("r", "grep -n '</function>' t.py"),
+        ("r", "grep -n '<parameter=' t.py"),
+        ("r", "echo '<tool_call>'"),
+    ],
+)
+def test_qwen3_5_literal_tags_in_well_formed_output_stay_in_place(reasoning, value):
+    # Regions close only at their own closing tag. Lookahead closers such as
+    # (?=<tool_call>) or (?=</function>), as in the response template Qwen ships in
+    # tokenizer_config.json, would also accept a malformed turn missing its closers,
+    # but split well-formed reasoning or arguments that mention a tag literally.
+    out = _parse(
+        f"{reasoning}\n</think>\n\n<tool_call>\n<function=calculator>\n<parameter=expr>\n{value}\n"
+        "</parameter>\n</function>\n</tool_call><|im_end|>",
+        template="qwen3_5",
+        prompt="<|im_start|>assistant\n<think>\n",
+    )
+    assert (out.reasoning, out.text) == (reasoning, "")
+    assert out.tool_uses == [{"name": "calculator", "input": {"expr": value}}]
+
+
 def test_gptoss_template_parses_generated_and_rendered_tool_call_headers():
     # The model puts the recipient inside the channel line with "code"; the chat
     # template renders it in the role header with "json". Both must parse, and
