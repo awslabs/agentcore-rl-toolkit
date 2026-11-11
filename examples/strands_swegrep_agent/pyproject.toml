@@ -1,0 +1,33 @@
+[project]
+name = "swegrep"
+version = "1.0.0"
+description = "RL training of a code-region retrieval agent (Qwen3.5-9B) on AgentCore with the Tinker API."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+# The trainer, rollout gateway, data builders and benchmark harness (CPU side). The GPU endpoint has its
+# own environment (endpoint/setup.sh); the agent runs in AgentCore (agent/, also installed here because the
+# data builders, the scorer and eval/claude_bench.py import it).
+dependencies = [
+    "agentcore-rl-toolkit[gateway,tinker_skyrl]",
+    "swegrep-agent",
+    "transformers==5.16.1",
+    "huggingface-hub>=0.34",
+    "pyarrow==21.0.0",
+    "python-dotenv>=1.0",
+    "wandb==0.22.3",
+]
+
+[project.optional-dependencies]
+# scripts/export_adapter.py and scripts/merge_adapter.py (CPU is enough)
+merge = ["torch>=2.6", "safetensors>=0.5"]
+# eval/claude_bench.py (the Claude rows)
+claude = ["strands-agents[anthropic]"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+# Upstream AgentCore RL toolkit, unmodified, pinned by commit.
+agentcore-rl-toolkit = { url = "https://github.com/awslabs/agentcore-rl-toolkit/archive/0e5c08fae4be73a511ab6dbe8a796ca194cbeee2.tar.gz" }
+swegrep-agent = { path = "agent", editable = true }

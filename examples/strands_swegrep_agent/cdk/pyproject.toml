@@ -1,0 +1,13 @@
+[project]
+name = "swegrep-agentcore-cdk"
+version = "0.1.0"
+description = "CDK app deploying the SWE-grep agent to AWS Bedrock AgentCore Runtime."
+requires-python = ">=3.11"
+dependencies = [
+    # aws_cdk.aws_bedrockagentcore L2 constructs (Runtime, AgentRuntimeArtifact)
+    # ship in aws-cdk-lib; 2.260.0 is the first version documented with them.
+    "aws-cdk-lib>=2.260.0",
+    "constructs>=10.0.0,<11.0.0",
+    # app.py reads deploy config (account, VPC, runtime, buckets) from config.yaml.
+    "pyyaml>=6.0",
+]

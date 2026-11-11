@@ -1,0 +1,25 @@
+{
+  "_comment": "Ablation: gold = raw patch hunks (window 0).",
+  "beta": 2,
+  "chat_template_kwargs": {
+    "enable_thinking": true
+  },
+  "dataset": "data/window0/train.jsonl",
+  "evaluation_dataset": "data/window0/val.jsonl",
+  "gateway_port": 9090,
+  "history_mode": "linear",
+  "steps": 30,
+  "batch_size": 12,
+  "group_size": 16,
+  "lora_rank": 64,
+  "learning_rate": 8e-05,
+  "max_new_tokens": 16384,
+  "max_context_tokens": 65536,
+  "rollout_timeout": 3600,
+  "tps_limit": 25,
+  "evaluation_batch_size": 32,
+  "evaluation_temperature": 1.0,
+  "evaluation_interval": 5,
+  "checkpoint_interval": 5,
+  "wandb_project": "swegrep"
+}

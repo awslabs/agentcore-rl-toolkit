@@ -1,0 +1,29 @@
+{
+  "_comment": "Patch files that are export-ignore'd in their repo's .gitattributes, so `git archive` (and the agent's repo snapshot) never contains them. Excluded from the labels, as in the published training data.",
+  "excluded": [
+    {
+      "instance_id": "open-telemetry__opentelemetry-php-635",
+      "path": ".phan/config.php"
+    },
+    {
+      "instance_id": "open-telemetry__opentelemetry-php-899",
+      "path": "examples/traces/troubleshooting/setting_up_logging.php"
+    },
+    {
+      "instance_id": "crazy-max__ghaction-docker-meta-23",
+      "path": "dist/index.js"
+    },
+    {
+      "instance_id": "crazy-max__ghaction-docker-meta-53",
+      "path": "dist/index.js"
+    },
+    {
+      "instance_id": "pandas-dev__pandas-61238",
+      "path": "ci/code_checks.sh"
+    },
+    {
+      "instance_id": "thephpleague__oauth2-server-1412",
+      "path": "examples/src/Repositories/DeviceCodeRepository.php"
+    }
+  ]
+}
