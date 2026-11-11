@@ -138,6 +138,10 @@ _TEMPLATE_HASHES: dict[str, str] = {
     "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715": "qwen3_5",  # Qwen3.5 (think)
     "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259": "qwen3_5",  # Qwen3.6
     "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041": "qwen3_5",  # Qwen3.8
+    # Revisions that add {% generation %} tags around the assistant turn; the
+    # rendered text is unchanged.
+    "1b8361565cc35d47551d342214cff341c0f1a9685ce529c7ce31de0ed3616248": "qwen3_5",  # Qwen3.6
+    "af16f654968d47d09a6c604e00370b12dbc21f76456f59c9e98b82e84d9f6375": "qwen3_5",  # Qwen3.8
     # Qwen3-Coder uses Qwen3.5's XML tool-call syntax.
     "5a38bfa05833266240066aedc497decc9b00cc0d3e3b8cceea98cf530196ab06": "qwen3_5",  # Qwen3-Coder
 }
