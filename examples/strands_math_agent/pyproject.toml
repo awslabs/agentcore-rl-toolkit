@@ -8,7 +8,7 @@ dependencies = [
     "agentcore-rl-toolkit[core]==0.2.0",
     "python-dotenv>=1.0.0",
     "strands-agents[openai]>=1.18.0",
-    "strands-agents-tools>=0.2.16",
+    "strands-agents-tools>=0.2.16,<0.9.0",
 ]
 
 [tool.setuptools]
