@@ -95,6 +95,10 @@ export default defineConfig({
 							label: 'Async RL performance optimization',
 							slug: 'blog/async-rl-performance-optimization',
 						},
+						{
+							label: 'Training a SWE-Grep agent using ART and SkyRL Tinker',
+							slug: 'blog/training-swe-grep-agent-tinker',
+						},
 					],
 				},
 				{
