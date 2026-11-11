@@ -1,0 +1,11 @@
+# Copy this file to config.toml and fill in your values
+
+[agentcore]
+# Agent ARN printed by `agentcore deploy`
+agent_arn = "arn:aws:bedrock-agentcore:REGION:ACCOUNT_ID:runtime/AGENT_ID"
+
+[eval]
+# A Bedrock model (omit base_url), or a model behind an OpenAI-compatible endpoint
+model_id = "us.anthropic.claude-opus-5"
+bedrock_fields = { thinking = { type = "adaptive" }, output_config = { effort = "high" } }
+# base_url = "http://INFERENCE_SERVER_IP:8000/v1"
