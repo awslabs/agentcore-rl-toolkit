@@ -207,6 +207,10 @@ for installation, configuration, and training.
 | Terminal tasks · Harbor / TMax | mini-swe-agent | [Guide](examples/tmax_agent/README.md) |
 | Code retrieval · SWE-Explore, ContextBench | Strands | [Guide](examples/strands_swegrep_agent/README.md) |
 
+**Host an environment.** The [Scale AI AgentEnv example](examples/scaleai_agentenv/README.md)
+runs a Strands agent against the upstream SlackEnv example, using MCP tools and
+environment state APIs through an AgentCore session endpoint.
+
 **Terminal agents with separate sandboxes.** The
 [terminal agent example](examples/tmax_agent/README.md) uses the Sandbox SDK to
 run mini-swe-agent and its task environment in separate AgentCore sessions.
