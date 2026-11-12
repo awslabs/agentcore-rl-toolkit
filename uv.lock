@@ -370,7 +370,7 @@ verl = [
     { name = "torchvision", version = "0.28.0", source = { registry = "https://pypi.org/simple" } },
     { name = "transformers" },
     { name = "uvloop" },
-    { name = "verl", extra = ["verl-core"], marker = "(extra == 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-tinker-skyrl') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-skyrl' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-skyrl' and extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron')" },
+    { name = "verl", extra = ["cupy-cu130", "verl-core"], marker = "(extra == 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-tinker-skyrl') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-skyrl' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-skyrl' and extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron') or (extra != 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron')" },
     { name = "vllm" },
 ]
 
@@ -449,7 +449,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'gateway'", specifier = ">=5.16.1" },
     { name = "transformers", marker = "extra == 'verl'", specifier = "==5.16.1" },
     { name = "uvloop", marker = "extra == 'verl'", specifier = ">=0.23.0" },
-    { name = "verl", extras = ["verl-core"], marker = "extra == 'verl'", git = "https://github.com/verl-project/verl.git?rev=f78fd053e13c3d021e51de5e81afc54dddd13993" },
+    { name = "verl", extras = ["verl-core", "cupy-cu130"], marker = "extra == 'verl'", git = "https://github.com/verl-project/verl.git?rev=f78fd053e13c3d021e51de5e81afc54dddd13993" },
     { name = "vllm", marker = "extra == 'verl'", specifier = "==0.32.0" },
 ]
 provides-extras = ["core", "server", "rollout", "dev", "gateway", "tinker-api", "tinker-skyrl", "a2a-server", "a2a", "verl"]
@@ -1872,6 +1872,30 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d9/e3/49afa1bc180e0d28008ec6bcdf82a4072d1c7a41032b5b759b60814ca4b0/culsans-0.11.0.tar.gz", hash = "sha256:0b43d0d05dce6106293d114c86e3fb4bfc63088cfe8ff08ed3fe36891447fe33", size = 107546, upload-time = "2025-12-31T23:15:38.196Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/5d/9fb19fb38f6d6120422064279ea5532e22b84aa2be8831d49607194feda3/culsans-0.11.0-py3-none-any.whl", hash = "sha256:278d118f63fc75b9db11b664b436a1b83cc30d9577127848ba41420e66eb5a47", size = 21811, upload-time = "2025-12-31T23:15:37.189Z" },
+]
+
+[[package]]
+name = "cupy-cuda13x"
+version = "14.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cuda-pathfinder" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.13' and extra != 'extra-20-agentcore-rl-toolkit-tinker-skyrl' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (python_full_version < '3.13' and extra != 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (extra == 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-tinker-skyrl') or (extra == 'extra-20-agentcore-rl-toolkit-verl' and extra == 'group-20-agentcore-rl-toolkit-sagemaker-integration') or (extra == 'extra-20-agentcore-rl-toolkit-verl' and extra == 'group-20-agentcore-rl-toolkit-verl-ci') or (extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron')" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13' and extra != 'extra-20-agentcore-rl-toolkit-tinker-skyrl' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (python_full_version >= '3.13' and extra != 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-verl') or (extra == 'extra-20-agentcore-rl-toolkit-verl' and extra == 'group-20-agentcore-rl-toolkit-sagemaker-integration') or (extra == 'extra-20-agentcore-rl-toolkit-verl' and extra == 'group-20-agentcore-rl-toolkit-verl-ci') or (extra == 'extra-20-agentcore-rl-toolkit-tinker-api' and extra == 'extra-20-agentcore-rl-toolkit-tinker-skyrl') or (extra == 'group-20-agentcore-rl-toolkit-verl-ci' and extra == 'group-20-agentcore-rl-toolkit-verl-megatron')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/a2/84f2a9739e914cb119807b8b91d48b2c7628794e4eee66daa3402a2d7442/cupy_cuda13x-14.0.1-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:5c368d7b9fa9eef8a5d209d6335f468f84893cf875defdd1d195b6b27da941c9", size = 74276076, upload-time = "2026-02-20T10:24:00.841Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/fe/064f73bab30460eb9024e1a52319b8b69ef0c1cd853301189d1b4579e686/cupy_cuda13x-14.0.1-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:97fe8f0ff683ed5f39b82d0e56ad90368fc001c1b191a3bc662d31a0ac8cb482", size = 70267352, upload-time = "2026-02-20T10:24:05.105Z" },
+    { url = "https://files.pythonhosted.org/packages/df/3c/a0de0513ad575f3a9f9543efd9ae408303101205c206d9cfe5a37b59bddc/cupy_cuda13x-14.0.1-cp311-cp311-win_amd64.whl", hash = "sha256:9dda18b7100a19a54536b4325e63a29c1fb58891a0973623c6c8c80642b3f933", size = 35450158, upload-time = "2026-02-20T10:24:09.205Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/9b/7983b4e24749937dd4ab34565561a8c015e88df4ff9fd4678337b710b3ee/cupy_cuda13x-14.0.1-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:763f33f5641a28db5ac91788301271930e910813f1b1279119b504babeb1b863", size = 73616635, upload-time = "2026-02-20T10:24:14.115Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/d4/42f79f6baea881c604982df18d158456e40071925bfdd53c1b6eb82f6e75/cupy_cuda13x-14.0.1-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:a06cdc0d6a0054663fca4770e32df6a39cbeb7396a08b23f97965e5e1c0edb7d", size = 69793920, upload-time = "2026-02-20T10:24:20.287Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/0c/83c6be011fa00a270c0d08985844fd992d59c34a6bb91755dad4f31942e8/cupy_cuda13x-14.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:e91052340bab0860bdf1fd4e5a4fc85846800df6cc9a1de02a5afa1dd8655550", size = 35353554, upload-time = "2026-02-20T10:24:24.337Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/de/679a7a571dcd1b654378cc4f9c5cd6f6d4af09ec8973eb4b2dce276adce4/cupy_cuda13x-14.0.1-cp313-cp313-manylinux2014_aarch64.whl", hash = "sha256:a8488a6a9c934c417f98078ac7dd2a47059c39195199b7e557c84d01b3071c75", size = 73167833, upload-time = "2026-02-20T10:24:30.645Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/05/f60525718e83c0ea10efc4ae3183ea9c5309935b76c200b6d9c2569185de/cupy_cuda13x-14.0.1-cp313-cp313-manylinux2014_x86_64.whl", hash = "sha256:1c206483aaea40cd38bfbd1a29f4df0c19d555d306ffe43ef16f39db0e7e7a7f", size = 69416450, upload-time = "2026-02-20T10:24:35.982Z" },
+    { url = "https://files.pythonhosted.org/packages/73/4e/8b4b996690d91745e34ce6103fbf8a9fb51f2e46b4e47c45ea8b3fff9d2b/cupy_cuda13x-14.0.1-cp313-cp313-win_amd64.whl", hash = "sha256:cd01307b4f67e3bf242537f02ac8e5db729a557510728f70ee41a32490ce1e1a", size = 35336403, upload-time = "2026-02-20T10:24:40.355Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/f9/e5480aefcc86cfa45abe12c323e8e65b8a04727c227f67dff1cae99ead1b/cupy_cuda13x-14.0.1-cp314-cp314-manylinux2014_aarch64.whl", hash = "sha256:70a5b3d4b20367abf978e2c75bd0235f0768b5901a6102398877aef044628151", size = 73012147, upload-time = "2026-02-20T10:24:45.12Z" },
+    { url = "https://files.pythonhosted.org/packages/61/9e/cd8ddc220283272a7891a8277fb911a584a9224bd1c8f56d75ca6f62d976/cupy_cuda13x-14.0.1-cp314-cp314-manylinux2014_x86_64.whl", hash = "sha256:2e6fbfb24bc336ba91507e9e6488589665a4c7366453bb80c717d874fce3c373", size = 68714185, upload-time = "2026-02-20T10:24:49.984Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/f5/273193563cdc37cdb22de3b73e7db12819b39fafb73de6bcf7d48f20945e/cupy_cuda13x-14.0.1-cp314-cp314-win_amd64.whl", hash = "sha256:22b50139e05c4612fac905dd6c3390f8687e0e390f0e200d5be14be1726e3d04", size = 35474838, upload-time = "2026-02-20T10:24:54.198Z" },
 ]
 
 [[package]]
@@ -9777,6 +9801,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cupy-cu130 = [
+    { name = "cupy-cuda13x" },
+]
 verl-core = [
     { name = "accelerate" },
     { name = "cachetools" },
