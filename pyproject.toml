@@ -80,7 +80,7 @@ verl = [
     # Pinned to a verl main commit through [tool.uv.sources]; the first release
     # carrying transformers 5.16 support is 0.10. verl-core holds the runtime
     # dependencies verl's base (setup.py) metadata omits, e.g. TransferQueue.
-    "verl[verl-core]>=0.10.0.dev0",
+    "verl[verl-core,cupy-cu130]>=0.10.0.dev0",
     "orjson",  # required for tracking; not in verl-core
     "aiohttp>=3.9",
     "transformers==5.16.1",
