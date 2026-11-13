@@ -24,11 +24,11 @@ py-modules = ["rl_app", "tool_service", "prepare_data"]
 include = ["harness*"]
 
 [tool.setuptools.package-data]
-harness = ["gwas/prompts/*.txt", "gwas/clients/gwas_catalog_sql/resources/*"]
+harness = ["gwas/prompts/*.txt", "gwas/resources/*"]
 
 [tool.ruff]
 extend = "../../pyproject.toml"
 
 [tool.ruff.lint.per-file-ignores]
-# Upstream tool docstrings and messages, kept verbatim.
-"harness/seqqa/{official,db_subset}.py" = ["E501"]
+# Biomni's docstrings and messages, kept verbatim.
+"harness/seqqa/tools.py" = ["E501"]
