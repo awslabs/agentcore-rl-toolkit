@@ -1,0 +1,18 @@
+[project]
+name = "scaleai-agentenv-example"
+version = "0.1.0"
+description = "A Strands agent using AgentEnv's Slack environment on AgentCore Runtime"
+requires-python = ">=3.11"
+dependencies = [
+    "agentenv-framework-protocol==0.1.525",
+    "mcp==1.28.1",
+]
+
+[project.optional-dependencies]
+client = [
+    "agentcore-rl-toolkit[rollout]==0.2.0",
+    "strands-agents==1.64.0",
+]
+
+[tool.uv]
+package = false
