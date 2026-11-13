@@ -97,7 +97,7 @@ def connect(path: Path) -> sqlite3.Connection:
 
 def build_gwas(out: Path, raw: Path) -> None:
     """The three official GWAS Catalog files; the SQL backend checks their sizes and sha256 at startup."""
-    from harness.gwas.clients.gwas_catalog_sql.catalog import DATASETS, RELEASE
+    from harness.gwas.tools import DATASETS, RELEASE
 
     target = out / "gwas_catalog" / RELEASE
     target.mkdir(parents=True, exist_ok=True)
