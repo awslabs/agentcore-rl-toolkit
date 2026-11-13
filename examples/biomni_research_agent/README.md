@@ -1,7 +1,7 @@
 # Biomni Research Agent
 
 A tool-calling research agent for six biomedical tasks. It answers each question by querying biomedical databases
-and online APIs over at most 20 model turns, and is trained with GRPO on
+and online APIs, and is trained with GRPO on
 [SageMaker Training Sessions](../../src/agentcore_rl_toolkit/backends/sagemaker/SETUP.md).
 
 | Task (`task_name`) | Question | Answer |
@@ -67,8 +67,7 @@ uv run python tool_service.py gwas   --port 8104 &
 ```
 
 Each service binds to `127.0.0.1` by default. For the Runtime, start them with `--host <the instance's private IP>`
-and allow TCP 8101–8104 only from the Runtime's security group. Every NCBI request goes through these services, so
-NCBI's rate limit (10 requests per second per key) applies across all of them.
+and allow TCP 8101–8104 only from the Runtime's security group.
 
 ## Run the agent
 
