@@ -1,4 +1,4 @@
-"""lab_bench_seqqa: the official question text and native sequence tools.
+"""lab_bench_seqqa: native sequence tools.
 
 A turn that hits the output cap continues only if at least one complete tool call in it parsed; a turn
 whose tool calls are all malformed ends the episode.

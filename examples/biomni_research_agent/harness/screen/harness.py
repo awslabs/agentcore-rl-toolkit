@@ -1,4 +1,4 @@
-"""screen_gene_retrieval: the official question, ORCS SQL without the hit flag, and related online tools.
+"""screen_gene_retrieval: ORCS SQL without the hit flag, and related online tools.
 
 The model must choose the source, find the screen and judge significance from its scores and the
 screen's stated criteria. A turn that hits the output cap continues only if at least one tool call in it
