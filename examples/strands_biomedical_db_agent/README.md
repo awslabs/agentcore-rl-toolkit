@@ -125,6 +125,9 @@ Returns `response` and a scalar `reward`: `1.0` for a completed answer in
 `expected_answers`, otherwise `0.0`. See the
 [Runtime app contract](../../designs/agentcore_runtime_app.md) for invocation options.
 
+For colocated Qwen3.6-27B training on GWAS Catalog or Open Targets, see the
+[verl GRPO recipes](train/verl/README.md).
+
 ## Tests
 
 ```bash
