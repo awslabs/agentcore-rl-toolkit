@@ -1,0 +1,1357 @@
+Use
+query_open_targets_graphql to retrieve Open Targets evidence. Do not answer
+from memory when the database can establish the result, and never invent tool
+results, identifiers, or evidence.
+
+Follow the task and output requirements in the request. The candidate set in
+the request is closed.
+
+The complete official Open Targets Platform GraphQL SDL follows. Treat it as
+the authoritative API schema.
+
+```graphql
+type APIVersion {
+  suffix: String
+  y: String!
+  z: String!
+  x: String!
+}
+
+type AdverseEvent {
+  meddraCode: String
+  count: Long!
+  logLR: Float!
+  name: String!
+}
+
+type AdverseEvents {
+  criticalValue: Float!
+  count: Long!
+  rows: [AdverseEvent!]!
+  id: String!
+}
+
+enum AggregationTypeEnum {
+  datasourceId
+  overall
+}
+
+type AlleleFrequency {
+  populationName: String
+  alleleFrequency: Float
+}
+
+type AssociatedDisease {
+  datasourceScores: [ScoredComponent!]!
+  datatypeScores: [ScoredComponent!]!
+  novelty: Float
+  score: Float!
+  disease: Disease!
+}
+
+type AssociatedDiseases {
+  count: Long!
+  datasources: [DatasourceSettings!]!
+  rows: [AssociatedDisease!]!
+}
+
+type AssociatedTarget {
+  datasourceScores: [ScoredComponent!]!
+  datatypeScores: [ScoredComponent!]!
+  novelty: Float
+  score: Float!
+  target: Target!
+}
+
+type AssociatedTargets {
+  count: Long!
+  datasources: [DatasourceSettings!]!
+  rows: [AssociatedTarget!]!
+}
+
+type AssociationTimeSeries {
+  yearlyEvidenceCount: Int
+  diseaseId: String!
+  targetId: String!
+  aggregationValue: String!
+  associationScore: Float!
+  year: Int
+  isDirect: Boolean!
+  novelty: Float
+  aggregationType: AggregationTypeEnum!
+}
+
+type AssociationTimeSeriesResults {
+  count: Long!
+  rows: [AssociationTimeSeries!]!
+}
+
+type BaselineExpression {
+  count: Long!
+  rows: [BaselineExpressionRow!]!
+}
+
+type BaselineExpressionRow {
+  unit: String!
+  q3: Float
+  datasourceId: String!
+  q1: Float
+  targetId: String!
+  median: Float
+  min: Float
+  targetFromSourceId: String
+  distribution_score: Float!
+  qualityControls: String
+  celltypeBiosampleFromSource: String
+  max: Float
+  tissueBiosampleFromSource: String
+  specificity_score: Float
+  datatypeId: String!
+  tissueBiosample: Biosample
+  tissueBiosampleParent: Biosample
+  celltypeBiosample: Biosample
+  celltypeBiosampleParent: Biosample
+}
+
+type BiologicalModels {
+  literature: [String!]
+  allelicComposition: String!
+  geneticBackground: String!
+  id: String
+}
+
+type BiomarkerGeneExpression {
+  name: String
+  id: GeneOntologyTerm
+}
+
+type Biosample {
+  descendants: [String!]
+  description: String
+  biosampleId: String!
+  children: [String!]
+  biosampleName: String!
+  parents: [String!]
+  synonyms: [String!]
+  ancestors: [String!]
+  xrefs: [String!]
+}
+
+type CancerHallmark {
+  label: String!
+  impact: String
+  description: String!
+  pmid: Long!
+}
+
+type CanonicalTranscript {
+  end: Long!
+  chromosome: String!
+  strand: String!
+  start: Long!
+  id: String!
+}
+
+type ChemicalProbe {
+  urls: [ChemicalProbeUrl!]!
+  isHighQuality: Boolean!
+  origin: [String!]
+  drugFromSourceId: String
+  scoreInOrganisms: Float
+  targetFromSourceId: String!
+  probesDrugsScore: Float
+  id: String!
+  mechanismOfAction: [String!]
+  control: String
+  scoreInCells: Float
+  probeMinerScore: Float
+  drugId: String
+}
+
+type ChemicalProbeUrl {
+  url: String
+  niceName: String!
+}
+
+type ClinRepDrugListItem {
+  drugFromSource: String
+  drug: Drug
+}
+
+type ClinicalDiseaseListItem {
+  diseaseFromSource: String
+  disease: Disease
+}
+
+type ClinicalIndicationFromDisease {
+  maxClinicalStage: String!
+  id: String!
+  drug: Drug
+  clinicalReports: [ClinicalReport!]!
+}
+
+type ClinicalIndicationFromDrug {
+  maxClinicalStage: String!
+  id: String!
+  disease: Disease
+  clinicalReports: [ClinicalReport!]!
+}
+
+type ClinicalReport {
+  trialLiterature: [String!]!
+  trialOfficialTitle: String
+  trialOverallStatus: String
+  drugs: [ClinRepDrugListItem!]!
+  trialStudyType: String
+  trialWhyStopped: String
+  url: String
+  trialPrimaryPurpose: String
+  trialStopReasonCategories: [String!]!
+  trialNumberOfArms: Int
+  year: Int
+  qualityControls: [String!]!
+  trialDescription: String
+  type: ClinicalReportType
+  id: String!
+  trialPhase: String
+  countries: [String!]!
+  source: String!
+  phaseFromSource: String
+  hasExpertReview: Boolean!
+  trialStartDate: String
+  clinicalStage: String!
+  title: String
+  diseases: [ClinicalDiseaseListItem!]!
+  sideEffects: [ClinicalDiseaseListItem!]!
+}
+
+enum ClinicalReportType {
+  CURATED_RESOURCE
+  DRUG_LABEL
+  CLINICAL_TRIAL
+  REGULATORY_AGENCY
+}
+
+type ClinicalTargetFromTarget {
+  maxClinicalStage: String!
+  id: String!
+  drug: Drug
+  clinicalReports: [ClinicalReport!]!
+  diseases: [ClinicalDiseaseListItem!]!
+}
+
+type Colocalisation {
+  rightStudyType: String!
+  chromosome: String!
+  clpp: Float
+  betaRatioSignAverage: Float
+  h3: Float
+  studyLocusId: String!
+  numberColocalisingVariants: Long!
+  h4: Float
+  colocalisationMethod: String!
+  otherStudyLocus: CredibleSet
+}
+
+type Colocalisations {
+  id: String!
+  count: Long!
+  rows: [Colocalisation!]!
+}
+
+type Constraint {
+  oeUpper: Float
+  oeLower: Float
+  obs: Long
+  upperRank: Long
+  exp: Float
+  constraintType: String!
+  upperBin: Long
+  upperBin6: Long
+  score: Float
+  oe: Float
+}
+
+type CredibleSet {
+  locusEnd: Int
+  beta: Float
+  isTransQtl: Boolean
+  zScore: Float
+  purityMinR2: Float
+  region: String
+  chromosome: String!
+  ldSet: [LdSet!]
+  subStudyDescription: String
+  credibleSetIndex: Int
+  credibleSetlog10BF: Float
+  sampleSize: Int
+  qtlGeneId: String
+  studyId: String!
+  studyLocusId: String!
+  pValueExponent: Int!
+  qualityControls: [String!]
+  purityMeanR2: Float
+  locusStart: Int
+  effectAlleleFrequencyFromSource: Float
+  pValueMantissa: Float!
+  position: Int!
+  finemappingMethod: String
+  standardError: Float
+  confidence: String
+  variant: Variant
+  studyType: StudyTypeEnum
+  l2GPredictions(page: Pagination): L2GPredictions!
+  locus(variantIds: [String!], page: Pagination): Loci!
+  colocalisation(studyTypes: [StudyTypeEnum!], page: Pagination): Colocalisations!
+  study: Study
+}
+
+type CredibleSets {
+  id: String!
+  count: Long!
+  rows: [CredibleSet!]!
+}
+
+type DataVersion {
+  month: String!
+  year: String!
+  iteration: String
+}
+
+type Datasource {
+  datasourceCount: Int!
+  datasourceId: String!
+  datasourceNiceName: String!
+}
+
+type DatasourceSettings {
+  propagate: Boolean!
+  required: Boolean!
+  weight: Float!
+  id: String!
+}
+
+input DatasourceSettingsInput {
+  id: String!
+  weight: Float!
+  propagate: Boolean!
+  required: Boolean = false
+}
+
+type DbXref {
+  id: String
+  source: String
+}
+
+type DepMapEssentiality {
+  screens: [GeneEssentialityScreen!]!
+  tissueId: String
+  tissueName: String
+}
+
+type Disease {
+  descendants: [String!]!
+  isTherapeuticArea: Boolean!
+  indirectLocationIds: [String!]
+  description: String
+  id: String!
+  dbXRefs: [String!]!
+  obsoleteTerms: [String!]!
+  synonyms: [DiseaseSynonyms!]
+  directLocationIds: [String!]
+  ancestors: [String!]!
+  name: String!
+  therapeuticAreas: [Disease!]!
+  parents: [Disease!]!
+  children: [Disease!]!
+  directLocations: [Disease!]!
+  indirectLocations: [Disease!]!
+  similarEntities(additionalIds: [String!], entityNames: [String!], threshold: Float, size: Int): [Similarity!]!
+  literatureOcurrences(additionalIds: [String!], startYear: Int, startMonth: Int, endYear: Int, endMonth: Int, cursor: String): Publications!
+  phenotypes(page: Pagination): DiseaseHPOs!
+  evidences(ensemblIds: [String!]!, enableIndirect: Boolean, datasourceIds: [String!], size: Int, cursor: String): Evidences!
+  otarProjects: [OtarProject!]!
+  associatedTargets(Bs: [String!], enableIndirect: Boolean, datasources: [DatasourceSettingsInput!], facetFilters: [String!], BFilter: String, orderByScore: String, page: Pagination): AssociatedTargets!
+  resolvedAncestors: [Disease!]!
+  drugAndClinicalCandidates: clinicalIndicationsFromDiseaseImp!
+  associationTimeSeries(ensemblId: String!, isDirect: Boolean!, aggregationTypes: [AggregationTypeEnum!], startYear: Int, endYear: Int, page: Pagination): AssociationTimeSeriesResults!
+}
+
+type DiseaseCellLine {
+  tissue: String
+  tissueId: String
+  id: String
+  name: String
+}
+
+type DiseaseHPO {
+  evidence: [DiseaseHPOEvidences!]!
+  phenotypeHPO: HPO
+  phenotypeEFO: Disease
+}
+
+type DiseaseHPOEvidences {
+  sex: String
+  aspect: String
+  evidenceType: String
+  frequency: String
+  diseaseFromSourceId: String!
+  resource: String!
+  qualifierNot: Boolean!
+  bioCuration: String
+  references: [String!]!
+  diseaseFromSource: String!
+  modifiers: [HPO!]!
+  onset: [HPO!]!
+  frequencyHPO: HPO
+}
+
+type DiseaseHPOs {
+  id: String!
+  count: Long!
+  rows: [DiseaseHPO!]!
+}
+
+type DiseaseSynonyms {
+  relation: String!
+  terms: [String!]!
+}
+
+type Drug {
+  maximumClinicalStage: String!
+  description: String
+  crossReferences: [DrugReferences!]
+  tradeNames: [DrugLabelAndSource!]!
+  id: String!
+  synonyms: [DrugLabelAndSource!]!
+  drugType: String!
+  molblock: String
+  name: String!
+  parentMolecule: Drug
+  childMolecules: [Drug!]!
+  drugWarnings: [DrugWarning!]!
+  similarEntities(additionalIds: [String!], entityNames: [String!], threshold: Float, size: Int): [Similarity!]!
+  literatureOcurrences(additionalIds: [String!], startYear: Int, startMonth: Int, endYear: Int, endMonth: Int, cursor: String): Publications!
+  mechanismsOfAction: MechanismsOfAction
+  adverseEvents(page: Pagination): AdverseEvents!
+  pharmacogenomics: [Pharmacogenomics!]!
+  indications: clinicalIndicationsFromDrugImp!
+}
+
+type DrugLabelAndSource {
+  label: String!
+  source: String!
+}
+
+type DrugReferences {
+  ids: [String!]!
+  source: String!
+}
+
+type DrugWarning {
+  country: String
+  efoTerm: String
+  warningType: String!
+  chemblIds: [String!]
+  efoId: String
+  description: String
+  year: Int
+  id: Long
+  toxicityClass: String
+  efoIdForWarningClass: String
+  references: [DrugWarningReference!]
+}
+
+type DrugWarningReference {
+  url: String!
+  id: String!
+  source: String!
+}
+
+type DrugWithIdentifiers {
+  drugFromSource: String
+  drugId: String
+  drug: Drug
+}
+
+type EnhancerToGene {
+  meta_total: Long!
+  intervalType: String!
+  datasourceId: String!
+  chromosome: String!
+  resourceScore: [ResourceScore!]!
+  studyId: String!
+  pmid: String!
+  biosampleFromSourceId: String
+  qualityControls: [String!]
+  end: Int!
+  start: Int!
+  distanceToTss: Int!
+  biosampleName: String!
+  score: Float!
+  target: Target!
+  biosample: Biosample
+}
+
+type EnhancerToGenes {
+  count: Long!
+  rows: [EnhancerToGene!]!
+}
+
+union EntityUnionType = Target | Drug | Disease | Variant | Study
+
+type Evidence {
+  warningMessage: String
+  studyStartDate: String
+  biologicalModelId: String
+  diseaseModelAssociatedHumanPhenotypes: [LabelledElement!]
+  beta: Float
+  directionOnTrait: String
+  oddsRatioConfidenceIntervalUpper: Float
+  datasourceId: String!
+  metaTotal: Int!
+  betaConfidenceIntervalLower: Float
+  biosamplesFromSource: [String!]
+  statisticalTestTail: String
+  targetInModel: String
+  targetRole: String
+  evidenceDate: String
+  log2FoldChangePercentileRank: Long
+  ancestryId: String
+  projectId: String
+  publicationFirstAuthor: String
+  releaseDate: String
+  crisprScreenLibrary: String
+  assays: [assays!]
+  variantRsId: String
+  biologicalModelGeneticBackground: String
+  trialWhyStopped: String
+  assessments: [String!]
+  diseaseModelAssociatedModelPhenotypes: [LabelledElement!]
+  targetModulation: String
+  cellType: String
+  phenotypicConsequenceLogFoldChange: Float
+  pathways: [Pathway!]
+  projectDescription: String
+  cohortShortName: String
+  trialStopReasonCategories: [String!]
+  targetFromSourceId: String
+  clinicalReportId: String
+  resourceScore: Float
+  drugFromSource: String
+  literature: [String!]
+  studySampleSize: Long
+  studyId: String
+  cohortPhenotypes: [String!]
+  biologicalModelAllelicComposition: String
+  cohortId: String
+  biomarkerList: [NameDescription!]
+  oddsRatio: Float
+  variantAminoacidDescriptions: [String!]
+  mutatedSamples: [EvidenceVariation!]
+  textMiningSentences: [EvidenceTextMiningSentence!]
+  interactingTargetFromSourceId: String
+  pValueExponent: Long
+  oddsRatioConfidenceIntervalLower: Float
+  geneticInteractionType: String
+  cohortDescription: String
+  qualityControls: [String!]!
+  interactingTargetRole: String
+  cellLineBackground: String
+  diseaseFromSourceId: String
+  reactionId: String
+  directionOnTarget: String
+  reactionName: String
+  significantDriverMethods: [String!]
+  biomarkers: biomarkers
+  studyCases: Long
+  urls: [LabelledUri!]
+  studyCasesWithQualifyingVariants: Long
+  primaryProjectId: String
+  statisticalMethodOverview: String
+  statisticalMethod: String
+  releaseVersion: String
+  primaryProjectHit: Boolean
+  validationReadouts: [ValidationReadouts!]
+  pValueMantissa: Float
+  id: String!
+  biomarkerName: String
+  betaConfidenceIntervalUpper: Float
+  alleleOrigins: [String!]
+  publicationDate: String
+  log2FoldChangeValue: Float
+  geneticInteractionScore: Float
+  targetFromSource: String
+  score: Float!
+  clinicalSignificances: [String!]
+  publicationYear: Long
+  diseaseFromSource: String
+  allelicRequirements: [String!]
+  studyOverview: String
+  contrast: String
+  ancestry: String
+  clinicalStage: String
+  diseaseCellLines: [DiseaseCellLine!]
+  geneticInteractionFDR: Float
+  datatypeId: String!
+  confidence: String
+  phenotypicConsequencePValue: Float
+  diseaseFromSourceMappedId: String
+  target: Target!
+  disease: Disease!
+  credibleSet: CredibleSet
+  variant: Variant
+  drug: Drug
+  drugResponse: Disease
+  variantFunctionalConsequence: SequenceOntologyTerm
+  variantFunctionalConsequenceFromQtlId: SequenceOntologyTerm
+  pubMedCentralIds: [String!]
+}
+
+type EvidenceSource {
+  datatype: String!
+  datasource: String!
+}
+
+type EvidenceTextMiningSentence {
+  section: String!
+  tEnd: Long!
+  tStart: Long!
+  dStart: Long!
+  dEnd: Long!
+  text: String!
+}
+
+type EvidenceVariation {
+  numberMutatedSamples: Long
+  numberSamplesTested: Long
+  numberSamplesWithMutationType: Long
+  functionalConsequence: SequenceOntologyTerm
+}
+
+type Evidences {
+  cursor: String
+  count: Int!
+  rows: [Evidence!]!
+}
+
+type GeneEssentialityScreen {
+  geneEffect: Float
+  depmapId: String
+  mutation: String
+  diseaseCellLineId: String
+  diseaseFromSource: String
+  cellLineName: String
+  expression: Float
+}
+
+type GeneOntology {
+  source: String!
+  aspect: String!
+  evidence: String!
+  geneProduct: String!
+  term: GeneOntologyTerm!
+}
+
+type GeneOntologyTerm {
+  label: String!
+  id: String!
+}
+
+type GenomicLocation {
+  end: Long!
+  chromosome: String!
+  strand: Int!
+  start: Long!
+}
+
+type HPO {
+  namespace: [String!]
+  description: String
+  id: String!
+  name: String!
+}
+
+type HallmarkAttribute {
+  description: String!
+  pmid: Long
+  name: String!
+}
+
+type Hallmarks {
+  cancerHallmarks: [CancerHallmark!]!
+  attributes: [HallmarkAttribute!]!
+}
+
+type Homologue {
+  queryPercentageIdentity: Float!
+  targetGeneId: String!
+  targetPercentageIdentity: Float!
+  homologyType: String!
+  targetGeneSymbol: String!
+  isHighConfidence: String
+  speciesId: String!
+  speciesName: String!
+}
+
+type IdAndSource {
+  id: String!
+  source: String!
+}
+
+type Interaction {
+  score: Float
+  count: Long!
+  intB: String!
+  speciesB: InteractionSpecies
+  intABiologicalRole: String!
+  intA: String!
+  speciesA: InteractionSpecies
+  sourceDatabase: String!
+  evidences: [InteractionEvidence!]!
+  intBBiologicalRole: String!
+  targetA: Target
+  targetB: Target
+}
+
+type InteractionEvidence {
+  interactionTypeShortName: String
+  hostOrganismTaxId: Long
+  intASource: String!
+  participantDetectionMethodB: [InteractionEvidencePDM!]
+  participantDetectionMethodA: [InteractionEvidencePDM!]
+  interactionDetectionMethodMiIdentifier: String!
+  hostOrganismScientificName: String
+  pubmedId: String
+  interactionIdentifier: String
+  expansionMethodShortName: String
+  interactionDetectionMethodShortName: String!
+  expansionMethodMiIdentifier: String
+  evidenceScore: Float
+  intBSource: String!
+  interactionTypeMiIdentifier: String
+}
+
+type InteractionEvidencePDM {
+  miIdentifier: String
+  shortName: String
+}
+
+type InteractionResources {
+  sourceDatabase: String!
+  databaseVersion: String!
+}
+
+enum InteractionSourceEnum {
+  intact
+  reactome
+  signor
+  string
+}
+
+type InteractionSpecies {
+  mnemonic: String!
+  scientificName: String
+  taxonId: Long
+}
+
+type Interactions {
+  id: String!
+  count: Long!
+  rows: [Interaction!]!
+}
+
+type KeyValuePair {
+  key: String!
+  value: String!
+}
+
+type L2GFeature {
+  shapValue: Float!
+  value: Float!
+  name: String!
+}
+
+type L2GPrediction {
+  studyLocusId: String!
+  features: [L2GFeature!]
+  shapBaseValue: Float!
+  score: Float!
+  target: Target
+}
+
+type L2GPredictions {
+  id: String!
+  count: Long!
+  rows: [L2GPrediction!]!
+}
+
+type LabelAndSource {
+  label: String!
+  source: String!
+}
+
+type LabelledElement {
+  label: String!
+  id: String!
+}
+
+type LabelledUri {
+  url: String!
+  niceName: String
+}
+
+type LdPopulationStructure {
+  relativeSampleSize: Float
+  ldPopulation: String!
+}
+
+type LdSet {
+  tagVariantId: String!
+  r2Overall: Float!
+}
+
+type LocationAndSource {
+  source: String!
+  labelSL: String
+  termSL: String
+  targetModifier: String
+  location: String!
+}
+
+type Loci {
+  count: Long!
+  rows: [Locus!]
+}
+
+type Locus {
+  is99CredibleSet: Boolean!
+  logBF: Float
+  beta: Float
+  is95CredibleSet: Boolean!
+  posteriorProbability: Float!
+  pValueExponent: Int
+  pValueMantissa: Float
+  r2Overall: Float
+  standardError: Float
+  variant: Variant
+}
+
+type MappingResult {
+  hits: [SearchResult!]
+  term: String!
+}
+
+type MappingResults {
+  aggregations: SearchResultAggs
+  total: Long!
+  mappings: [MappingResult!]!
+}
+
+type MechanismOfActionRow {
+  mechanismOfAction: String!
+  references: [Reference!]
+  actionType: String
+  targetName: String
+  targets: [Target!]!
+}
+
+type MechanismsOfAction {
+  uniqueActionTypes: [String!]!
+  uniqueTargetTypes: [String!]!
+  rows: [MechanismOfActionRow!]!
+}
+
+type Meta {
+  product: String!
+  apiVersion: APIVersion!
+  enableDataReleasePrefix: Boolean!
+  dataPrefix: String!
+  name: String!
+  dataVersion: DataVersion!
+  downloads: String
+}
+
+type ModelPhenotypeClasses {
+  label: String!
+  id: String!
+}
+
+type MousePhenotype {
+  modelPhenotypeClasses: [ModelPhenotypeClasses!]!
+  biologicalModels: [BiologicalModels!]!
+  targetInModel: String!
+  targetInModelMgiId: String!
+  modelPhenotypeLabel: String!
+  targetInModelEnsemblId: String
+  modelPhenotypeId: String!
+}
+
+type NameDescription {
+  description: String!
+  name: String!
+}
+
+type OtarProject {
+  integratesInPPP: Boolean
+  otarCode: String!
+  reference: String!
+  status: String
+  projectName: String
+}
+
+input Pagination {
+  index: Int!
+  size: Int!
+}
+
+type Pathway {
+  id: String
+  name: String!
+}
+
+type Pharmacogenomics {
+  variantRsId: String
+  genotypeId: String
+  genotypeAnnotationText: String
+  haplotypeFromSourceId: String
+  haplotypeId: String
+  variantId: String
+  variantFunctionalConsequenceId: String
+  datasourceId: String
+  isDirectTarget: Boolean!
+  phenotypeFromSourceId: String
+  pgxCategory: String
+  targetFromSourceId: String
+  phenotypeText: String
+  literature: [String!]
+  studyId: String
+  evidenceLevel: String
+  variantAnnotation: [VariantAnnotation!]
+  genotype: String
+  datatypeId: String
+  variantFunctionalConsequence: SequenceOntologyTerm
+  target: Target
+  drugs: [DrugWithIdentifiers!]!
+}
+
+type ProteinCodingCoordinate {
+  therapeuticAreas: [String!]!
+  datasources: [Datasource!]!
+  uniprotAccessions: [String!]!
+  aminoAcidPosition: Int!
+  referenceAminoAcid: String!
+  variantEffect: Float
+  alternateAminoAcid: String!
+  diseases: [Disease!]!
+  target: Target
+  variant: Variant
+  variantConsequences: [SequenceOntologyTerm!]!
+}
+
+type ProteinCodingCoordinates {
+  id: String!
+  count: Long!
+  rows: [ProteinCodingCoordinate!]!
+}
+
+type Publication {
+  pmcid: String
+  pmid: String!
+  publicationDate: String!
+}
+
+type Publications {
+  earliestPubYear: Int!
+  cursor: String
+  count: Long!
+  rows: [Publication!]!
+  filteredCount: Long!
+}
+
+type Query {
+  meta: Meta!
+  target(ensemblId: String!): Target
+  targets(ensemblIds: [String!]!): [Target!]!
+  disease(efoId: String!): Disease
+  diseases(efoIds: [String!]!): [Disease!]!
+  drug(chemblId: String!): Drug
+  drugs(chemblIds: [String!]!): [Drug!]!
+  search(queryString: String!, entityNames: [String!], page: Pagination): SearchResults!
+  facets(queryString: String, entityNames: [String!], category: String, page: Pagination): SearchFacetsResults!
+  mapIds(queryTerms: [String!]!, entityNames: [String!]): MappingResults!
+  associationDatasources: [EvidenceSource!]!
+  interactionResources: [InteractionResources!]!
+  geneOntologyTerms(goIds: [String!]!): [GeneOntologyTerm]!
+  variant(variantId: String!): Variant
+  study(studyId: String): Study
+  studies(page: Pagination, studyId: String, diseaseIds: [String!], enableIndirect: Boolean): Studies!
+  credibleSet(studyLocusId: String!): CredibleSet
+  credibleSets(page: Pagination, studyLocusIds: [String!], studyIds: [String!], variantIds: [String!], studyTypes: [StudyTypeEnum!], regions: [String!]): CredibleSets!
+  clinicalReport(clinicalReportId: String!): ClinicalReport
+  clinicalReports(clinicalReportsIds: [String!]!): [ClinicalReport!]!
+}
+
+type ReactomePathway {
+  pathway: String!
+  topLevelTerm: String!
+  pathwayId: String!
+}
+
+type Reference {
+  ids: [String!]
+  urls: [String!]
+  source: String!
+}
+
+type ResourceScore {
+  value: Float!
+  name: String!
+}
+
+type SafetyBiosample {
+  cellFormat: String
+  cellLabel: String
+  cellId: String
+  tissueLabel: String
+  tissueId: String
+}
+
+type SafetyEffects {
+  direction: String!
+  dosing: String
+}
+
+type SafetyLiability {
+  url: String
+  literature: String
+  effects: [SafetyEffects!]
+  biosamples: [SafetyBiosample!]
+  event: String
+  eventId: String
+  studies: [SafetyStudy!]
+  datasource: String!
+}
+
+type SafetyStudy {
+  description: String
+  type: String
+  name: String
+}
+
+type Sample {
+  sampleSize: Int!
+  ancestry: String!
+}
+
+type ScoredComponent {
+  id: String!
+  score: Float!
+}
+
+type SearchFacetsCategory {
+  total: Long!
+  name: String!
+}
+
+type SearchFacetsResult {
+  label: String!
+  datasourceId: String
+  category: String!
+  entityIds: [String!]
+  highlights: [String!]!
+  id: String!
+  score: Float!
+}
+
+type SearchFacetsResults {
+  hits: [SearchFacetsResult!]!
+  total: Long!
+  categories: [SearchFacetsCategory!]!
+}
+
+type SearchResult {
+  multiplier: Float!
+  ngrams: [String!]
+  entity: String!
+  keywords: [String!]
+  prefixes: [String!]
+  category: [String!]!
+  description: String
+  highlights: [String!]!
+  id: String!
+  score: Float!
+  name: String!
+  object: EntityUnionType
+}
+
+type SearchResultAggCategory {
+  total: Long!
+  name: String!
+}
+
+type SearchResultAggEntity {
+  categories: [SearchResultAggCategory!]!
+  total: Long!
+  name: String!
+}
+
+type SearchResultAggs {
+  entities: [SearchResultAggEntity!]!
+  total: Long!
+}
+
+type SearchResults {
+  aggregations: SearchResultAggs
+  hits: [SearchResult!]!
+  total: Long!
+}
+
+type SequenceOntologyTerm {
+  label: String!
+  id: String!
+}
+
+type Similarity {
+  category: String!
+  id: String!
+  score: Float!
+  object: EntityUnionType
+}
+
+type Studies {
+  count: Long!
+  rows: [Study!]!
+}
+
+type Study {
+  publicationJournal: String
+  initialSampleSize: String
+  hasSumstats: Boolean
+  discoverySamples: [Sample!]
+  ldPopulationStructure: [LdPopulationStructure!]
+  publicationFirstAuthor: String
+  projectId: String!
+  traitFromSource: String!
+  nSamples: Int
+  pubmedId: String
+  publicationTitle: String
+  traitFromSourceMappedIds: [String!]
+  qualityControls: [String!]
+  replicationSamples: [Sample!]
+  cohorts: [String!]
+  condition: String
+  analysisFlags: [String!]
+  sumstatQCValues: [SumStatQC!]
+  summarystatsLocation: String
+  nControls: Int
+  publicationDate: String
+  nCases: Int
+  id: String!
+  studyType: StudyTypeEnum
+  target: Target
+  biosample: Biosample
+  diseases: [Disease!]
+  backgroundTraits: [Disease!]
+  credibleSets(page: Pagination): CredibleSets!
+}
+
+enum StudyTypeEnum {
+  eqtl
+  gwas
+  pqtl
+  sceqtl
+  scpqtl
+  scsqtl
+  sctuqtl
+  sqtl
+  tuqtl
+}
+
+type SumStatQC {
+  QCCheckValue: Float!
+  QCCheckName: String!
+}
+
+type Target {
+  approvedSymbol: String!
+  nameSynonyms: [LabelAndSource!]!
+  tractability: [Tractability!]!
+  functionDescriptions: [String!]!
+  homologues: [Homologue!]!
+  subcellularLocations: [LocationAndSource!]!
+  geneticConstraint: [Constraint!]!
+  hallmarks: Hallmarks
+  alternativeGenes: [String!]!
+  pathways: [ReactomePathway!]!
+  obsoleteSymbols: [LabelAndSource!]!
+  obsoleteNames: [LabelAndSource!]!
+  canonicalTranscript: CanonicalTranscript
+  approvedName: String!
+  transcriptIds: [String!]!
+  genomicLocation: GenomicLocation!
+  targetClass: [TargetClass!]!
+  id: String!
+  tep: Tep
+  chemicalProbes: [ChemicalProbe!]!
+  safetyLiabilities: [SafetyLiability!]!
+  biotype: String!
+  synonyms: [LabelAndSource!]!
+  geneOntology: [GeneOntology!]!
+  transcripts: [Transcript!]!
+  proteinIds: [IdAndSource!]!
+  symbolSynonyms: [LabelAndSource!]!
+  dbXrefs: [IdAndSource!]!
+  credibleSets(page: Pagination): CredibleSets!
+  similarEntities(additionalIds: [String!], entityNames: [String!], threshold: Float, size: Int): [Similarity!]!
+  literatureOcurrences(additionalIds: [String!], startYear: Int, startMonth: Int, endYear: Int, endMonth: Int, cursor: String): Publications!
+  evidences(efoIds: [String!]!, datasourceIds: [String!], size: Int, cursor: String): Evidences!
+  interactions(scoreThreshold: Float, sourceDatabase: InteractionSourceEnum, page: Pagination): Interactions
+  mousePhenotypes: [MousePhenotype!]!
+  baselineExpression(page: Pagination): BaselineExpression!
+  associatedDiseases(Bs: [String!], enableIndirect: Boolean, datasources: [DatasourceSettingsInput!], includeMeasurements: Boolean, facetFilters: [String!], BFilter: String, orderByScore: String, page: Pagination): AssociatedDiseases!
+  prioritisation: TargetPrioritisation
+  isEssential: Boolean
+  depMapEssentiality: [DepMapEssentiality!]
+  pharmacogenomics: [Pharmacogenomics!]!
+  proteinCodingCoordinates(page: Pagination): ProteinCodingCoordinates!
+  drugAndClinicalCandidates: clinicalTargets!
+  associationTimeSeries(efoId: String!, isDirect: Boolean!, aggregationTypes: [AggregationTypeEnum!], startYear: Int, endYear: Int, page: Pagination): AssociationTimeSeriesResults!
+}
+
+type TargetClass {
+  label: String!
+  id: Long!
+  level: String!
+}
+
+type TargetPrioritisation {
+  items: [KeyValuePair!]!
+}
+
+type Tep {
+  uri: String!
+  name: String!
+  description: String!
+  therapeuticArea: String!
+}
+
+type Tractability {
+  label: String!
+  modality: String!
+  value: Boolean!
+}
+
+type Transcript {
+  isEnsemblCanonical: Boolean
+  uniprotIsoformId: String
+  isUniprotReviewed: Boolean
+  uniprotId: String
+  transcriptId: String!
+  translationId: String
+  alphafoldId: String
+  biotype: String!
+}
+
+type TranscriptConsequence {
+  uniprotAccessions: [String!]
+  lofteePrediction: String
+  isEnsemblCanonical: Boolean!
+  impact: String
+  consequenceScore: Float!
+  aminoAcidChange: String
+  transcriptId: String
+  distanceFromFootprint: Int!
+  codons: String
+  distanceFromTss: Int!
+  transcriptIndex: Long!
+  siftPrediction: Float
+  polyphenPrediction: Float
+  target: Target
+  variantConsequences: [SequenceOntologyTerm!]!
+}
+
+type ValidationReadouts {
+  hsaValue: Float
+  readoutMethodName: String
+  screen: String
+  isValidated: Boolean
+}
+
+type Variant {
+  referenceAllele: String!
+  id: String!
+  hgvsId: String
+  chromosome: String!
+  alleleFrequencies: [AlleleFrequency!]
+  variantEffect: [VariantEffect!]
+  alternateAllele: String!
+  variantDescription: String!
+  rsIds: [String!]
+  position: Int!
+  transcriptConsequences: [TranscriptConsequence!]
+  dbXrefs: [DbXref!]
+  mostSevereConsequence: SequenceOntologyTerm
+  credibleSets(page: Pagination, studyTypes: [StudyTypeEnum!]): CredibleSets!
+  pharmacogenomics: [Pharmacogenomics!]!
+  evidences(datasourceIds: [String!], size: Int, cursor: String): Evidences!
+  proteinCodingCoordinates(page: Pagination): ProteinCodingCoordinates!
+  enhancerToGenes(page: Pagination): EnhancerToGenes!
+}
+
+type VariantAnnotation {
+  effectType: String
+  entity: String
+  baseAlleleOrGenotype: String
+  directionality: String
+  effect: String
+  literature: String
+  comparisonAlleleOrGenotype: String
+  effectDescription: String
+}
+
+type VariantEffect {
+  method: String
+  assessmentFlag: String
+  normalisedScore: Float
+  assessment: String
+  score: Float
+  target: Target
+}
+
+type assays {
+  isHit: Boolean
+  description: String
+  shortName: String
+}
+
+type biomarkers {
+  geneticVariation: [geneticVariation!]
+  geneExpression: [BiomarkerGeneExpression!]
+}
+
+type clinicalIndicationsFromDiseaseImp {
+  count: Long!
+  rows: [ClinicalIndicationFromDisease!]!
+}
+
+type clinicalIndicationsFromDrugImp {
+  count: Long!
+  rows: [ClinicalIndicationFromDrug!]!
+}
+
+type clinicalTargets {
+  count: Long!
+  rows: [ClinicalTargetFromTarget!]!
+}
+
+type geneticVariation {
+  id: String
+  name: String
+  functionalConsequenceId: SequenceOntologyTerm
+}
+
+scalar Long
+```
+
+Put exactly one candidate rsID inside <solution></solution> at the end of your response.
