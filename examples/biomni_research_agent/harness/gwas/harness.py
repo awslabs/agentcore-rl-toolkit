@@ -50,9 +50,7 @@ os.environ.setdefault("TMPDIR", "/tmp")
 
 def sql_backend():
     # One backend per episode, kept by the tool service; it verifies the three parquet files and the prompt schema.
-    from .clients.gwas_catalog_sql.sql_backend import SnapshotSQLBackend
-
-    backend = SnapshotSQLBackend()
+    backend = tools.SnapshotSQLBackend()
     if any(backend.schema not in SYSTEM[t] for t in TASKS if "query_gwas_catalog_sql" in TASK_TOOLS[t]):
         backend.close()
         raise ProtocolError("GWAS backend schema differs from the system prompt")
