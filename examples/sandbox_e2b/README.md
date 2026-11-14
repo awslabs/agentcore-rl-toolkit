@@ -137,6 +137,8 @@ in their environment.
   ([quotas](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/bedrock-agentcore-limits.html)).
   The command keeps running; reattach with `sbx.commands.connect(pid)`. envd
   does not replay output written while no stream was attached.
+- **Platform version.** envd currently cannot start commands on platform
+  version V2, so `deploy.py` creates the runtime on V1.
 - **Network.** Session endpoints accept public HTTPS only, so the proxy's host
   needs a route to `*.on.aws`.
 - **One user per proxy.** Commands, PTYs and filesystem calls run as the

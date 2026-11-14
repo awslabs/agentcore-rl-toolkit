@@ -41,6 +41,7 @@ def main():
         "allowedPorts": [{"port": ENVD_PORT}],
         # sandboxd keeps a started session busy, so maxLifetime bounds a session nobody stops.
         "lifecycleConfiguration": {"idleRuntimeSessionTimeout": 300, "maxLifetime": args.max_lifetime},
+        "platformVersion": "V1",  # envd currently cannot start commands on V2
     }
 
     try:
