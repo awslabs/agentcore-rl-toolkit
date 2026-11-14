@@ -1,0 +1,13 @@
+[project]
+name = "sandbox-e2b-example"
+version = "0.1.0"
+description = "Run the E2B SDK against sandboxes on AgentCore Runtime"
+requires-python = ">=3.11"
+dependencies = [
+    "agentcore-rl-toolkit[rollout]==0.2.0",
+    # The proxy relies on E2B_API_URL / E2B_SANDBOX_URL, which e2b has deprecated for removal in its next major version.
+    "e2b>=2.63.0,<3",
+]
+
+[tool.setuptools]
+py-modules = ["run_e2b"]

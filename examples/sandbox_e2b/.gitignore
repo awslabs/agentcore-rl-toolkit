@@ -1,0 +1,4 @@
+# Prebuilt sandboxd binary staged by ../../sandboxd/build.sh --stage .
+agentcore-sandboxd-linux-*
+# Standalone uv project: users run `uv sync` themselves; examples don't track lockfiles
+uv.lock

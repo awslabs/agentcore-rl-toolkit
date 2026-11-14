@@ -31,6 +31,7 @@ cd examples/strands_math_agent && uv sync && uv run python rl_app.py
 | `src/agentcore_rl_toolkit/backends/slime/` | slime backend: `generate` + `normalize_episode_rewards` hooks for slime's `--custom-generate-function-path` / `--custom-reward-post-process-path` (see [slime backend](#slime-backend-backendsslime)) |
 | `src/agentcore_rl_toolkit/sandbox/` | Sandbox SDK: `SandboxClient`, `Sandbox`, `ExecResult` — run programs in arbitrary images on ACR (see [Sandbox SDK](#sandbox-sdk)) |
 | `sandboxd/` | Go daemon (`agentcore-sandboxd`) for session health and recoverable command execution |
+| `src/agentcore_rl_toolkit/sandbox/e2b/` | `AgentCoreE2BProxy`: loopback E2B API so the unmodified `e2b` SDK runs sandboxes as ACR sessions (see [E2B-compatible sandboxes](#e2b-compatible-sandboxes)) |
 | `examples/strands_math_agent/` | GSM8K math agent example |
 | `examples/strands_migration_agent/` | Java migration agent example |
 | `examples/strands_officebench_agent/` | OfficeBench office automation agent example |
@@ -411,6 +412,27 @@ uv run pytest tests/sandbox/
 
 Live ACR tests require `SANDBOX_RUNTIME_ARN`. Go CI runs in
 `.github/workflows/sandboxd.yml`.
+
+#### E2B-compatible sandboxes
+
+`sandbox/e2b/proxy.py` (`AgentCoreE2BProxy`) lets the unmodified `e2b` SDK run
+sandboxes as ACR sessions; see [examples/sandbox_e2b](examples/sandbox_e2b/README.md)
+for the architecture, image layout and limits.
+
+**Key constraints:**
+
+- Data-plane routing uses the SDK's `E2b-Sandbox-Id` / `E2b-Sandbox-Port` headers,
+  not the Host. The SDK reaches the proxy through `E2B_API_URL` / `E2B_SANDBOX_URL`,
+  which E2B has deprecated for its next major version.
+- SigV4 replaces `Authorization`, where the SDK names the per-call user, so a
+  request naming a user other than `default_user` must fail rather than fall back.
+- `templateID` is the runtime ARN; keep control-plane lookups off the per-sandbox path.
+
+```bash
+uv run pytest tests/sandbox/test_e2b_proxy.py
+```
+
+Live tests require `AGENTCORE_E2B_RUNTIME_ARN` and the `e2b` package.
 
 ### Agent adaptation
 
