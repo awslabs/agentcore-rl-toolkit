@@ -72,6 +72,39 @@ sampling fields inherit the model endpoint's defaults, including the rollout
 gateway's per-session training or evaluation settings. The standalone evaluator
 explicitly requests 16,384 output tokens per call, temperature 0.7, and top-p 0.95.
 
+## Observability
+
+Each rollout ends with one JSON line in the harness runtime log:
+
+| Field | Value |
+|---|---|
+| `event` | `tmax_rollout` |
+| `task_id`, `session_id`, `source` | Task and sandbox session |
+| `reward`, `stop_reason`, `error`, `steps`, `duration_s` | Outcome |
+| `verifier_exit_code`, `verifier_timed_out`, `verifier_stdout`, `verifier_stderr` | Verifier result |
+| `trace_id` | Trace of this rollout in `aws/spans` |
+
+CloudWatch Logs Insights reads these fields directly:
+
+```
+filter event = 'tmax_rollout'
+| stats count() as n, avg(reward) as mean_reward, avg(duration_s) as seconds by stop_reason
+```
+
+The harness also emits spans to `aws/spans`, which requires CloudWatch
+Transaction Search and the harness role's trace permissions:
+
+| Span | Attributes |
+|---|---|
+| `tmax.rollout` | `tmax.task_id`, `session.id`, `tmax.reward`, `tmax.stop_reason`, `tmax.error`, `tmax.steps` |
+| `litellm_request` | Model and token usage; message content is not recorded |
+| `tmax.exec` | `tmax.command`, `tmax.exit_code`, `tmax.timed_out`, `tmax.output` |
+| `tmax.verify` | `tmax.verifier.exit_code` or `tmax.verifier.timed_out` |
+
+To trace a single rollout, follow
+[check-cloudwatch-session-logs](../../.agents/skills/check-cloudwatch-session-logs/SKILL.md)
+with its `session_id` or filter `aws/spans` on `traceId`.
+
 ## Run
 
 Provide a model endpoint that supports OpenAI Chat Completions tool calls
@@ -83,7 +116,7 @@ and security groups:
 | Role | Required access |
 |---|---|
 | Both | Pull from this ECR repository; write their AgentCore logs |
-| Harness | Invoke/stop this example's task runtimes; `GetObject` on `tmax/verifiers/*` |
+| Harness | Invoke/stop this example's task runtimes; `GetObject` on `tmax/verifiers/*`; [traces](#observability): `xray:PutTraceSegments`, `xray:PutTelemetryRecords`, `xray:GetSamplingRules`, `xray:GetSamplingTargets`, and `cloudwatch:PutMetricData` in namespace `bedrock-agentcore` |
 | Task | No S3 read or runtime invocation IAM permissions |
 
 On the model host's security group, allow traffic from the harness security

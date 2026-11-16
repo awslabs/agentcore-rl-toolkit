@@ -8,8 +8,11 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.litellm_model import LitellmModel
+from opentelemetry import trace
 
 from agentcore_rl_toolkit.sandbox import ExecTimeoutError
+
+tracer = trace.get_tracer("tmax_agent")
 
 
 def remaining(deadline):
@@ -30,15 +33,23 @@ class SandboxEnvironment(LocalEnvironment):
         )
 
     def execute(self, action, cwd="", *, timeout=None):
-        try:
-            result = self.sandbox.exec(
-                ["/bin/bash", "-c", action["command"]],
-                cwd=cwd or self.config.cwd or None,
-                env=self.config.env,
-                timeout=math.ceil(min(timeout or self.config.timeout, remaining(self.deadline))),
+        with tracer.start_as_current_span("tmax.exec", attributes={"tmax.command": action["command"]}) as span:
+            try:
+                result = self.sandbox.exec(
+                    ["/bin/bash", "-c", action["command"]],
+                    cwd=cwd or self.config.cwd or None,
+                    env=self.config.env,
+                    timeout=math.ceil(min(timeout or self.config.timeout, remaining(self.deadline))),
+                )
+            except ExecTimeoutError as exc:
+                result = exc.result
+            span.set_attributes(
+                {
+                    "tmax.exit_code": result.exit_code,
+                    "tmax.timed_out": result.timed_out,
+                    "tmax.output": (result.stdout + result.stderr)[-4000:],
+                }
             )
-        except ExecTimeoutError as exc:
-            result = exc.result
         output = {
             "output": result.stdout + result.stderr,
             "returncode": result.exit_code,
