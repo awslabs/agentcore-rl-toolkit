@@ -13,10 +13,13 @@ tool_service.py at the URL in TOOL_SERVICE_<FAMILY> (e.g. TOOL_SERVICE_DBQA).
 import hashlib
 import logging
 import os
+import socket
 import uuid
 from types import SimpleNamespace
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection
 
 from agentcore_rl_toolkit import AgentCoreRuntimeApp
 from harness.dbqa import harness as dbqa
@@ -30,9 +33,31 @@ logger = logging.getLogger(__name__)
 HARNESS = {"dbqa": dbqa, "screen": screen, "seqqa": seqqa, "gwas": gwas}
 TASK_FAMILIES = {task: family for family, module in HARNESS.items() for task in module.TASKS}
 TOOL_TIMEOUT = 900
+# A Runtime in VPC mode silently drops a TCP connection idle for about 350 s, and a model call that generates
+# for longer sends nothing back until it finishes; keepalive probes from 60 s keep such connections open.
+KEEPALIVE = HTTPConnection.default_socket_options + [
+    (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 5),
+]
+
+
+class _KeepAliveAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["socket_options"] = KEEPALIVE
+        super().init_poolmanager(*args, **kwargs)
+
+
+def keepalive_session() -> requests.Session:
+    session = requests.Session()
+    session.mount("http://", _KeepAliveAdapter())
+    session.mount("https://", _KeepAliveAdapter())
+    return session
+
 
 app = AgentCoreRuntimeApp()
-http = requests.Session()
+http = keepalive_session()
 
 
 def tool_client(family: str, session: str):
@@ -72,7 +97,7 @@ def invoke_agent(payload: dict, context):
         answer=payload.get("answer"),
     )
     # During training the rollout gateway keys trajectory capture off the api-key slot.
-    client = requests.Session()
+    client = keepalive_session()
     client.headers["Authorization"] = f"Bearer {config.get('api_key') or 'EMPTY'}"
     session = uuid.uuid4().hex
     url, invoke = tool_client(family, session)
