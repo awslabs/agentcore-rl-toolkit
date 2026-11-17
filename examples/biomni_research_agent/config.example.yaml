@@ -33,6 +33,8 @@ chat_template_kwargs: {enable_thinking: false}
 
 # --- Checkpointing ---
 save_every: 6
+# A step's forward_backward over 512 rollouts of up to 64K tokens takes longer than the 600 s default.
+train_op_timeout: 3600.0
 
 # --- Rollout ---
 max_rollout_time: 4000.0
