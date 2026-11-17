@@ -47,7 +47,7 @@ class SandboxEnvironment(LocalEnvironment):
                 {
                     "tmax.exit_code": result.exit_code,
                     "tmax.timed_out": result.timed_out,
-                    "tmax.output": (result.stdout + result.stderr)[-4000:],
+                    "tmax.output": result.stdout + result.stderr,
                 }
             )
         output = {
