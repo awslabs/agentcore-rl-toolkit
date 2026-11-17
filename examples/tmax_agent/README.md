@@ -140,6 +140,12 @@ Evaluation saves rewards, trajectories, and verifier output to `--output`.
 Deployment uses `uv run --script` to install a boto3 version with custom-port
 support independently of the evaluation environment's aiobotocore constraints.
 
+`pyproject.toml` covers only the local tooling dependencies (`prepare.py`,
+`evaluate.py`). The harness runtime gets its dependencies, including the
+toolkit's `[core]` extra, from the [`Dockerfile`](Dockerfile), so deploy the
+harness with `deploy.py` rather than packaging this directory with
+`pyproject.toml` as its dependency list.
+
 Task images run sandboxd on port 11000, leaving port 8080 available to the
 task's services.
 See the [custom serving port guide](../sandbox_quickstart/README.md#use-a-different-serving-port)
