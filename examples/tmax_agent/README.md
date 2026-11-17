@@ -142,9 +142,9 @@ support independently of the evaluation environment's aiobotocore constraints.
 
 `pyproject.toml` covers only the local tooling dependencies (`prepare.py`,
 `evaluate.py`). The harness runtime gets its dependencies, including the
-toolkit's `[core]` extra, from the [`Dockerfile`](Dockerfile), so deploy it with
-`deploy.py` rather than packaging this directory with `pyproject.toml` as its
-dependency list.
+toolkit's `[core]` extra, from the [`Dockerfile`](Dockerfile), so deploy the
+harness with `deploy.py` rather than packaging this directory with
+`pyproject.toml` as its dependency list.
 
 Task images run sandboxd on port 11000, leaving port 8080 available to the
 task's services.
