@@ -27,10 +27,13 @@ class SandboxEnvironment(LocalEnvironment):
         super().__init__(**kwargs)
         self.sandbox = sandbox
         self.deadline = deadline
-        platform = self.execute({"command": "uname -s; uname -r; uname -v; uname -m"})
-        self.platform = dict(
-            zip(("system", "release", "version", "machine"), platform["output"].splitlines(), strict=True)
+        # Parse stdout only: an image's shell startup may write to stderr.
+        result = self.sandbox.exec(
+            ["/bin/bash", "-c", "uname -s; uname -r; uname -v; uname -m"],
+            timeout=math.ceil(min(60, remaining(deadline))),
         )
+        lines = (result.stdout.splitlines() + [""] * 4)[:4]
+        self.platform = dict(zip(("system", "release", "version", "machine"), lines, strict=True))
 
     def execute(self, action, cwd="", *, timeout=None):
         with tracer.start_as_current_span("tmax.exec", attributes={"tmax.command": action["command"]}) as span:
