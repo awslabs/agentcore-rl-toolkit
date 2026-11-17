@@ -23,8 +23,11 @@ AgentCore splits telemetry across two CloudWatch log groups:
    - Log group: `aws/spans` (shared across all runtimes in the region)
    - Filter by `attributes.session.id = "<sid>"` to scope to one session.
    - Each event has `name`, `kind`, `durationNano`, `attributes.gen_ai.operation.name`, `attributes.tool.name`, plus any exceptions in `events[]`.
+   - Span names depend on the agent's framework. Strands emits `chat` and `execute_tool`; other harnesses emit their own (for example `litellm_request` for model calls). List them before analyzing: `stats count() by name`.
 
 Use source (1) for "did the session start / end / error at the app level?". Use source (2) for "what did the agent actually do?".
+
+Agents may also print their own JSON lines to the runtime log, with their own field names (not `sessionId`). Check the agent's README for its schema; recipe 5 aggregates such lines across sessions.
 
 ## Resolving the log group name from the ARN
 
@@ -140,6 +143,24 @@ done
 aws logs get-query-results --region us-west-2 --query-id $QID --output json
 ```
 
+### 5. Aggregate an agent's structured log lines across sessions
+
+When the agent prints one JSON line per session or episode, Logs Insights parses its fields, so one query summarizes thousands of sessions. Replace `event`, `reward`, and `stop_reason` with the agent's field names:
+
+```bash
+QID=$(aws logs start-query --region $REGION --log-group-name "$LG" \
+  --start-time $(($(date +%s) - 21600)) --end-time $(date +%s) \
+  --query-string "filter event = 'tmax_rollout' | stats count() as n, avg(reward) as mean_reward by stop_reason | sort n desc" \
+  --query 'queryId' --output text)
+
+while [[ "$(aws logs get-query-results --region $REGION --query-id $QID --query 'status' --output text)" != "Complete" ]]; do
+  sleep 2
+done
+aws logs get-query-results --region $REGION --query-id $QID --output json
+```
+
+Group by a task identifier to find tasks that always fail, or by error text to rank failure modes. Do not alias a stat to an existing field name (`avg(steps) as steps`): Insights rejects it as a cycle.
+
 ## Analysis patterns
 
 When inspecting, answer these in order:
@@ -179,6 +200,7 @@ If recipe 2 or 3 returns nothing for a session you're sure ran, work through the
 3. **Stale time window?** `filter-log-events --start-time` and `start-query --start-time` both default to "recent." Older sessions need a larger window — the runtime ARN's `creationTime` from `describe-log-groups` is a hard lower bound.
 4. **Typo'd or wrongly-cased session_id?** AgentCore session IDs are case-sensitive lowercased UUIDs. Copy from the source rather than retyping.
 5. **Session never reached the runtime?** If recipe 2 returns no events even with a wide window, the runtime never received the request — check the client-side `invoke_agent_runtime` response, network/IAM, and the agent ARN itself. Recipe 1 ("list recent sessions") confirms whether *any* sessions are landing.
+6. **Runtime logs present but no spans?** The execution role likely lacks trace permissions, and X-Ray rejects every span. It needs `xray:PutTraceSegments`, `xray:PutTelemetryRecords`, `xray:GetSamplingRules`, and `xray:GetSamplingTargets`. Check with `aws iam simulate-principal-policy --policy-source-arn <role-arn> --action-names xray:PutTraceSegments`. Also confirm Transaction Search is enabled: `aws xray get-trace-segment-destination` should return `CloudWatchLogs`.
 
 ## Gotchas
 
@@ -187,3 +209,4 @@ If recipe 2 or 3 returns nothing for a session you're sure ran, work through the
 - **Runtime logs vs spans differ in completeness.** A session that returned fast with no model call will have ~3 runtime-log events but zero spans (no instrumented work happened). Conversely, a session that crashed mid-stream may have 100+ spans but only a single "task started" runtime log — useful for debugging in-flight failures.
 - **Session ID must be lowercased UUID.** AgentCore treats them case-sensitively.
 - **Spans don't always arrive in order.** Use `sort @timestamp asc` explicitly.
+- **Outer spans arrive last.** A span is exported when it ends, so the root span of a session can appear minutes after its child spans. Wait before concluding it is missing.
