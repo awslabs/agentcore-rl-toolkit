@@ -1,0 +1,31 @@
+[project]
+name = "strands-widesearch-agent-example"
+version = "0.1.0"
+description = "Example: Strands WideSearch broad information-seeking agent using Bedrock AgentCore RL Toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agentcore-rl-toolkit[core]==0.2.0",
+    "bedrock-agentcore>=1.0.3",
+    "boto3>=1.40.55",
+    "strands-agents[openai]>=1.63.0",
+    "httpx",
+    "beautifulsoup4",
+    "lxml",
+    "pypdf",
+    # the official evaluation (widesearch_eval/)
+    "pandas",
+    "numpy",
+    "dateparser",
+    "loguru",
+    "datasets",
+    "huggingface_hub",
+]
+
+[project.optional-dependencies]
+# env/: the Wikipedia dumps service
+env = ["libzim==3.7.0"]
+
+[tool.setuptools]
+py-modules = ["rl_app", "reward", "models", "tools"]
+packages = ["widesearch_eval"]
