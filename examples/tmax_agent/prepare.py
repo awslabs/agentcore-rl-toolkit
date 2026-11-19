@@ -59,6 +59,8 @@ def prepare_task(task_dir, binary, repository, bucket, s3, scratch):
             "\nENV TMPDIR=/var/tmp\n"
             "RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \\\n"
             "    && rm -rf /var/lib/apt/lists/*\n"
+            "RUN mkdir -p /workspace /output /logs/verifier /root && ([ -d /app ] || ln -sf /workspace /app)\n"
+            "WORKDIR /app\n"
             "COPY --chmod=755 agentcore-sandboxd /usr/local/bin/agentcore-sandboxd\n"
             f"EXPOSE {SANDBOX_PORT}\n"
             f'CMD ["/usr/local/bin/agentcore-sandboxd", "--listen", "0.0.0.0:{SANDBOX_PORT}"]\n'
