@@ -1,0 +1,9 @@
+data/
+__pycache__/
+*.egg-info/
+.venv/
+.env
+.bedrock_agentcore.yaml
+.bedrock_agentcore/
+config.yaml
+README.md

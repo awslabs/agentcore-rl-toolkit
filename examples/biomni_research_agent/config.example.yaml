@@ -1,0 +1,41 @@
+# GRPO on SageMaker Training Sessions (agentcore_rl_toolkit.backends.sagemaker.train_grpo).
+# Copy to config.yaml and fill in the AWS resources and the dataset path.
+
+# --- AWS resources ---
+role_arn: "arn:aws:iam::<account-id>:role/<your-sagemaker-role>"
+s3_output_path: "s3://<your-s3-bucket>/output/"
+model_package_group_arn: "arn:aws:sagemaker:<region>:<account-id>:model-package-group/<your-group>"
+base_model_arn: "arn:aws:sagemaker:us-west-2:aws:hub-content/SageMakerPublicHub/Model/huggingface-vlm-qwen3-6-27b/1.24.0"
+agent_runtime_arn: "arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<your-agent-id>"
+region: "us-west-2"
+
+# --- LoRA ---
+lora_rank: 32
+lora_alpha: 64
+
+# --- Training ---
+batch_size: 64
+responses_per_prompt: 8
+learning_rate: 5.0e-5
+max_context_tokens: 65536
+max_new_tokens: 8192
+temperature: 0.7
+epochs: 1
+loss: ppo
+
+# --- Dataset: a parquet with a payload column ---
+dataset_path: "/path/to/train.parquet"
+
+# --- Gateway: pin the port so the host's security group can allow it from the Runtime's security group only ---
+gateway_port: 18000
+history_mode: linear
+chat_template_kwargs: {enable_thinking: false}
+
+# --- Checkpointing ---
+save_every: 6
+
+# --- Rollout ---
+max_rollout_time: 4000.0
+
+# --- Logging ---
+wandb_project: ""
