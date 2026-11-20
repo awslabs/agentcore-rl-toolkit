@@ -47,6 +47,9 @@ class Config:
     chat_template_kwargs: dict = dataclasses.field(default_factory=dict)
     gateway_port: int = 0
     history_mode: str = "linear"
+    # Send the generated-token mask as per-token ``weights``. SkyRL uses them as its loss mask;
+    # without them, its logprob and importance-ratio metrics also average over prompt tokens.
+    loss_weights: bool = False
     steps: int = 3
     batch_size: int = 4
     group_size: int = 4
@@ -383,7 +386,7 @@ async def train(config: Config):
                 )
                 + "\n"
             )
-            datums, metrics = training_data(groups)
+            datums, metrics = training_data(groups, config.loss_weights)
             metrics["time/rollout_seconds"] = time.monotonic() - start
             if datums:
                 backward, optimizer = await update_policy(training_client, datums, config.learning_rate)

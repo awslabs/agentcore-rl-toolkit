@@ -1,0 +1,215 @@
+diff --git a/skyrl/backends/skyrl_train/distributed/fsdp_strategy.py b/skyrl/backends/skyrl_train/distributed/fsdp_strategy.py
+index 4220aaaf..1044afb9 100644
+--- a/skyrl/backends/skyrl_train/distributed/fsdp_strategy.py
++++ b/skyrl/backends/skyrl_train/distributed/fsdp_strategy.py
+@@ -380,40 +380,44 @@ class FSDPStrategy(DistributedStrategy):
+ 
+         # Extract the actual model for saving
+         if isinstance(model, HFModelWrapper):
+             save_model = model.model
+         else:
+             save_model = model
+ 
+         # Define paths for saving individual rank files
+         rank = self.get_rank()
+         world_size = self.world_size
+ 
+         with io.local_work_dir(ckpt_dir) as work_dir:
+             model_path = os.path.join(work_dir, f"model_world_size_{world_size}_rank_{rank}.pt")
+             optim_path = os.path.join(work_dir, f"optim_world_size_{world_size}_rank_{rank}.pt")
+             extra_path = os.path.join(work_dir, f"extra_state_world_size_{world_size}_rank_{rank}.pt")
+ 
+             with warnings.catch_warnings():
+                 warnings.simplefilter("ignore")
+                 # FSDP2 state_dict returns DTensors directly; no state_dict_type context needed.
+                 model_state_dict = save_model.state_dict()
++                # LoRA: the frozen base never changes, so save only trainable (adapter) tensors.
++                if self.is_lora:
++                    trainable = {name for name, param in save_model.named_parameters() if param.requires_grad}
++                    model_state_dict = {k: v for k, v in model_state_dict.items() if k in trainable}
+                 self.print(f"[rank-{rank}]: Saving model to {model_path}")
+                 with io.open_file(model_path, "wb") as f:
+                     torch.save(model_state_dict, f)
+ 
+                 # Get and save optimizer state dict if optimizer is provided
+                 optimizer_state_dict = {}
+                 if optimizer is not None:
+                     optimizer_state_dict = optimizer.state_dict()
+                 self.print(f"[rank-{rank}]: Saving optim to {optim_path}")
+                 with io.open_file(optim_path, "wb") as f:
+                     torch.save(optimizer_state_dict, f)
+ 
+                 # Get scheduler state dict if scheduler is provided
+                 lr_scheduler_state_dict = {}
+                 if scheduler is not None:
+                     lr_scheduler_state_dict = scheduler.state_dict()
+ 
+                 # Create extra state dict with client state and any additional info
+                 extra_state_dict = {
+                     "lr_scheduler": lr_scheduler_state_dict,
+@@ -502,41 +506,48 @@ class FSDPStrategy(DistributedStrategy):
+             if optim_exists:
+                 self.print(f"[rank-{rank}]: Loading optim from {optim_path}")
+ 
+             # Load state dictionaries from disk
+             with io.open_file(model_path, "rb") as f:
+                 model_state_dict = torch.load(f, map_location="cpu", weights_only=False)
+             with io.open_file(extra_path, "rb") as f:
+                 extra_state_dict = torch.load(f, map_location="cpu", weights_only=False)
+ 
+             optimizer_state_dict = {}
+             if optim_exists and load_optimizer_states:
+                 with io.open_file(optim_path, "rb") as f:
+                     optimizer_state_dict = torch.load(f, map_location="cpu", weights_only=False)
+ 
+         # Extract scheduler state from extra state
+         lr_scheduler_state_dict = extra_state_dict.get("lr_scheduler", {})
+ 
+         with warnings.catch_warnings():
+             warnings.simplefilter("ignore")
+             # FSDP2: load_state_dict accepts DTensors directly; no state_dict_type context needed.
+-            load_model.load_state_dict(model_state_dict, strict=load_module_strict)
++            if self.is_lora:
++                # LoRA checkpoints may hold only trainable tensors; keep the already-loaded frozen base.
++                result = load_model.load_state_dict(model_state_dict, strict=False)
++                trainable = {name for name, param in load_model.named_parameters() if param.requires_grad}
++                if result.unexpected_keys or trainable - set(model_state_dict):
++                    raise ValueError("Trainable-only checkpoint does not match the model's trainable parameters")
++            else:
++                load_model.load_state_dict(model_state_dict, strict=load_module_strict)
+             self.print(f"[rank-{rank}]: Successfully loaded model state dict")
+ 
+             # Load optimizer state dict if optimizer object is provided and loading is requested
+             if optimizer is not None and load_optimizer_states and optimizer_state_dict:
+                 optimizer.load_state_dict(optimizer_state_dict)
+                 self.print(f"[rank-{rank}]: Successfully loaded optimizer state")
+ 
+             # Load scheduler state dict if scheduler object is provided and loading is requested
+             if scheduler is not None and load_lr_scheduler_states:
+                 scheduler.load_state_dict(lr_scheduler_state_dict)
+                 self.print(f"[rank-{rank}]: Successfully loaded scheduler state")
+ 
+         # Load RNG state for reproducibility
+         if "rng" in extra_state_dict:
+             self.load_rng_state(extra_state_dict["rng"])
+ 
+         # Wait for all ranks to finish loading
+         dist.barrier()
+ 
+         # Create states dict with extra information
+diff --git a/skyrl/backends/skyrl_train_backend.py b/skyrl/backends/skyrl_train_backend.py
+index ac361284..5b5e17a7 100644
+--- a/skyrl/backends/skyrl_train_backend.py
++++ b/skyrl/backends/skyrl_train_backend.py
+@@ -1515,48 +1515,57 @@ class SkyRLTrainBackend(AbstractBackend):
+             raise RuntimeError("Training and weight synchronization are unavailable in an inference-only runtime")
+         if self._dispatch is None:
+             raise RuntimeError("Model not initialized")
+ 
+     def _staging_root(self, reference_path) -> str:
+         """Return a directory for checkpoint staging on the same filesystem as
+         ``reference_path``.
+ 
+         Tar archives are written/read in the engine process, but the actual
+         model files are produced/consumed by remote Ray worker actors that may
+         run on a different node.  Staging on local /tmp (``tempfile``'s default)
+         therefore breaks on multi-node deployments because the worker and the
+         engine do not share that path.  ``reference_path`` lives under
+         ``checkpoints_base`` (expected to be shared storage), so staging next to
+         it keeps the directory visible to both processes.
+         """
+         staging_root = os.path.dirname(os.path.abspath(reference_path))
+         os.makedirs(staging_root, exist_ok=True)
+         return staging_root
+ 
+-    def _create_tar_from_directory(self, source_dir: str, output_path: str) -> None:
+-        """Create an uncompressed tar archive from a directory."""
++    def _create_tar_from_directory(self, source_dir: str, output_path: str, gzip: bool = False) -> None:
++        """Create a tar archive (local or cloud ``output_path``) from a directory."""
++        from cloudpathlib import AnyPath
++
+         # Ensure parent directory exists
+         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+ 
+         # Use uncompressed tar - gzip adds 5-10min CPU time on 6-7GB FSDP checkpoints
+-        with tarfile.open(output_path, "w") as tar:
++        # (gzip=True writes level 0, framing only, for readers that require gzip).
++        mode, options = ("w:gz", {"compresslevel": 0}) if gzip else ("w", {})
++        destination = AnyPath(output_path)
++        with destination.open("wb") as f, tarfile.open(fileobj=f, mode=mode, **options) as tar:
+             tar.add(source_dir, arcname=".")
++        # A cloud write uploads on close but keeps cloudpathlib's local copy, whose mtime can
++        # look newer than the object's whole-second timestamp; a later read here would then fail.
++        if hasattr(destination, "clear_cache"):
++            destination.clear_cache()
+ 
+     def save_checkpoint(self, output_path, model_id: str) -> None:
+         """Save full training checkpoint (model + optimizer + scheduler) as tar."""
+         self._validate_model_state(model_id)
+         role = self._get_role(model_id)
+ 
+         # The dispatch backloads the trainer (masters + optimizer) for the
+         # save; awake colocated engines hold most of the GPU (218GiB/GPU at
+         # gpu_memory_utilization=0.8) and the backload OOMs. Same idiom as
+         # forward/forward_backward: sleep first, the next weight sync wakes.
+         self._sleep_inference_engines()
+ 
+         # Create temp directory for checkpoint on the same (shared) filesystem
+         # as output_path so the remote worker that writes the files and the
+         # engine that tars them both see the same path.
+         with tempfile.TemporaryDirectory(dir=self._staging_root(output_path)) as temp_dir:
+             ckpt_dir = os.path.join(temp_dir, "checkpoint")
+ 
+             # Save checkpoint directory (includes optimizer state automatically)
+             self._dispatch.save_checkpoint(model=role, ckpt_dir=ckpt_dir, tokenizer=self._tokenizer, model_id=model_id)
+@@ -1589,40 +1598,50 @@ class SkyRLTrainBackend(AbstractBackend):
+                 model=role,
+                 ckpt_dir=temp_dir,
+                 load_optimizer_states=load_optimizer,
+                 load_lr_scheduler_states=load_optimizer,
+                 model_id=model_id,
+             )
+ 
+         logger.info(f"Loaded checkpoint for {model_id} from {checkpoint_path}")
+ 
+     def save_sampler_checkpoint(self, output_path, model_id: str, persist: bool = True) -> None:
+         """Sync weights to colocated inference engines and optionally save to disk.
+ 
+         The NCCL broadcast always runs so inference engines have the latest
+         policy weights.  When ``persist`` is False (the common hot-path in RL
+         loops) the expensive HuggingFace model export is skipped entirely.
+         """
+         self._validate_model_state(model_id)
+         if self._get_role(model_id) != "policy":
+             raise ValueError("save_sampler_checkpoint is only supported for policy models")
+ 
++        if self.config.runtime_role == "trainer":
++            # No local engines: always write the HF/PEFT export, even when ephemeral, as the
++            # gzip tar that --external-inference-url's client unpacks.
++            with tempfile.TemporaryDirectory(dir=self._staging_root(output_path)) as temp_dir:
++                hf_dir = os.path.join(temp_dir, "model")
++                self._dispatch.save_hf_model(model="policy", export_dir=hf_dir, tokenizer=self._tokenizer)
++                self._create_tar_from_directory(hf_dir, output_path, gzip=True)
++            logger.info(f"Exported sampler weights for {model_id} to {output_path}")
++            return
++
+         # Lazily create inference engines on first sampling-related call
+         self._ensure_inference_engines()
+ 
+         adapter_only_sync = self._adapter_only_sync
+ 
+         # Multi-LoRA: pass model_id so the dispatch swaps the right adapter in
+         # before broadcasting and the worker registers it on vLLM under that
+         # name. None for the FFT / single-tenant path uses legacy behavior.
+         sync_id = model_id if self._base_lora_signature is not None else None
+         try:
+             asyncio.run(self._dispatch.save_weights_for_sampler(model_id=sync_id))
+         finally:
+             # Dispatch owns the sync-time sleep/wake sequence. After a sync
+             # attempt, force the next backend sleep to issue a real engine
+             # call instead of relying on stale local state.
+             self._engines_sleep_level = None
+         if sync_id is not None:
+             # The sync registered this tenant's adapter on vLLM; remember it
+             # so delete_model can unload it.
+             self._inference_adapter_ids.add(model_id)
