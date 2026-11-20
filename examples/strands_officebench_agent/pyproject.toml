@@ -10,17 +10,23 @@ dependencies = [
     "boto3>=1.40.55",
     "python-dotenv>=1.0.0",
     "strands-agents[openai]>=1.18.0",
-    "strands-agents-tools>=0.2.16",
+    # 0.9.0 removed strands_tools.shell, which this agent uses; moving to strands.vended_tools.shell
+    # changes the tool's security boundary and is a separate change.
+    "strands-agents-tools>=0.2.16,<0.9.0",
     # OfficeBench evaluation deps
     "openpyxl",
     "python-docx",
     "PyMuPDF",
+    # Imported by OfficeBench's pdf_read_file script; without it the agent's pdf_read_file tool fails.
+    "PyPDF2",
     "pdf2docx",
     "pytesseract",
     "icalendar",
     "Pillow",
     "pytz",
     "fire",
+    # Imported by OfficeBench's word_app scripts (word_create_new_file, word_write_to_file).
+    "pandas",
 ]
 
 [tool.setuptools]

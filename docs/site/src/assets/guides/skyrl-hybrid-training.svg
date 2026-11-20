@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="196" viewBox="0 0 720 196" role="img" aria-labelledby="title">
+  <title id="title">SkyRL hybrid training: agents, ART client, GPU trainer, S3 and a separate sampling host</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#4b5563"/>
+    </marker>
+    <style>
+      .box { fill: #f3f4f6; stroke: #9ca3af; stroke-width: 1.2; }
+      .gpu { fill: #fff7ed; stroke: #f59e0b; }
+      .trn { fill: #ecfeff; stroke: #06b6d4; }
+      .title { font: 600 13px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #111827; text-anchor: middle; }
+      .sub { font: 11.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #4b5563; text-anchor: middle; }
+      .edge { fill: none; stroke: #4b5563; stroke-width: 1.4; marker-end: url(#arrow); }
+      .step { fill: #1f2937; }
+      .num { font: 600 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #ffffff; text-anchor: middle; dominant-baseline: central; }
+    </style>
+  </defs>
+  <rect width="720" height="196" rx="8" fill="#ffffff"/>
+
+  <!-- Hosts -->
+  <rect class="box" x="20" y="22" width="140" height="54" rx="6"/>
+  <text class="title" x="90" y="44">AgentCore Runtime</text>
+  <text class="sub" x="90" y="62">agents</text>
+
+  <rect class="box" x="200" y="22" width="140" height="54" rx="6"/>
+  <text class="title" x="270" y="44">ART client</text>
+  <text class="sub" x="270" y="62">loop + gateway</text>
+
+  <rect class="box gpu" x="380" y="22" width="140" height="54" rx="6"/>
+  <text class="title" x="450" y="44">GPU host</text>
+  <text class="sub" x="450" y="62">SkyRL LoRA trainer</text>
+
+  <rect class="box trn" x="560" y="22" width="140" height="54" rx="6"/>
+  <text class="title" x="630" y="44">Sampling host</text>
+  <text class="sub" x="630" y="62">e.g. vLLM-Neuron</text>
+
+  <!-- S3 cylinder -->
+  <path class="box" d="M470 126 v46 a70 9 0 0 0 140 0 v-46"/>
+  <ellipse class="box" cx="540" cy="126" rx="70" ry="9"/>
+  <text class="title" x="540" y="152">S3</text>
+  <text class="sub" x="540" y="169">LoRA checkpoints</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M160 49 H198"/>
+  <path class="edge" d="M340 49 H378"/>
+  <path class="edge" d="M520 49 H558"/>
+  <path class="edge" d="M450 76 V150 H468"/>
+  <path class="edge" d="M610 150 H630 V78"/>
+
+  <!-- Step numbers -->
+  <circle class="step" cx="179" cy="49" r="9"/><text class="num" x="179" y="49">1</text>
+  <circle class="step" cx="359" cy="49" r="9"/><text class="num" x="359" y="49">2</text>
+  <circle class="step" cx="539" cy="49" r="9"/><text class="num" x="539" y="49">3</text>
+  <circle class="step" cx="450" cy="112" r="9"/><text class="num" x="450" y="112">4</text>
+  <circle class="step" cx="630" cy="112" r="9"/><text class="num" x="630" y="112">5</text>
+</svg>

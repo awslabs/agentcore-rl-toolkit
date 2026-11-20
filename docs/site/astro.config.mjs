@@ -48,6 +48,7 @@ export default defineConfig({
 								{ label: 'verl', slug: 'guides/verl-backend-setup' },
 								{ label: 'slime', slug: 'guides/slime-backend-setup' },
 								{ label: 'SageMaker', slug: 'guides/sagemaker-backend-setup' },
+								{ label: 'SkyRL hybrid training', slug: 'guides/skyrl-hybrid-training' },
 								{
 									label: 'SkyRL ↗',
 									link: 'https://github.com/awslabs/agentcore-rl-toolkit/blob/main/src/agentcore_rl_toolkit/backends/tinker_api/README.md',

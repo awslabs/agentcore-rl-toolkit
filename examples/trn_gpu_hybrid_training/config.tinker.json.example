@@ -1,0 +1,23 @@
+{
+  "endpoint": "http://127.0.0.1:18080",
+  "base_model": "/models/Qwen3.6-27B",
+  "tokenizer": "/models/Qwen3.6-27B",
+  "dataset": "officebench.jsonl",
+  "agent_runtime_arn": "arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/RUNTIME_ID",
+  "gateway_host": "PRIVATE_IP_REACHABLE_FROM_AGENTCORE",
+  "gateway_port": 18081,
+  "output_dir": "outputs/officebench",
+  "steps": 1,
+  "batch_size": 4,
+  "group_size": 4,
+  "lora_rank": 8,
+  "learning_rate": 1e-05,
+  "max_new_tokens": 512,
+  "max_context_tokens": 16384,
+  "rollout_timeout": 900,
+  "tps_limit": 4,
+  "chat_template_kwargs": {
+    "enable_thinking": false
+  },
+  "loss_weights": true
+}

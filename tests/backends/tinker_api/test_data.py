@@ -23,6 +23,10 @@ def test_token_shift_masks_prompt_and_tool_output():
     assert datum.model_input.to_ints() == [10, 11, 12, 13, 14, 15]
     assert list(datum.loss_fn_inputs["target_tokens"].data) == [11, 12, 13, 14, 15, 16]
     assert list(datum.loss_fn_inputs["advantages"].data) == [0, 0.75, 0.75, 0, 0, 0.75]
+    assert "weights" not in datum.loss_fn_inputs  # Tinker's RL loss inputs only, by default
+    weighted = trace_to_datum(trace, 0.75, loss_weights=True)
+    assert list(weighted.loss_fn_inputs["weights"].data) == [0, 1, 1, 0, 0, 1]
+    assert list(weighted.loss_fn_inputs["advantages"].data) == list(datum.loss_fn_inputs["advantages"].data)
     assert list(datum.loss_fn_inputs["logprobs"].data) == pytest.approx([0, -0.1, -0.2, 0, 0, -0.3])
 
 
@@ -39,6 +43,9 @@ def test_forked_failure_is_counted_once_and_preserves_centering_and_masks():
     assert metrics["rollout/failed_episodes"] == metrics["rollout/truncated_episodes"] == 1
     assert metrics["rollout/failure_rate"] == 0.5
     assert [list(d.loss_fn_inputs["advantages"].data) for d in datums] == [[0, -2, -2], [0, 0, -2], [0, 2, 2]]
+    assert all("weights" not in d.loss_fn_inputs for d in datums)
+    weighted, _ = training_data([[a, b]], loss_weights=True)
+    assert [list(d.loss_fn_inputs["weights"].data) for d in weighted] == [[0, 1, 1], [0, 0, 1], [0, 1, 1]]
 
 
 def test_constant_rewards_skip_training():
