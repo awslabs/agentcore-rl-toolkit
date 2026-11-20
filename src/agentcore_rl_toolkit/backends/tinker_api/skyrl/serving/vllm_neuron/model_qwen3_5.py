@@ -23,7 +23,8 @@ def load_merged(base_path, adapter_path):
 
         config = Qwen3_5Config.from_pretrained(base_path)
     base = AutoModelForCausalLM.from_pretrained(
-        base_path, config=config.text_config if is_vlm else config, dtype=torch.bfloat16, device_map="cpu")
+        base_path, config=config.text_config if is_vlm else config, dtype=torch.bfloat16, device_map="cpu"
+    )
     merged = PeftModel.from_pretrained(base, adapter_path, is_trainable=False).merge_and_unload(safe_merge=True)
     if not is_vlm:
         return merged

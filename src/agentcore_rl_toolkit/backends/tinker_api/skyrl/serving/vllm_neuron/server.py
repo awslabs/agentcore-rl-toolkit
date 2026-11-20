@@ -35,10 +35,21 @@ else:  # Imported by name with this directory on sys.path (PYTHONPATH).
 MODEL_SUPPORT = {module.MODEL_TYPE: module for module in (model_qwen3_5,)}
 ADAPTER_FILES = ("adapter_config.json", "adapter_model.safetensors")
 # Copied from the base into every merged checkpoint, and required to match the resident model.
-BASE_METADATA = ("config.json", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja",
-                 "generation_config.json", "preprocessor_config.json", "processor_config.json",
-                 "special_tokens_map.json", "added_tokens.json", "vocab.json", "merges.txt",
-                 "tokenizer.model", "spiece.model")
+BASE_METADATA = (
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "chat_template.jinja",
+    "generation_config.json",
+    "preprocessor_config.json",
+    "processor_config.json",
+    "special_tokens_map.json",
+    "added_tokens.json",
+    "vocab.json",
+    "merges.txt",
+    "tokenizer.model",
+    "spiece.model",
+)
 SKYRL_ID = re.compile(r"[A-Za-z0-9_-]+")  # SkyRL model and checkpoint IDs; also safe as a directory name.
 MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024
 SAMPLING_PATHS = ("/v1/completions", "/v1/chat/completions")
@@ -67,8 +78,10 @@ def model_support(checkpoint):
     """Return the model-support module for a checkpoint's ``model_type``."""
     model_type = json.loads((Path(checkpoint) / "config.json").read_text()).get("model_type")
     if model_type not in MODEL_SUPPORT:
-        raise ValueError(f"Weight refresh does not support model_type {model_type!r}; "
-                         f"supported: {', '.join(sorted(MODEL_SUPPORT))}")
+        raise ValueError(
+            f"Weight refresh does not support model_type {model_type!r}; "
+            f"supported: {', '.join(sorted(MODEL_SUPPORT))}"
+        )
     return MODEL_SUPPORT[model_type]
 
 
@@ -77,8 +90,15 @@ def model_support(checkpoint):
 
 def s3_location(uri):
     parsed = urlsplit(uri)
-    if (parsed.scheme != "s3" or not parsed.netloc or parsed.username or parsed.password
-            or ":" in parsed.netloc or parsed.query or parsed.fragment):
+    if (
+        parsed.scheme != "s3"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or ":" in parsed.netloc
+        or parsed.query
+        or parsed.fragment
+    ):
         raise ValueError("Checkpoint storage must be an s3://bucket/prefix URI")
     key = parsed.path.lstrip("/").rstrip("/")
     if not key or any(part in ("", ".", "..") for part in key.split("/")):
@@ -90,8 +110,11 @@ def s3_client(region=None):
     import boto3
     from botocore.config import Config
 
-    return boto3.client("s3", region_name=region, config=Config(
-        connect_timeout=10, read_timeout=60, retries={"mode": "standard", "max_attempts": 2}))
+    return boto3.client(
+        "s3",
+        region_name=region,
+        config=Config(connect_timeout=10, read_timeout=60, retries={"mode": "standard", "max_attempts": 2}),
+    )
 
 
 def sampler_checkpoint_key(version, checkpoints_prefix, client):
@@ -104,7 +127,7 @@ def sampler_checkpoint_key(version, checkpoints_prefix, client):
     bucket, prefix = s3_location(checkpoints_prefix)
     found = []
     for index, char in enumerate(version):
-        model_id, checkpoint_id = version[:index], version[index + 1:]
+        model_id, checkpoint_id = version[:index], version[index + 1 :]
         if char != "_" or not SKYRL_ID.fullmatch(model_id) or not SKYRL_ID.fullmatch(checkpoint_id):
             continue
         key = f"{prefix}/{model_id}/sampler_weights/{checkpoint_id}.tar.gz"
@@ -117,8 +140,10 @@ def sampler_checkpoint_key(version, checkpoints_prefix, client):
             continue
         found.append(key)
     if len(found) != 1:
-        raise LookupError(f"No unique readable SkyRL sampler checkpoint for model {version!r} "
-                          f"under {checkpoints_prefix} (missing, ambiguous or access denied)")
+        raise LookupError(
+            f"No unique readable SkyRL sampler checkpoint for model {version!r} "
+            f"under {checkpoints_prefix} (missing, ambiguous or access denied)"
+        )
     return bucket, found[0]
 
 
@@ -248,8 +273,13 @@ class WeightRefreshWorker:
             if not torch.isfinite(tensor).all().item():
                 raise ValueError(f"Nonfinite checkpoint parameter: {name}")
         self._refresh_staged = (version, source)
-        return {"pid": os.getpid(), "rank": self.rank, "parameters": len(source),
-                "stage_seconds": time.monotonic() - started, "version": version}
+        return {
+            "pid": os.getpid(),
+            "rank": self.rank,
+            "parameters": len(source),
+            "stage_seconds": time.monotonic() - started,
+            "version": version,
+        }
 
     def apply_checkpoint(self, version):
         import torch
@@ -272,9 +302,14 @@ class WeightRefreshWorker:
                     raise RuntimeError(f"Device weight verification failed: {name}")
         self._refresh_staged = None
         self._refresh_version = version
-        return {"pid": os.getpid(), "rank": self.rank, "version": version,
-                "changed_parameters": changed, "parameters": len(source),
-                "apply_seconds": time.monotonic() - started}
+        return {
+            "pid": os.getpid(),
+            "rank": self.rank,
+            "version": version,
+            "changed_parameters": changed,
+            "parameters": len(source),
+            "apply_seconds": time.monotonic() - started,
+        }
 
 
 # --- Request routing and refresh orchestration (API server process) -----------------
@@ -285,10 +320,12 @@ async def all_workers(engine, method, *args):
     # first replica's result. Keep all acknowledgements for activation checks.
     core = engine.engine_core
     if hasattr(core, "core_engines"):
-        groups = await asyncio.gather(*[
-            core._call_utility_async("collective_rpc", method, 180, args, {}, engine=replica)
-            for replica in core.core_engines
-        ])
+        groups = await asyncio.gather(
+            *[
+                core._call_utility_async("collective_rpc", method, 180, args, {}, engine=replica)
+                for replica in core.core_engines
+            ]
+        )
         return [worker for group in groups for worker in group]
     return await engine.collective_rpc(method, timeout=180, args=args)
 
@@ -387,8 +424,10 @@ class RefreshController:
                 except Exception as exc:
                     if model == version:
                         status = 404 if isinstance(exc, LookupError) else 500
-                        return status, {"error": f"Activation of {version} failed: {exc}",
-                                        "restart_required": self.failed}
+                        return status, {
+                            "error": f"Activation of {version} failed: {exc}",
+                            "restart_required": self.failed,
+                        }
                 continue
             if model is None or model == self.served():
                 return None
@@ -415,8 +454,13 @@ class RefreshController:
         engine = self.app.state.engine_client
         current = self.models().base_model_paths[0].model_path
         checkpoint = await asyncio.to_thread(
-            prepare_adapter, version, base_path=self.base_path, output_root=self.root,
-            checkpoints_prefix=self.checkpoints_prefix, region=self.s3_region)
+            prepare_adapter,
+            version,
+            base_path=self.base_path,
+            output_root=self.root,
+            checkpoints_prefix=self.checkpoints_prefix,
+            region=self.s3_region,
+        )
         checkpoint = await asyncio.to_thread(validate_checkpoint, self.root, current, checkpoint, version)
         prepared = time.monotonic()
         # Download and CPU merge do not block requests to the old version.
@@ -424,7 +468,8 @@ class RefreshController:
         await asyncio.wait_for(self.drained.wait(), timeout=1800)
         await engine.pause_generation(mode="wait", clear_cache=True)
         expected = engine.vllm_config.parallel_config.tensor_parallel_size * len(
-            getattr(engine.engine_core, "core_engines", [None]))
+            getattr(engine.engine_core, "core_engines", [None])
+        )
         staged = await all_workers(engine, "stage_checkpoint", checkpoint, version)
         staged_pids = check_acknowledgements(staged, expected, version, "staging")
         applied = await all_workers(engine, "apply_checkpoint", version)
@@ -439,9 +484,14 @@ class RefreshController:
         old = Path(previous.model_path).resolve()
         if old != Path(checkpoint).resolve() and old.is_relative_to(Path(self.root).resolve()) and old.is_dir():
             await asyncio.to_thread(shutil.rmtree, old, True)
-        result = {"version": version, "seconds": time.monotonic() - started,
-                  "prepare_seconds": prepared - started, "refresh_seconds": time.monotonic() - prepared,
-                  "staged": staged, "applied": applied}
+        result = {
+            "version": version,
+            "seconds": time.monotonic() - started,
+            "prepare_seconds": prepared - started,
+            "refresh_seconds": time.monotonic() - prepared,
+            "staged": staged,
+            "applied": applied,
+        }
         print(json.dumps({"weight_refresh": result}), flush=True)
         return result
 
@@ -494,6 +544,10 @@ class ModelResolver:
             replayed = True
             return {"type": "http.request", "body": body, "more_body": False}
 
-        scope = {**scope, "headers": [
-            (k, str(len(body)).encode() if k.lower() == b"content-length" else v) for k, v in scope["headers"]]}
+        scope = {
+            **scope,
+            "headers": [
+                (k, str(len(body)).encode() if k.lower() == b"content-length" else v) for k, v in scope["headers"]
+            ],
+        }
         return await controller.track(self.app, scope, receive_body, send)

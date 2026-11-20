@@ -9,9 +9,18 @@ from pathlib import Path
 import pytest
 
 SERVING = Path(__file__).resolve().parents[2] / "src/agentcore_rl_toolkit/backends/tinker_api/skyrl/serving/vllm_neuron"
-CAPTURED_ENV = ("PYTHONPATH", "VLLM_API_KEY", "ART_WEIGHT_REFRESH_BASE", "ART_WEIGHT_REFRESH_ROOT",
-                "ART_WEIGHT_REFRESH_CHECKPOINTS", "ART_WEIGHT_REFRESH_S3_REGION", "NEURON_VISIBLE_DEVICES",
-                "NEURON_PLATFORM_TARGET_OVERRIDE", "NEURON_LIBTORCH_CACHE_ROOT", "NEURON_RT_VISIBLE_CORES")
+CAPTURED_ENV = (
+    "PYTHONPATH",
+    "VLLM_API_KEY",
+    "ART_WEIGHT_REFRESH_BASE",
+    "ART_WEIGHT_REFRESH_ROOT",
+    "ART_WEIGHT_REFRESH_CHECKPOINTS",
+    "ART_WEIGHT_REFRESH_S3_REGION",
+    "NEURON_VISIBLE_DEVICES",
+    "NEURON_PLATFORM_TARGET_OVERRIDE",
+    "NEURON_LIBTORCH_CACHE_ROOT",
+    "NEURON_RT_VISIBLE_CORES",
+)
 
 
 def launch(tmp_path, *args, **overrides):
@@ -19,16 +28,27 @@ def launch(tmp_path, *args, **overrides):
     binary.mkdir(exist_ok=True)
     capture = tmp_path / "vllm.json"
     fake = binary / "vllm"
-    fake.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
-                    f"json.dump({{'argv': sys.argv[1:], 'env': {{k: os.environ.get(k) for k in {CAPTURED_ENV!r}}}}}, "
-                    f"open({str(capture)!r}, 'w'))\n")
+    fake.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        f"json.dump({{'argv': sys.argv[1:], 'env': {{k: os.environ.get(k) for k in {CAPTURED_ENV!r}}}}}, "
+        f"open({str(capture)!r}, 'w'))\n"
+    )
     fake.chmod(0o755)
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("ART_", "NEURON_", "VLLM_NEURON_")) and key != "PYTHONPATH"}
-    env.update({"PATH": f"{binary}{os.pathsep}{os.environ['PATH']}", "HOME": str(tmp_path),
-                "ART_CHECKPOINT_DIR": "/models/Qwen3.6-27B", "ART_WEIGHT_REFRESH_ROOT": "/nvme/merged",
-                "ART_WEIGHT_REFRESH_CHECKPOINTS": "s3://bucket/skyrl-checkpoints",
-                "NEURON_RT_VISIBLE_CORES": "0-3"})
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("ART_", "NEURON_", "VLLM_NEURON_")) and key != "PYTHONPATH"
+    }
+    env.update(
+        {
+            "PATH": f"{binary}{os.pathsep}{os.environ['PATH']}",
+            "HOME": str(tmp_path),
+            "ART_CHECKPOINT_DIR": "/models/Qwen3.6-27B",
+            "ART_WEIGHT_REFRESH_ROOT": "/nvme/merged",
+            "ART_WEIGHT_REFRESH_CHECKPOINTS": "s3://bucket/skyrl-checkpoints",
+            "NEURON_RT_VISIBLE_CORES": "0-3",
+        }
+    )
     env.update(overrides)
     env = {key: value for key, value in env.items() if value is not None}
     result = subprocess.run(["bash", str(SERVING / "serve.sh"), *args], env=env, capture_output=True, text=True)

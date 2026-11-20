@@ -55,8 +55,12 @@ def test_vllm_imports_plugins_by_name_without_starting_anything(name):
             'assert "vllm" not in sys.modules and "torch" not in sys.modules',
             name,
         ],
-        env={**os.environ, "PYTHONPATH": os.pathsep.join(
-            [str(SOURCE.parent), str(Path(__file__).resolve().parents[2] / "src"), *sys.path])},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                [str(SOURCE.parent), str(Path(__file__).resolve().parents[2] / "src"), *sys.path]
+            ),
+        },
         check=True,
         capture_output=True,
         text=True,
@@ -233,7 +237,8 @@ def install_routes(app, root, base_path, checkpoints_prefix, s3_region=None):
     from types import SimpleNamespace
 
     settings = SimpleNamespace(
-        root=root, base_path=base_path, checkpoints_prefix=checkpoints_prefix, s3_region=s3_region)
+        root=root, base_path=base_path, checkpoints_prefix=checkpoints_prefix, s3_region=s3_region
+    )
     app.add_middleware(refresh.ModelResolver, settings=settings)
 
 
@@ -415,18 +420,23 @@ def test_model_name_resolves_to_exactly_one_skyrl_sampler_archive(missing_code):
     assert refresh.sampler_checkpoint_key("model_ab12cd34_run_1-step-2", "s3://bucket/skyrl", client) == ("bucket", key)
     with pytest.raises(LookupError):
         refresh.sampler_checkpoint_key("model_ab12cd34_missing", "s3://bucket/skyrl", client)
-    ambiguous = FakeS3({
-        ("bucket", "skyrl/a/sampler_weights/b_c.tar.gz"): b"x",
-        ("bucket", "skyrl/a_b/sampler_weights/c.tar.gz"): b"x",
-    })
+    ambiguous = FakeS3(
+        {
+            ("bucket", "skyrl/a/sampler_weights/b_c.tar.gz"): b"x",
+            ("bucket", "skyrl/a_b/sampler_weights/c.tar.gz"): b"x",
+        }
+    )
     with pytest.raises(LookupError, match="ambiguous"):
         refresh.sampler_checkpoint_key("a_b_c", "s3://bucket/skyrl", ambiguous)
 
 
 def test_prepare_adapter_extracts_skyrl_archive_and_reuses_completed_merge(monkeypatch, tmp_path):
     pytest.importorskip("botocore")
-    adapter = {"adapter_config.json": b'{"peft_type": "LORA"}', "adapter_model.safetensors": b"weights",
-               "tokenizer.json": b"{}"}
+    adapter = {
+        "adapter_config.json": b'{"peft_type": "LORA"}',
+        "adapter_model.safetensors": b"weights",
+        "tokenizer.json": b"{}",
+    }
     key = "skyrl/model_ab12cd34/sampler_weights/step-1.tar.gz"
     client = FakeS3({("bucket", key): sampler_archive(adapter)})
     merged = []
@@ -444,8 +454,13 @@ def test_prepare_adapter_extracts_skyrl_archive_and_reuses_completed_merge(monke
     assert len(merged) == 1 and client.gets == [key]
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".adapter-")]
 
-    broken = FakeS3({("bucket", "skyrl/model_ab12cd34/sampler_weights/step-2.tar.gz"):
-                     sampler_archive({"adapter_config.json": b'{"peft_type": "LORA"}'})})
+    broken = FakeS3(
+        {
+            ("bucket", "skyrl/model_ab12cd34/sampler_weights/step-2.tar.gz"): sampler_archive(
+                {"adapter_config.json": b'{"peft_type": "LORA"}'}
+            )
+        }
+    )
     with pytest.raises(ValueError, match="adapter_model.safetensors"):
         refresh.prepare_adapter("model_ab12cd34_step-2", **{**options, "client": broken})
 
