@@ -248,6 +248,12 @@ def _build_model(llm: dict) -> _CapturingLiteLLMModel:
     Forced non-streaming so every turn's response carries token ids.
     """
     llm = dict(llm)
+    # The A2A data part carries numbers as doubles, so the trainer's ``num_retries=0`` arrives
+    # as ``0.0`` and LiteLLM rejects it. It must be an integer here; a non-integral value is
+    # left for LiteLLM to reject.
+    retries = llm.get("num_retries")
+    if isinstance(retries, float) and retries.is_integer():
+        llm["num_retries"] = int(retries)
     model_id = llm.pop("model")
     extra_body = llm.pop("litellm_extra_body", {})
     params: dict[str, Any] = {}

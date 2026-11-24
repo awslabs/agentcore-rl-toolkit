@@ -70,6 +70,20 @@ class BuildModelTest(unittest.TestCase):
         # Remaining keys become LiteLLM client args, not model config.
         self.assertEqual(model.client_args, {"base_url": "http://host/v1", "api_key": "secret"})
 
+    def test_restores_integer_num_retries_widened_by_the_wire(self):
+        # the A2A data part turns the trainer's num_retries=0 into 0.0
+        model = _build_model(dict(model="openai/Qwen", num_retries=0.0, temperature=1.0))
+
+        self.assertIs(type(model.client_args["num_retries"]), int)
+        self.assertEqual(model.client_args["num_retries"], 0)
+        # other numbers are not touched
+        self.assertIs(type(model.client_args["temperature"]), float)
+
+    def test_leaves_non_integral_num_retries_for_validation(self):
+        model = _build_model(dict(model="openai/Qwen", num_retries=1.5))
+
+        self.assertEqual(model.client_args["num_retries"], 1.5)
+
 
 class ToolTimingHooksTest(unittest.TestCase):
     def test_accumulates_elapsed_time_per_tool_call(self):
