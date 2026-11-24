@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shlex
 import time
 from dataclasses import asdict
@@ -28,8 +29,23 @@ def tail(text, limit=4000):
     return text[-limit:] if text else text
 
 
+def format_errors(trajectory):
+    """Each format error's message (its <error> line, else its first line), and the final consecutive run."""
+    errors, final = [], []
+    for message in trajectory:
+        if message.get("extra", {}).get("interrupt_type") == "FormatError":
+            content = message.get("content") or ""
+            match = re.search(r"<error>\s*(.*?)\s*</error>", content, re.S)
+            errors.append(((match.group(1) if match else content).strip().splitlines() or [""])[0])
+            final.append(errors[-1])
+        elif message.get("role") in ("assistant", "tool"):
+            final = []
+    return errors, final
+
+
 def log_rollout(record, span, started):
     verifier = record.get("verifier") or {}
+    errors, final_errors = format_errors(record.get("trajectory", []))
     summary = {
         "event": "tmax_rollout",
         "task_id": record["task_id"],
@@ -40,6 +56,8 @@ def log_rollout(record, span, started):
         "error": tail(record.get("error")),
         "steps": sum(message.get("role") == "assistant" for message in record.get("trajectory", [])),
         "duration_s": round(time.monotonic() - started, 1),
+        "format_errors": errors,
+        "final_format_errors": final_errors,
         "verifier_exit_code": verifier.get("exit_code"),
         "verifier_timed_out": verifier.get("timed_out"),
         "verifier_stdout": tail(verifier.get("stdout")),
