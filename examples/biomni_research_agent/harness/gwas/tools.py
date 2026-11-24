@@ -25,6 +25,7 @@ import urllib.request
 import uuid
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -674,10 +675,13 @@ class SnapshotSQLBackend:
 
 
 # --------------------------------------------- Open Targets: GraphQL transport
-# Read-only GraphQL transport for the public Open Targets Platform API.
+# Read-only GraphQL transport for the Open Targets Platform API: the public endpoint by default, or a self-hosted
+# release (opentargets/README.md) named by OPEN_TARGETS_GRAPHQL_URL. With OPEN_TARGETS_RELEASE set (e.g. 26.06), the
+# first query checks that the endpoint serves that data release and refuses to run against any other.
 
-ENDPOINT = "https://api.platform.opentargets.org/api/v4/graphql"
+PUBLIC_ENDPOINT = "https://api.platform.opentargets.org/api/v4/graphql"
 DEFAULT_TIMEOUT_SECONDS = 60.0
+RELEASE_QUERY = "query OpenTargetsRelease { meta { dataVersion { year month } } }"
 MAX_QUERY_CHARACTERS = 50_000
 MAX_VARIABLE_BYTES = 100_000
 MAX_RESPONSE_BYTES = 512_000
@@ -737,12 +741,29 @@ def _post_json(
     return status, body
 
 
+@lru_cache(maxsize=8)
+def _verify_release(endpoint: str, expected: str) -> None:
+    """Raise unless the endpoint serves the expected data release (e.g. 26.06)."""
+    try:
+        status, body = _post_json(
+            endpoint=endpoint, query=RELEASE_QUERY, variables=None, timeout=DEFAULT_TIMEOUT_SECONDS
+        )
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Open Targets endpoint is unavailable: {error.reason}") from error
+    version = ((body.get("data") or {}).get("meta") or {}).get("dataVersion") or {}
+    release = f"{version.get('year')}.{version.get('month')}"
+    if status != 200 or release != expected:
+        raise RuntimeError(
+            f"Open Targets release check failed: expected {expected}, got HTTP {status} release {release}"
+        )
+
+
 def query_open_targets_graphql(
     *,
     query: str,
     variables: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Execute one read-only query against the public Open Targets endpoint."""
+    """Execute one read-only query against the Open Targets endpoint."""
     _validate_query(query)
     variables = variables or {}
     try:
@@ -752,15 +773,22 @@ def query_open_targets_graphql(
     if variable_bytes > MAX_VARIABLE_BYTES:
         raise ValueError(f"variables exceed the {MAX_VARIABLE_BYTES}-byte limit")
 
+    endpoint = os.environ.get("OPEN_TARGETS_GRAPHQL_URL") or PUBLIC_ENDPOINT
+    if os.environ.get("OPEN_TARGETS_RELEASE"):
+        _verify_release(endpoint, os.environ["OPEN_TARGETS_RELEASE"])
     try:
-        _, body = _post_json(
-            endpoint=ENDPOINT,
+        status, body = _post_json(
+            endpoint=endpoint,
             query=query,
             variables=variables,
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
     except urllib.error.URLError as error:
         raise RuntimeError(f"Open Targets endpoint is unavailable: {error.reason}") from error
+    # A GraphQL error (invalid query, unknown field) comes back as 4xx with errors and goes to the model; a non-2xx
+    # without GraphQL errors (503 {"message": "unavailable"}) or any 5xx is a service failure, not an empty result.
+    if status >= 500 or (status >= 300 and not body.get("errors")):
+        raise RuntimeError(f"Open Targets returned HTTP {status}")
     return {
         "data": body.get("data"),
         "errors": body.get("errors") or [],

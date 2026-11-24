@@ -5,6 +5,7 @@ common/online.py, and KEGG, Reactome, Open Targets, NCBI Gene and PubMed.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import time
@@ -192,6 +193,7 @@ BASES = {
     "query_kegg": "https://rest.kegg.jp",
     "query_reactome": "https://reactome.org/ContentService",
 }
+# The public Open Targets endpoint, or the self-hosted release named by OPEN_TARGETS_GRAPHQL_URL (as gwas uses).
 OPENTARGETS = "https://api.platform.opentargets.org/api/v4/graphql"
 
 
@@ -226,7 +228,7 @@ def query_opentarget(query: str, variables: dict | None = None) -> dict:
     ):
         return {"status": "invalid_query", "source": "query_opentarget"}
     return online._request(
-        OPENTARGETS,
+        os.environ.get("OPEN_TARGETS_GRAPHQL_URL") or OPENTARGETS,
         "query_opentarget",
         json_body={"query": query, "variables": variables or {}},
     )
