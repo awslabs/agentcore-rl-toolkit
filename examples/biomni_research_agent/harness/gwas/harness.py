@@ -31,10 +31,16 @@ from . import tools
 HERE = Path(__file__).resolve().parent
 GWAS_TASK = "gwas_causal_gene_gwas_catalog"
 TASKS = ("gwas_causal_gene_gwas_catalog", "gwas_causal_gene_opentargets", "gwas_variant_prioritization")
+# One Open Targets prompt for the three tasks; the GWAS Catalog task puts its SQL instructions and the generated schema
+# in front of it, and each task ends with its own answer instruction.
+_OT = (HERE / "prompts/opentargets.txt").read_text()
+_GWAS_SQL = (HERE / "prompts/gwas_catalog_sql.txt").read_text()
+_SCHEMA = (HERE / "resources/gwas_catalog_schema.sql").read_text()
+_ANSWER = "\nPut exactly one candidate {} inside <solution></solution> at the end of your response.\n"
 SYSTEM = {
-    "gwas_causal_gene_opentargets": (HERE / "prompts/causal_gene_opentargets.txt").read_text(),
-    "gwas_variant_prioritization": (HERE / "prompts/variant_prioritization.txt").read_text(),
-    GWAS_TASK: (HERE / "prompts/causal_gene_gwas_catalog.txt").read_text(),
+    "gwas_causal_gene_opentargets": _OT + _ANSWER.format("gene symbol"),
+    "gwas_variant_prioritization": _OT + _ANSWER.format("rsID"),
+    GWAS_TASK: _GWAS_SQL + "```sql\n" + _SCHEMA + "```\n\n" + _OT + _ANSWER.format("gene symbol"),
 }
 TASK_TOOLS = {
     "gwas_causal_gene_opentargets": ["query_open_targets_graphql"],

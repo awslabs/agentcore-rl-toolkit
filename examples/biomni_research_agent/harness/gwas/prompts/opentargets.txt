@@ -1353,5 +1353,3 @@ type geneticVariation {
 
 scalar Long
 ```
-
-Put exactly one candidate gene symbol inside <solution></solution> at the end of your response.
