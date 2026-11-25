@@ -1,0 +1,476 @@
+{
+  "release": "2026-03-17",
+  "mapping_version": 1,
+  "duckdb_version": "1.5.5",
+  "field_reference": "https://www.ebi.ac.uk/gwas/docs/fileheaders",
+  "schema_sha256": "c07f7fda1729f7079a327bdb591191db13ffd3aa47b93ef7625e3022f518071b",
+  "value_transformation": "column aliases only; all rows, types and values preserved",
+  "verified_relationships": {
+    "studies_key": "accession_id",
+    "associations_to_studies": "many_to_one",
+    "samples_to_studies": "many_to_one",
+    "orphan_association_rows": 0,
+    "orphan_sample_rows": 0
+  },
+  "datasets": [
+    {
+      "name": "associations",
+      "source_url": "https://huggingface.co/datasets/gwascatalog/associations/resolve/7918ec608275b845b87c386478bdb1f4e549234c/gwas-catalog-associations-r2026-03-17.parquet",
+      "source_revision": "7918ec608275b845b87c386478bdb1f4e549234c",
+      "filename": "gwas-catalog-associations-r2026-03-17.parquet",
+      "sha256": "10f6d6fdd6237b32d6277d59ecd3220fe6b0aa81cd31334c65f29d480fbcf90b",
+      "size_bytes": 68633383,
+      "row_count": 1067194,
+      "distinct_accession_ids": 71228,
+      "null_accession_ids": 0,
+      "columns": [
+        {
+          "source": "DATE ADDED TO CATALOG",
+          "name": "date_added_to_catalog",
+          "type": "DATE",
+          "description": "Date published in the Catalog."
+        },
+        {
+          "source": "PUBMEDID",
+          "name": "pubmed_id",
+          "type": "BIGINT",
+          "description": "PubMed publication identifier; several studies can share it."
+        },
+        {
+          "source": "FIRST AUTHOR",
+          "name": "first_author",
+          "type": "VARCHAR",
+          "description": "First author as supplied."
+        },
+        {
+          "source": "DATE",
+          "name": "publication_date",
+          "type": "DATE",
+          "description": "Publication date, not the Catalog release date."
+        },
+        {
+          "source": "JOURNAL",
+          "name": "journal",
+          "type": "VARCHAR",
+          "description": "Journal name as supplied."
+        },
+        {
+          "source": "LINK",
+          "name": "publication_link",
+          "type": "VARCHAR",
+          "description": "Publication link as supplied; a URL scheme may be absent."
+        },
+        {
+          "source": "STUDY",
+          "name": "study_title",
+          "type": "VARCHAR",
+          "description": "Paper title; accession_id identifies the Catalog study."
+        },
+        {
+          "source": "DISEASE/TRAIT",
+          "name": "disease_trait",
+          "type": "VARCHAR",
+          "description": "Reported disease/trait text, not an ontology identifier."
+        },
+        {
+          "source": "INITIAL SAMPLE SIZE",
+          "name": "initial_sample_size",
+          "type": "VARCHAR",
+          "description": "Free-text sample size/ancestry description."
+        },
+        {
+          "source": "REPLICATION SAMPLE SIZE",
+          "name": "replication_sample_size",
+          "type": "VARCHAR",
+          "description": "Free-text replication description."
+        },
+        {
+          "source": "REGION",
+          "name": "region",
+          "type": "VARCHAR",
+          "description": "Cytogenetic region(s), preserved as source text."
+        },
+        {
+          "source": "CHR_ID",
+          "name": "chromosome",
+          "type": "VARCHAR",
+          "description": "Chromosome value(s), not necessarily a single integer."
+        },
+        {
+          "source": "CHR_POS",
+          "name": "chromosome_position",
+          "type": "VARCHAR",
+          "description": "Position value(s); multi-variant records remain text."
+        },
+        {
+          "source": "REPORTED GENE(S)",
+          "name": "reported_genes",
+          "type": "VARCHAR",
+          "description": "Author-reported genes; may contain multiple names."
+        },
+        {
+          "source": "MAPPED_GENE",
+          "name": "mapped_gene",
+          "type": "VARCHAR",
+          "description": "Catalog-mapped gene text; may list overlapping or flanking genes. Not a scalar gene identifier."
+        },
+        {
+          "source": "UPSTREAM_GENE_ID",
+          "name": "upstream_gene_id",
+          "type": "VARCHAR",
+          "description": "Source upstream gene identifier(s); namespace retained."
+        },
+        {
+          "source": "DOWNSTREAM_GENE_ID",
+          "name": "downstream_gene_id",
+          "type": "VARCHAR",
+          "description": "Source downstream gene identifier(s); namespace retained."
+        },
+        {
+          "source": "SNP_GENE_IDS",
+          "name": "snp_gene_ids",
+          "type": "VARCHAR",
+          "description": "Source overlapping gene identifier(s); may be multivalued."
+        },
+        {
+          "source": "UPSTREAM_GENE_DISTANCE",
+          "name": "upstream_gene_distance",
+          "type": "BIGINT",
+          "description": "Source upstream distance in base pairs."
+        },
+        {
+          "source": "DOWNSTREAM_GENE_DISTANCE",
+          "name": "downstream_gene_distance",
+          "type": "BIGINT",
+          "description": "Source downstream distance in base pairs."
+        },
+        {
+          "source": "STRONGEST SNP-RISK ALLELE",
+          "name": "strongest_snp_risk_allele",
+          "type": "VARCHAR",
+          "description": "Variant/risk-allele text; '?' can denote unknown allele. Haplotypes remain unsplit."
+        },
+        {
+          "source": "SNPS",
+          "name": "snps",
+          "type": "VARCHAR",
+          "description": "Source variant text; a haplotype can contain multiple rsIDs."
+        },
+        {
+          "source": "MERGED",
+          "name": "merged",
+          "type": "BIGINT",
+          "description": "Source merge flag (0/1); not converted to Boolean."
+        },
+        {
+          "source": "SNP_ID_CURRENT",
+          "name": "snp_id_current",
+          "type": "VARCHAR",
+          "description": "Current SNP identifier as supplied; no rs prefix is added."
+        },
+        {
+          "source": "CONTEXT",
+          "name": "context",
+          "type": "VARCHAR",
+          "description": "Source predicted functional consequence annotation."
+        },
+        {
+          "source": "INTERGENIC",
+          "name": "intergenic",
+          "type": "BIGINT",
+          "description": "Source intergenic flag (0/1); not converted to Boolean."
+        },
+        {
+          "source": "RISK ALLELE FREQUENCY",
+          "name": "risk_allele_frequency",
+          "type": "VARCHAR",
+          "description": "Reported allele/haplotype frequency text; not cast to a number."
+        },
+        {
+          "source": "P-VALUE",
+          "name": "p_value",
+          "type": "DOUBLE",
+          "description": "Reported Catalog p-value, with the source precision unchanged."
+        },
+        {
+          "source": "PVALUE_MLOG",
+          "name": "pvalue_mlog",
+          "type": "DOUBLE",
+          "description": "Source negative log10 p-value; not recomputed."
+        },
+        {
+          "source": "P-VALUE (TEXT)",
+          "name": "pvalue_text",
+          "type": "VARCHAR",
+          "description": "Context attached to the p-value, such as a subgroup."
+        },
+        {
+          "source": "OR or BETA",
+          "name": "or_or_beta",
+          "type": "DOUBLE",
+          "description": "Combined source effect value: odds ratio OR beta. Do not assume one effect type or split it."
+        },
+        {
+          "source": "95% CI (TEXT)",
+          "name": "ci_95_text",
+          "type": "VARCHAR",
+          "description": "Source confidence-interval/unit text; not parsed."
+        },
+        {
+          "source": "PLATFORM [SNPS PASSING QC]",
+          "name": "platform_snps_passing_qc",
+          "type": "VARCHAR",
+          "description": "Platform and QC/imputation description; not a standalone numeric SNP count."
+        },
+        {
+          "source": "CNV",
+          "name": "cnv",
+          "type": "VARCHAR",
+          "description": "Source copy-number-variation flag text."
+        },
+        {
+          "source": "MAPPED_TRAIT",
+          "name": "mapped_trait",
+          "type": "VARCHAR",
+          "description": "Mapped trait label(s); source multivalue formatting is retained."
+        },
+        {
+          "source": "MAPPED_TRAIT_URI",
+          "name": "mapped_trait_uri",
+          "type": "VARCHAR",
+          "description": "Mapped ontology URI(s); no descendant expansion, label matching or namespace conversion is applied."
+        },
+        {
+          "source": "STUDY ACCESSION",
+          "name": "accession_id",
+          "type": "VARCHAR",
+          "description": "Catalog study accession; shared join key across the three views."
+        },
+        {
+          "source": "GENOTYPING TECHNOLOGY",
+          "name": "genotyping_technology",
+          "type": "VARCHAR",
+          "description": "Source technology description(s)."
+        }
+      ]
+    },
+    {
+      "name": "studies",
+      "source_url": "https://huggingface.co/datasets/gwascatalog/studies/resolve/3542caab46a3a27667f198ed6f05e71c45a96618/gwas-catalog-studies-r2026-03-17.parquet",
+      "source_revision": "3542caab46a3a27667f198ed6f05e71c45a96618",
+      "filename": "gwas-catalog-studies-r2026-03-17.parquet",
+      "sha256": "0d345722becb42b43d31058c8e8650c9f5788d2e88053e96187d4c3ef414333a",
+      "size_bytes": 10224509,
+      "row_count": 213462,
+      "distinct_accession_ids": 213462,
+      "null_accession_ids": 0,
+      "columns": [
+        {
+          "source": "DATE ADDED TO CATALOG",
+          "name": "date_added_to_catalog",
+          "type": "DATE",
+          "description": "Date published in the Catalog."
+        },
+        {
+          "source": "PUBMEDID",
+          "name": "pubmed_id",
+          "type": "BIGINT",
+          "description": "PubMed publication identifier; several studies can share it."
+        },
+        {
+          "source": "FIRST AUTHOR",
+          "name": "first_author",
+          "type": "VARCHAR",
+          "description": "First author as supplied."
+        },
+        {
+          "source": "DATE",
+          "name": "publication_date",
+          "type": "DATE",
+          "description": "Publication date, not the Catalog release date."
+        },
+        {
+          "source": "JOURNAL",
+          "name": "journal",
+          "type": "VARCHAR",
+          "description": "Journal name as supplied."
+        },
+        {
+          "source": "LINK",
+          "name": "publication_link",
+          "type": "VARCHAR",
+          "description": "Publication link as supplied; a URL scheme may be absent."
+        },
+        {
+          "source": "STUDY",
+          "name": "study_title",
+          "type": "VARCHAR",
+          "description": "Paper title; accession_id identifies the Catalog study."
+        },
+        {
+          "source": "DISEASE/TRAIT",
+          "name": "disease_trait",
+          "type": "VARCHAR",
+          "description": "Reported disease/trait text, not an ontology identifier."
+        },
+        {
+          "source": "INITIAL SAMPLE SIZE",
+          "name": "initial_sample_size",
+          "type": "VARCHAR",
+          "description": "Free-text sample size/ancestry description."
+        },
+        {
+          "source": "REPLICATION SAMPLE SIZE",
+          "name": "replication_sample_size",
+          "type": "VARCHAR",
+          "description": "Free-text replication description."
+        },
+        {
+          "source": "PLATFORM [SNPS PASSING QC]",
+          "name": "platform_snps_passing_qc",
+          "type": "VARCHAR",
+          "description": "Platform and QC/imputation description; not a standalone numeric SNP count."
+        },
+        {
+          "source": "ASSOCIATION COUNT",
+          "name": "association_count",
+          "type": "BIGINT",
+          "description": "Source association count; NOT SNPs passing QC."
+        },
+        {
+          "source": "MAPPED_TRAIT",
+          "name": "mapped_trait",
+          "type": "VARCHAR",
+          "description": "Mapped trait label(s); source multivalue formatting is retained."
+        },
+        {
+          "source": "MAPPED_TRAIT_URI",
+          "name": "mapped_trait_uri",
+          "type": "VARCHAR",
+          "description": "Mapped ontology URI(s); no descendant expansion, label matching or namespace conversion is applied."
+        },
+        {
+          "source": "STUDY ACCESSION",
+          "name": "accession_id",
+          "type": "VARCHAR",
+          "description": "Catalog study accession; shared join key across the three views."
+        },
+        {
+          "source": "GENOTYPING TECHNOLOGY",
+          "name": "genotyping_technology",
+          "type": "VARCHAR",
+          "description": "Source technology description(s)."
+        },
+        {
+          "source": "COHORT",
+          "name": "cohort",
+          "type": "VARCHAR",
+          "description": "Source discovery-cohort text; multiple cohorts are not split."
+        },
+        {
+          "source": "FULL SUMMARY STATISTICS",
+          "name": "full_summary_statistics",
+          "type": "BOOLEAN",
+          "description": "Availability flag only; these views do not contain the genome-wide summary-statistics files."
+        },
+        {
+          "source": "SUMMARY STATS LOCATION",
+          "name": "summary_stats_location",
+          "type": "VARCHAR",
+          "description": "Source file location; not fetched by this catalog."
+        },
+        {
+          "source": "GXE",
+          "name": "gxe",
+          "type": "BOOLEAN",
+          "description": "Source genotype-by-environment interaction study flag."
+        }
+      ]
+    },
+    {
+      "name": "samples",
+      "source_url": "https://huggingface.co/datasets/gwascatalog/samples/resolve/f9cc5e6ec7cf2a870d29490847fdeb4b709c64dc/gwas-catalog-ancestry-r2026-03-17.parquet",
+      "source_revision": "f9cc5e6ec7cf2a870d29490847fdeb4b709c64dc",
+      "filename": "gwas-catalog-ancestry-r2026-03-17.parquet",
+      "sha256": "917fa2b417a48c480daaee4546cce7d5113a349d590561814d45338bb4aa5054",
+      "size_bytes": 3387704,
+      "row_count": 278862,
+      "distinct_accession_ids": 213446,
+      "null_accession_ids": 0,
+      "columns": [
+        {
+          "source": "STUDY ACCESSION",
+          "name": "accession_id",
+          "type": "VARCHAR",
+          "description": "Catalog study accession; shared join key across the three views."
+        },
+        {
+          "source": "PUBMEDID",
+          "name": "pubmed_id",
+          "type": "BIGINT",
+          "description": "PubMed publication identifier; several studies can share it."
+        },
+        {
+          "source": "FIRST AUTHOR",
+          "name": "first_author",
+          "type": "VARCHAR",
+          "description": "First author as supplied."
+        },
+        {
+          "source": "DATE",
+          "name": "publication_date",
+          "type": "DATE",
+          "description": "Publication date, not the Catalog release date."
+        },
+        {
+          "source": "INITIAL SAMPLE DESCRIPTION",
+          "name": "initial_sample_description",
+          "type": "VARCHAR",
+          "description": "Source initial-sample description."
+        },
+        {
+          "source": "REPLICATION SAMPLE DESCRIPTION",
+          "name": "replication_sample_description",
+          "type": "VARCHAR",
+          "description": "Source replication description."
+        },
+        {
+          "source": "STAGE",
+          "name": "stage",
+          "type": "VARCHAR",
+          "description": "Source sample stage, initial or replication in this release."
+        },
+        {
+          "source": "NUMBER OF INDIVDUALS",
+          "name": "number_of_individuals",
+          "type": "BIGINT",
+          "description": "Individuals in this sample row; source header typo retained in mapping."
+        },
+        {
+          "source": "BROAD ANCESTRAL CATEGORY",
+          "name": "broad_ancestral_category",
+          "type": "VARCHAR",
+          "description": "Source ancestry category text; not a newly inferred category."
+        },
+        {
+          "source": "COUNTRY OF ORIGIN",
+          "name": "country_of_origin",
+          "type": "VARCHAR",
+          "description": "Source country-of-origin text."
+        },
+        {
+          "source": "COUNTRY OF RECRUITMENT",
+          "name": "country_of_recruitment",
+          "type": "VARCHAR",
+          "description": "Source recruitment-country text."
+        },
+        {
+          "source": "ADDITONAL ANCESTRY DESCRIPTION",
+          "name": "additional_ancestry_description",
+          "type": "VARCHAR",
+          "description": "Additional source ancestry text; source header typo retained in mapping."
+        }
+      ]
+    }
+  ]
+}

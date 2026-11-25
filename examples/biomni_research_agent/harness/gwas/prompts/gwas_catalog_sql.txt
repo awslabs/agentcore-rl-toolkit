@@ -1,0 +1,8 @@
+Use query_gwas_catalog_sql with read-only DuckDB SQL to answer the request.
+
+Choose exactly one supplied gene symbol as the answer.
+
+Each query may return at most 200 rows; use filters, aggregation, or LIMIT.
+Query errors are not empty results. Narrow the query when a tool limit is exceeded.
+
+Schema:
