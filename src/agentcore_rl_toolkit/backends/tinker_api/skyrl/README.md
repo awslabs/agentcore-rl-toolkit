@@ -1,4 +1,16 @@
-# Example: SkyRL Tinker-compatible endpoint on EC2
+# SkyRL Tinker-compatible endpoint on EC2
+
+ART's Tinker API training loop can use SkyRL as its endpoint in two ways:
+
+| Mode | Training | Sampling | Setup |
+|---|---|---|---|
+| [Single-node GPU endpoint](#single-node-gpu-endpoint-skypilot) | Megatron on one GPU instance | vLLM on the same instance | SkyPilot launcher in this folder |
+| [Hybrid training](#hybrid-training-gpu-trainer-with-separate-sampling-hardware) | FSDP LoRA on a GPU host | A separate server on other hardware, such as vLLM-Neuron on Trn2 | Already provisioned hosts, patched SkyRL |
+
+Both use the same ART client, configuration and [training guide](../README.md); only the
+endpoint differs.
+
+## Single-node GPU endpoint (SkyPilot)
 
 This example deploys **Qwen3.5-4B on one `p4d.24xlarge`** (8 A100 40 GB GPUs) with SkyPilot.
 A separate CPU client uses the endpoint for LoRA training and sampling.
@@ -15,7 +27,7 @@ Adjust the two configs together and validate your chosen configuration.
 Model downloads use Hugging Face `main` when setup runs; optionally set
 `envs.MODEL_REVISION` to a tag or commit to keep a fixed model version.
 
-## Prerequisites
+### Prerequisites
 
 - Linux, Python 3.12 via [uv](https://docs.astral.sh/uv/), Git, SSH, and rsync.
 - AWS credentials with EC2 provisioning permissions and the IAM permissions below.
@@ -31,7 +43,7 @@ VPC, use its private IP plus `/32` (find it in EC2 details or `ip -4 addr`).
 For separate hosts, use a suitable private subnet CIDR or a preconfigured security group.
 A supplied security group must allow the client CIDR on both ports and all traffic within the group.
 
-## Deploy
+### Deploy
 
 If IAM permissions are missing (for example with `PowerUserAccess`), first run
 the command below with `--plan`. It makes no AWS changes and prints the path to
@@ -78,7 +90,7 @@ at `/opt/dlami/nvme`. Validate these assumptions when overriding the image.
 Deployment state is saved under the temporary directory in `skyrl-endpoints/CLUSTER/`.
 Keep it for repeat deployments, or use `--state-dir` to choose a persistent location.
 
-## Connect
+### Connect
 
 Use **`tinker==0.24.1`** in your client environment for this SkyRL version.
 For the toolkit's training loop, follow the [training guide](../README.md)
@@ -101,7 +113,7 @@ trainer = service.create_lora_training_client(
 private**. HTTP readiness does not initialize GPU workers; the first training
 client and sampler can take several minutes to initialize.
 
-## Manage and resume
+### Manage and resume
 
 ```bash
 uv run sky queue skyrl-tinker-endpoint
@@ -131,3 +143,45 @@ capacity reservation retain their own charges.
 `down` deletes the root EBS data; backups are your responsibility. IAM resources
 and security groups remain. Existing ingress rules are preserved during
 deployment; remove obsolete client access explicitly.
+
+## Hybrid training: GPU trainer with separate sampling hardware
+
+SkyRL trains LoRA on a GPU host while a separate server samples on other hardware. The
+ART client still points `endpoint` at SkyRL's API; SkyRL forwards each `sample()` to the
+sampling server, which loads every new checkpoint from S3. Unlike the SkyPilot example,
+this mode runs on hosts you have already provisioned and uses a different SkyRL revision.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 24, "rankSpacing": 26, "padding": 10}}}%%
+flowchart LR
+    agent["Agents<br/>AgentCore Runtime"]
+    client["ART client<br/>loop + gateway"]
+    gpu["GPU host<br/>SkyRL trainer"]
+    s3[("S3<br/>LoRA ckpts")]
+    trn["Sampling host<br/>e.g. vLLM-Neuron"]
+
+    agent -- "1" --> client
+    client -- "2" --> gpu
+    gpu -- "3" --> trn
+    gpu -- "4" --> s3
+    s3 -- "5" --> trn
+```
+
+Each step, the agents' model calls go through the ART client's rollout gateway, which
+records token-level trajectories (1). The gateway samples through SkyRL, and the training
+loop trains through it (2); SkyRL forwards each sample to the sampling server (3). After
+each optimizer step, SkyRL exports the LoRA adapter to S3 (4), 41 MB in the
+Qwen3.6-27B example. The next sample names the new checkpoint, so the sampling server loads it,
+merges it into its base and refreshes its resident weights before replying (5).
+
+| Step | Where | Guide |
+|---|---|---|
+| 1. Check out SkyRL `a6c07705` and apply [`patches/`](patches/) | GPU host | [SkyRL version and patches](serving/README.md#skyrl-version-and-patches) |
+| 2. Grant S3 and AgentCore access and open the GPU host's route to the sampler | All hosts | [Network and permissions](serving/README.md#network-and-permissions) |
+| 3. Start the trainer: [`serve.sh`](serve.sh) with `SKYRL_EXTERNAL_INFERENCE_URL` and a trainer-only FSDP `SKYRL_BACKEND_CONFIG` | GPU host | [Launch the trainer](serving/README.md#launch-the-trainer) |
+| 4. Start the sampling server, for example [`serving/vllm_neuron/serve.sh`](serving/vllm_neuron/serve.sh) | Sampling host | [vLLM-Neuron sampling server](serving/vllm_neuron/README.md#launch-the-server) |
+| 5. Run ART's training loop with `tinker>=0.25.0,<0.28.0` (tested: 0.27.2) and `"loss_weights": true` | Client host | [Training guide](../README.md) |
+
+Setting `SKYRL_EXTERNAL_INFERENCE_URL` is what selects this mode in `serve.sh`; without it,
+`serve.sh` launches the single-node configuration above. For a complete run, see the
+[OfficeBench hybrid training example](../../../../../examples/trn_gpu_hybrid_training/README.md).

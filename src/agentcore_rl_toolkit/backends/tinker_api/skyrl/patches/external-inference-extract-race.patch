@@ -1,0 +1,20 @@
+diff --git a/skyrl/tinker/extra/external_inference.py b/skyrl/tinker/extra/external_inference.py
+index ecb89174..e7c449dd 100644
+--- a/skyrl/tinker/extra/external_inference.py
++++ b/skyrl/tinker/extra/external_inference.py
+@@ -32,10 +32,11 @@ def _extract_checkpoint_sync(checkpoint_path: AnyPath, target_dir: Path) -> None
+         try:
+             with download_and_unpack(checkpoint_path) as extracted_path:
+                 extracted_path.rename(target_dir)
+-        except FileExistsError:
+-            # This could happen if two processes try to download the file.
+-            # In that case the other process won the race and created target_dir.
+-            pass
++        except OSError:
++            # Concurrent requests may extract the same checkpoint; renaming onto the
++            # winner's non-empty directory raises ENOTEMPTY rather than FileExistsError.
++            if not target_dir.exists():
++                raise
+ 
+ 
+ class ExternalInferenceClient:

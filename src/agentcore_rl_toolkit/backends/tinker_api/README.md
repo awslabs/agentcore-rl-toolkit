@@ -56,9 +56,17 @@ identifier instead:
 {
   "endpoint": "http://GPU_NODE_PRIVATE_IP:18080",
   "base_model": "/models/Qwen3.5-4B",
-  "tokenizer": "Qwen/Qwen3.5-4B"
+  "tokenizer": "Qwen/Qwen3.5-4B",
+  "loss_weights": true
 }
 ```
+
+`loss_weights` sends each datum's generated-token mask as per-token `weights`.
+SkyRL uses them as its loss mask; without them, SkyRL's rollout-vs-training
+logprob, importance-ratio and entropy metrics also average over prompt and tool
+tokens, and its KL and entropy loss terms (off by default) would too. The policy
+loss is unchanged either way. Leave it unset for the official Tinker service,
+whose RL losses take only `target_tokens`, `logprobs` and `advantages`.
 
 Use the model identifier returned by `ServiceClient.get_server_capabilities()`.
 A server-side model path does not need to exist on the client; the client
@@ -72,6 +80,10 @@ support the client's Tinker SDK version, LoRA training, token sampling with
 logprobs, sampler weight synchronization, and checkpoints.
 
 ## Run the math example
+
+To sample on different hardware from training (for example Trn2), configure
+the SkyRL endpoint as described in the [external sampling guide](skyrl/serving/README.md);
+this recipe and its config are unchanged.
 
 Deploy one of the [math test agents](../../../../tests/runtime/agents/math/README.md).
 The [example config](examples/math_agent/config.json.example) runs GSM8K

@@ -1,0 +1,32 @@
+# Instance type: trn2.48xlarge (NEURON_PLATFORM_TARGET_OVERRIDE=trn2, NEURON_LOGICAL_NC_CONFIG=2)
+# vLLM-Neuron settings for Qwen3.6-27B: TP8 x DP8 uses all 64 logical cores, 8 sequences
+# per replica (64 concurrent), 64K context, async scheduling with NKI sampling in the model
+# graph. Validated with vllm-neuron qwen36-trn2 76ca872; 64K is the implicit final decode
+# bucket. In-graph sampling rejects top-k/top-p: requests must send top_k=-1, top_p=1.0.
+# Supply the local base checkpoint and served model version at launch.
+dtype: bfloat16
+tensor-parallel-size: 8
+data-parallel-size: 8
+data-parallel-size-local: 8
+max-model-len: 65536
+max-num-batched-tokens: 2048
+max-num-seqs: 8
+block-size: 512
+gpu-memory-utilization: 0.8
+optimization-level: 1
+async-scheduling: true
+enable-prefix-caching: true
+mamba-cache-mode: align
+logprobs-mode: processed_logprobs
+limit-mm-per-prompt:
+  image: 0
+  video: 0
+additional-config:
+  neuron_config:
+    quantization: bf16
+    num_batched_tokens_buckets: [2048]
+    num_seqs_buckets: [1, 4, 8]
+    decode_context_length_buckets: [4096, 8192, 16384, 32768]
+    hlo2tensorizer_options: ""
+    on_device_sampling_config: {}
+    stochastic_sampling_backend: nki

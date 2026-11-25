@@ -18,11 +18,13 @@ class Episode:
     error: str | None = None
 
 
-def trace_to_datum(record: TraceRecord, advantage: float) -> tinker.Datum:
+def trace_to_datum(record: TraceRecord, advantage: float, loss_weights: bool = False) -> tinker.Datum:
     """Shift tokens once, preserving generated-token masks across tool turns.
 
     Trace masks and logprobs cover the response suffix; Tinker tensors cover all
     next-token targets. Masked targets carry zero advantage and zero logprob.
+    With ``loss_weights``, a ``weights`` input also carries the mask (SkyRL uses it as its
+    loss mask; Tinker's RL losses do not define it).
     """
     prompt_length = len(record.token_ids) - len(record.loss_mask)
     if prompt_length < 1 or not any(record.loss_mask):
@@ -47,13 +49,16 @@ def trace_to_datum(record: TraceRecord, advantage: float) -> tinker.Datum:
         model_input=tinker.ModelInput.from_ints(record.token_ids[:-1]),
         loss_fn_inputs={
             "target_tokens": tensor(record.token_ids[1:], "int64"),
+            **({"weights": tensor([0.0] * prefix_length + list(record.loss_mask), "float32")} if loss_weights else {}),
             "logprobs": tensor(logprobs, "float32"),
             "advantages": tensor(advantages, "float32"),
         },
     )
 
 
-def training_data(groups: list[list[Episode]]) -> tuple[list[tinker.Datum], dict[str, float | None]]:
+def training_data(
+    groups: list[list[Episode]], loss_weights: bool = False
+) -> tuple[list[tinker.Datum], dict[str, float | None]]:
     """Center rewards over episodes, then sum losses over their emitted records.
 
     A fork changes the number of datums, not the number of rewards in its group.
@@ -90,7 +95,7 @@ def training_data(groups: list[list[Episode]]) -> tuple[list[tinker.Datum], dict
                 if record.rollout_id != episode.rollout_id:
                     raise ValueError("Trace rollout_id does not match its episode")
                 if any(record.loss_mask):
-                    datums.append(trace_to_datum(record, episode.reward - mean_reward))
+                    datums.append(trace_to_datum(record, episode.reward - mean_reward, loss_weights))
                     generated_tokens += sum(record.loss_mask)
     attempts = sum(len(group) for group in groups)
     return datums, {
