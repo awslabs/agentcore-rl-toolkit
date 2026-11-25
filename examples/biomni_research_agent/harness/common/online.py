@@ -1,9 +1,11 @@
 """Direct-query online database tools, shared by dbqa and screen.
 
 The agent supplies an endpoint, NCBI search term, or GraphQL query. No tool
-accepts a natural-language prompt or calls an auxiliary model. NCBI requests
-rotate over the NCBI_API_KEYS keys, each rate-limited on its own across every
-tool-service process.
+accepts a natural-language prompt or calls an auxiliary model. Ensembl and
+Monarch requests are answered from the local release files (ensembl_local.py,
+monarch_local.py); the routes those do not serve go to the official API.
+NCBI requests rotate over the NCBI_API_KEYS keys, each rate-limited on its own
+across every tool-service process.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import itertools
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 from functools import lru_cache
@@ -21,7 +24,9 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
-from .paths import RATE_DIR
+from .ensembl_local import EnsemblLocal
+from .monarch_local import MonarchLocal
+from .paths import DATA, RATE_DIR
 
 BASES = {
     "query_uniprot": "https://rest.uniprot.org",
@@ -43,6 +48,10 @@ EXTRA_HOSTS = {"query_stringdb": {"string-db.org", "www.string-db.org"}}
 MAX_ENDPOINT_CHARS = 4000
 MAX_REPLY_BYTES = 48_000
 REQUEST_TIMEOUT = (5, 30)
+LOCAL = {
+    "query_ensembl": EnsemblLocal(DATA / "ensembl/ensembl_116.sqlite"),
+    "query_monarch": MonarchLocal(DATA / "monarch/monarch_kg.sqlite"),
+}
 
 
 @lru_cache(maxsize=1)
@@ -237,7 +246,21 @@ def direct_endpoint(
         if not any(k in parameters for k in ("limit", "rows", "size", "page_size")):
             parameters["limit"] = str(max_results)
             url = urlunparse(parsed._replace(query=urlencode(parameters)))
+    if name in LOCAL:
+        try:
+            local = LOCAL[name].get(url)
+        except (OSError, sqlite3.Error) as exc:
+            return {"status": "backend_error", "source": name, "backend_source": "local_db", "error": str(exc)}
+        if local is not None:
+            return _local_result(name, url, *local)
     return _request(url, name)
+
+
+def _local_result(source: str, url: str, http_status: int, body) -> dict:
+    result = {"source": source, "backend_source": "local_db", "http_status": http_status, "request_url": url}
+    if len(json.dumps(body, ensure_ascii=False).encode()) > MAX_REPLY_BYTES:
+        return {**result, "status": "result_too_large", "error": "Local response exceeded 48 KB; narrow the query."}
+    return {**result, "status": "not_found" if http_status == 404 else "ok", "result": body}
 
 
 def ncbi_search(database: str, search_term: str, max_results: int = 3) -> dict:
@@ -348,7 +371,7 @@ OFFICIAL_SPECS = [
     endpoint_spec(
         "query_ensembl",
         "Query Ensembl REST routes for genes, variants, and sequences.",
-        routing="fixed Ensembl 116 local projection, strict-local without online fallback",
+        routing="fixed Ensembl 116 local projection; variation and overlap routes use the official online service",
     ),
     endpoint_spec(
         "query_monarch",

@@ -2,8 +2,8 @@
 
     python prepare_data.py [--out data] [--only STEP ...]
 
-Steps, in order: gwas, seqqa, screen, gene_sets, interactions, disease, clinvar. Downloads go to <out>/raw/ and are
-reused when present; delete that directory once the build is done.
+Steps, in order: gwas, seqqa, screen, gene_sets, interactions, disease, clinvar, ensembl, monarch. Downloads go to
+<out>/raw/ and are reused when present; delete that directory once the build is done.
 """
 
 import argparse
@@ -34,7 +34,15 @@ ORCS = (
 ORCS_INDEX = "BIOGRID-ORCS-SCREEN_INDEX-2.0.18.index.tab.txt"
 MONDO = "https://github.com/monarch-initiative/mondo/releases/download/v2026-08-04/mondo.obo"
 HPO = "https://github.com/obophenotype/human-phenotype-ontology/releases/download/v2026-06-23/genes_to_disease.txt"
-ENSEMBL_PEP = "https://ftp.ensembl.org/pub/release-116/fasta/homo_sapiens/pep/Homo_sapiens.GRCh38.pep.all.fa.gz"
+ENSEMBL = "https://ftp.ensembl.org/pub/release-116"
+ENSEMBL_PEP = f"{ENSEMBL}/fasta/homo_sapiens/pep/Homo_sapiens.GRCh38.pep.all.fa.gz"
+ENSEMBL_CORE = f"{ENSEMBL}/mysql/homo_sapiens_core_116_38"
+ENSEMBL_FASTA = {  # sequence type -> (molecule, FASTA)
+    "cds": ("dna", f"{ENSEMBL}/fasta/homo_sapiens/cds/Homo_sapiens.GRCh38.cds.all.fa.gz"),
+    "cdna": ("dna", f"{ENSEMBL}/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz"),
+    "protein": ("protein", ENSEMBL_PEP),
+}
+MONARCH_KG = "https://data.monarchinitiative.org/monarch-kg/2026-08-20/monarch-kg.tar.gz"
 MANE = f"{NCBI}/refseq/MANE/MANE_human/release_1.5/MANE.GRCh38.v1.5.summary.txt.gz"
 REFSEQ_PROTEINS = f"{NCBI}/refseq/H_sapiens/mRNA_Prot/"  # current release: no archive
 CLINVAR_SUMMARY = f"{NCBI}/pub/clinvar/tab_delimited/archive/variant_summary_2026-09.txt.gz"
@@ -347,6 +355,233 @@ def build_clinvar(out: Path, raw: Path) -> None:
     con.close()
 
 
+# --------------------------------------------------------------------------- ensembl, monarch
+
+
+def ensembl_table(raw: Path, table: str) -> pd.DataFrame:
+    """One table of the release's MySQL dump (tab-separated, \\N for NULL), with the columns of its CREATE TABLE."""
+    schema = gzip.open(download(f"{ENSEMBL_CORE}/homo_sapiens_core_116_38.sql.gz", raw), "rt").read()
+    body = schema[schema.index(f"CREATE TABLE `{table}` (") :].split("\n) ENGINE", 1)[0]
+    columns = re.findall(r"^\s+`(\w+)`", body, re.M)
+    escapes = {"t": "\t", "n": "\n", "r": "\r", "0": "\0"}
+
+    def field(value: str) -> str | None:
+        return None if value == "\\N" else re.sub(r"\\(.)", lambda m: escapes.get(m[1], m[1]), value)
+
+    with gzip.open(download(f"{ENSEMBL_CORE}/{table}.txt.gz", raw, f"ensembl_{table}.txt.gz"), "rt") as stream:
+        rows = [[field(v) for v in line.rstrip("\n").split("\t")] for line in stream]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def build_ensembl(out: Path, raw: Path) -> None:
+    """Ensembl 116 human genes in the shape of GET /lookup/id, gene symbols and xrefs, and transcript sequences."""
+    t = {name: ensembl_table(raw, name) for name in ("gene", "seq_region", "coord_system", "analysis", "transcript")}
+    gene = (
+        t["gene"]
+        .merge(t["seq_region"][["seq_region_id", "name", "coord_system_id"]], on="seq_region_id")
+        .merge(t["coord_system"][["coord_system_id", "version"]].rename(columns={"version": "assembly"}))
+        .merge(t["analysis"][["analysis_id", "logic_name"]], on="analysis_id")
+        .merge(
+            t["transcript"][["transcript_id", "stable_id", "version"]].rename(
+                columns={"transcript_id": "canonical_transcript_id", "stable_id": "ct_id", "version": "ct_version"}
+            ),
+            on="canonical_transcript_id",
+            how="left",
+        )
+    )
+    gene = gene.astype(object).where(gene.notna(), None)  # merges turn NULL into NaN; the JSON wants null
+    xref = ensembl_table(raw, "xref")
+    label = dict(zip(xref["xref_id"], xref["display_label"], strict=True))
+    con = connect(out / "ensembl" / "ensembl_116.sqlite")
+    con.executescript(
+        """
+        CREATE TABLE genes (stable_id TEXT PRIMARY KEY, body TEXT NOT NULL) WITHOUT ROWID;
+        CREATE TABLE gene_symbols (symbol_lower TEXT PRIMARY KEY, stable_id TEXT NOT NULL) WITHOUT ROWID;
+        CREATE TABLE xref_symbols (symbol_lower TEXT, stable_id TEXT, PRIMARY KEY (symbol_lower, stable_id))
+            WITHOUT ROWID;
+        CREATE TABLE gene_xrefs (stable_id TEXT PRIMARY KEY, body TEXT NOT NULL) WITHOUT ROWID;
+        CREATE TABLE sequences (stable_id TEXT, type TEXT, molecule TEXT NOT NULL, version INTEGER, seq TEXT NOT NULL,
+            PRIMARY KEY (stable_id, type)) WITHOUT ROWID;
+        """
+    )
+    genes, symbols = [], {}
+    primary = {str(c) for c in range(1, 23)} | {"X", "Y", "MT"}
+    for g in gene.itertuples():
+        display = label.get(g.display_xref_id)
+        canonical = g.ct_id and (f"{g.ct_id}.{g.ct_version}" if g.ct_version else g.ct_id)
+        body = {
+            "assembly_name": g.assembly,
+            "biotype": g.biotype,
+            "canonical_transcript": canonical,
+            "db_type": "core",
+            "description": g.description,
+            "display_name": display,
+            "end": int(g.seq_region_end),
+            "id": g.stable_id,
+            "logic_name": g.logic_name,
+            "object_type": "Gene",
+            "seq_region_name": g.name,
+            "source": g.source,
+            "species": "homo_sapiens",
+            "start": int(g.seq_region_start),
+            "strand": int(g.seq_region_strand),
+            "version": int(g.version) if g.version else None,
+        }
+        genes.append((g.stable_id, json.dumps(body, sort_keys=True)))
+        if display:  # /lookup/symbol: a symbol on a reference chromosome wins over one on a patch or haplotype
+            rank = (g.name not in primary, g.stable_id)
+            if display.lower() not in symbols or rank < symbols[display.lower()][0]:
+                symbols[display.lower()] = (rank, g.stable_id)
+    con.executemany("INSERT INTO genes VALUES (?, ?)", genes)
+    con.executemany("INSERT INTO gene_symbols VALUES (?, ?)", ((k, v[1]) for k, v in symbols.items()))
+
+    # /xrefs/symbol matches a current gene's display label or any synonym of it, and may return several genes.
+    synonym = ensembl_table(raw, "external_synonym")
+    current = gene[gene["is_current"] == "1"]
+    by_label = current.dropna(subset=["display_xref_id"]).merge(
+        synonym, left_on="display_xref_id", right_on="xref_id", how="left"
+    )
+    pairs = {
+        (label[x].lower(), s)
+        for x, s in zip(by_label["display_xref_id"], by_label["stable_id"], strict=True)
+        if label.get(x)
+    }
+    pairs |= {
+        (w.lower(), s)
+        for w, s in zip(by_label["synonym"], by_label["stable_id"], strict=True)
+        if isinstance(w, str) and w
+    }
+    con.executemany("INSERT INTO xref_symbols VALUES (?, ?)", sorted(pairs))
+
+    # /xrefs/id: every external reference attached to the gene, with that reference's synonyms.
+    linked = (
+        ensembl_table(raw, "object_xref")
+        .query("ensembl_object_type == 'Gene'")
+        .merge(current[["gene_id", "stable_id"]], left_on="ensembl_id", right_on="gene_id")
+        .merge(xref, on="xref_id")
+        .merge(ensembl_table(raw, "external_db")[["external_db_id", "db_name", "db_display_name"]], on="external_db_id")
+    )
+    linked = linked.astype(object).where(linked.notna(), None)
+    synonyms = synonym.groupby("xref_id")["synonym"].apply(list).to_dict()
+    per_gene = collections.defaultdict(list)
+    for r in linked.itertuples():
+        per_gene[r.stable_id].append(
+            {
+                "synonyms": synonyms.get(r.xref_id, []),
+                "primary_id": r.dbprimary_acc,
+                "db_display_name": r.db_display_name,
+                "description": r.description,
+                "version": r.version or "0",
+                "info_type": r.info_type,
+                "info_text": r.info_text or "",
+                "dbname": r.db_name,
+                "display_id": r.display_label,
+            }
+        )
+    con.executemany(
+        "INSERT INTO gene_xrefs VALUES (?, ?)",
+        ((k, json.dumps(v, ensure_ascii=False, separators=(",", ":"))) for k, v in per_gene.items()),
+    )
+
+    for kind, (molecule, url) in ENSEMBL_FASTA.items():
+        with gzip.open(download(url, raw), "rt") as stream:
+            for record in SeqIO.parse(stream, "fasta"):
+                stable_id, _, version = record.id.partition(".")
+                con.execute(
+                    "INSERT OR REPLACE INTO sequences VALUES (?, ?, ?, ?, ?)",
+                    (stable_id, kind, molecule, int(version) if version.isdigit() else None, str(record.seq)),
+                )
+    con.commit()
+    con.close()
+
+
+def monarch_cell(value: str, is_list: bool):
+    """A node cell of the KG dump: empty -> None; list cells are Python-list reprs, some quoting only some items."""
+    value = value.strip()
+    if not value:
+        return None
+    if not is_list:  # a scalar may carry one outer pair of quotes the dump added
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'" and value[0] not in value[1:-1]:
+            return value[1:-1].replace('\\"', '"').replace("\\'", "'") or None
+        return value
+    if not (value.startswith("[") and value.endswith("]")):
+        return [part for part in value.split("|") if part] or None
+    try:
+        items = ast.literal_eval(value)
+        items = list(items) if isinstance(items, (list, tuple)) else [items]
+    except (ValueError, SyntaxError):  # e.g. [RNF53, 'BRCA1/BRCA2-containing complex, subunit 1']: split outside quotes
+        items, buffer, quote, chars = [], [], None, iter(value[1:-1])
+        for c in chars:
+            if quote and c == "\\":
+                buffer.append(next(chars, ""))
+            elif quote and c == quote:
+                quote = None
+            elif quote:
+                buffer.append(c)
+            elif c in "'\"":
+                quote = c
+            elif c == ",":
+                items.append("".join(buffer))
+                buffer = []
+            else:
+                buffer.append(c)
+        items.append("".join(buffer))
+    return [str(item).strip() for item in items if str(item).strip()] or None
+
+
+def build_monarch(out: Path, raw: Path) -> None:
+    """Monarch KG nodes in the shape of GET /v3/api/entity/{id}, and the edges the entity response embeds."""
+    lists = {"category", "xref", "synonym", "exact_synonym", "broad_synonym", "narrow_synonym", "related_synonym"}
+    lists |= {"same_as", "subsets", "synonyms", "has_attribute"}
+    predicates = {"biolink:has_phenotype", "biolink:causes", "biolink:has_mode_of_inheritance"}
+    con = connect(out / "monarch" / "monarch_kg.sqlite")
+    con.executescript(
+        """
+        CREATE TABLE nodes (id TEXT PRIMARY KEY, name TEXT, payload TEXT NOT NULL) WITHOUT ROWID;
+        CREATE TABLE edges (predicate TEXT, subject TEXT, object TEXT, PRIMARY KEY (predicate, subject, object))
+            WITHOUT ROWID;
+        """
+    )
+    csv.field_size_limit(1 << 26)
+    with tarfile.open(download(MONARCH_KG, raw), "r|gz") as tar:
+        for member in tar:
+            name = member.name.rsplit("/", 1)[-1]
+            if name not in {"monarch-kg_nodes.tsv", "monarch-kg_edges.tsv"}:
+                continue
+            lines = (line.decode("utf-8", "replace") for line in tar.extractfile(member))  # a stream: not seekable
+            reader = csv.reader(lines, delimiter="\t", quoting=csv.QUOTE_NONE)
+            header = next(reader)
+            if name == "monarch-kg_nodes.tsv":
+                for row in reader:
+                    node = dict(zip(header, row, strict=True)) if len(row) == len(header) else {}
+                    node = {k: monarch_cell(v, k in lists) for k, v in node.items()}
+                    if node.get("id"):
+                        node["category"] = node["category"][0] if node.get("category") else None
+                        node["namespace"] = node["id"].split(":", 1)[0] if ":" in node["id"] else None
+                        con.execute(
+                            "INSERT OR REPLACE INTO nodes VALUES (?, ?, ?)",
+                            (node["id"], node.get("name"), json.dumps(node, ensure_ascii=False, separators=(",", ":"))),
+                        )
+            else:
+                # One row per (predicate, subject, object); a negated edge ("does not have phenotype") is dropped.
+                s, p, o, neg = (header.index(c) for c in ("subject", "predicate", "object", "negated"))
+                con.executemany(
+                    "INSERT OR IGNORE INTO edges VALUES (?, ?, ?)",
+                    (
+                        (r[p], r[s], r[o])
+                        for r in reader
+                        if len(r) > max(s, p, o, neg) and r[p] in predicates and r[neg] != "True"
+                    ),
+                )
+    con.executescript(
+        """
+        CREATE INDEX edges_object ON edges (predicate, object);
+        """
+    )
+    con.commit()
+    con.close()
+
+
 STEPS = {
     "gwas": build_gwas,
     "seqqa": build_seqqa,
@@ -355,6 +590,8 @@ STEPS = {
     "interactions": build_interactions,
     "disease": build_disease,
     "clinvar": build_clinvar,
+    "ensembl": build_ensembl,
+    "monarch": build_monarch,
 }
 
 

@@ -26,13 +26,13 @@ The reward is 1 when the final answer, in its canonical form, matches the label,
 
 ## Results
 
-Reference run results (same agent, data and hyperparameters, trained on SageMaker MTRL). Qwen3.6-27B, thinking off,
+Results of a GRPO run on SageMaker Training Sessions, best evaluated checkpoint. Qwen3.6-27B, thinking off,
 pass@1 over 8 samples per question:
 
 | Model | dbqa | seqqa | screen | GWAS Catalog | OT causal gene | OT variant | Mean |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Qwen3.6-27B | 0.715 | 0.625 | 0.720 | 0.607 | 0.553 | 0.259 | 0.580 |
-| + LoRA r32, step 42 | 0.902 | 0.870 | 0.915 | 0.655 | 0.758 | 0.637 | 0.790 |
+| + LoRA r32, step 30 | 0.895 | 0.850 | 0.902 | 0.667 | 0.722 | 0.573 | 0.768 |
 
 ## Install
 
@@ -48,10 +48,20 @@ uv sync
 uv run python prepare_data.py --out data
 ```
 
-The script downloads about 2.2 GB from the public sources (GWAS Catalog 2026-03-17, BioGRID ORCS 2.0.18, the Biomni
-data lake, MSigDB 2023.2, MONDO, HPO, ClinVar, RefSeq, MANE 1.5, Ensembl 116 and two GenBank records) into
-`data/raw/` and builds about 2.3 GB of environment data under `data/`. Delete `data/raw/` afterwards. Rerun a single
-step with `--only`, e.g. `--only clinvar`.
+The script downloads about 2.9 GB of public releases into `data/raw/` (delete it afterwards) and builds about 7.9 GB
+of environment data under `data/`; `--only <step>` reruns one step. The tools read:
+
+- from `data/`: GWAS Catalog 2026-03-17, BioGRID ORCS 2.0.18, gene sets, interactions, disease evidence,
+  ClinVar 2026-09, Ensembl 116 gene lookups, xrefs and sequences, and Monarch KG 2026-08-20 entities;
+- online: STRING 12.0, and at the source's current release Open Targets, NCBI, UniProt, InterPro, gnomAD, UCSC,
+  JASPAR, ReMap, QuickGO, KEGG, Reactome, Ensembl variation, overlap and seqqa queries, and the other Monarch
+  routes.
+
+Every tool result is recorded in the rollout. To pin Open Targets, serve release 26.06 on the tool-service instance
+with the official [standalone deployment](https://github.com/opentargets/platform-deployment-standalone), its
+published ports bound to `127.0.0.1`, and set
+`OPEN_TARGETS_GRAPHQL_URL=http://127.0.0.1:8081/api/v4/graphql OPEN_TARGETS_RELEASE=26.06`: the first query then
+fails unless the endpoint serves that release.
 
 ## Start the tool services
 
@@ -128,5 +138,5 @@ cp config.example.yaml config.yaml   # fill in the AWS resources, agent_runtime_
 python -m agentcore_rl_toolkit.backends.sagemaker.train_grpo --config config.yaml
 ```
 
-`config.example.yaml` holds the reference run's settings: LoRA rank 32 / alpha 64, batch 64 questions × 8 rollouts,
+`config.example.yaml` sets LoRA rank 32 / alpha 64, batch 64 questions × 8 rollouts,
 learning rate 5e-5, PPO loss, one epoch, thinking off, 64K context.
