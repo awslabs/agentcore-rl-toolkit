@@ -81,6 +81,7 @@ Each rollout ends with one JSON line in the harness runtime log:
 | `event` | `tmax_rollout` |
 | `task_id`, `session_id`, `source` | Task and sandbox session |
 | `reward`, `stop_reason`, `error`, `steps`, `duration_s` | Outcome |
+| `format_errors`, `final_format_errors` | The agent's format-error messages (the `<error>` line, else the first line), all and in the final run of consecutive format errors |
 | `verifier_exit_code`, `verifier_timed_out`, `verifier_stdout`, `verifier_stderr` | Verifier result |
 | `trace_id` | Trace of this rollout in `aws/spans` |
 
