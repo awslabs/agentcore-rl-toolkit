@@ -154,6 +154,7 @@ class BaseAdapter:
         debug_callback: Callable[..., None] | None = None,
         manager: TrajectoryManager | None = None,
         app: web.Application | None = None,
+        require_registered_sessions: bool = False,
     ) -> None:
         self.backend = backend
         self.renderer = renderer
@@ -163,6 +164,11 @@ class BaseAdapter:
         self.store: dict[str, Any] = {}
         self.inflight: dict[str, set[asyncio.Task]] = {}
         self.closed: set[str] = set()
+        # Opt-in auth guard: when True, only sids registered via open_session
+        # (<- RolloutGateway.create_session) may drive a turn; an unknown Bearer is
+        # refused with 401 instead of implicitly opening a session. Default False
+        # keeps the open-session-on-first-turn behaviour (local runs, tests).
+        self.require_registered_sessions = require_registered_sessions
 
         # one manager shared across all sids (and across co-mounted adapters, when
         # passed in); per-sid trees live inside it.
@@ -377,6 +383,11 @@ class BaseAdapter:
         if sid in self.closed:  # session drained; refuse stragglers
             self.logger.debug("[%s] sid=%s request after session closed", self.log_prefix, sid)
             return web.Response(status=503, text="session closed")
+        # open_session populates self.store, so an unregistered sid is one absent from
+        # it. Debug-level log so a scanner hammering the port does not flood the logs.
+        if self.require_registered_sessions and sid not in self.store:
+            self.logger.debug("[%s] sid=%s rejected: unregistered session", self.log_prefix, sid)
+            return web.Response(status=401, text="unknown session")
         capped = self._check_turn_cap(sid)
         if capped is not None:
             return capped

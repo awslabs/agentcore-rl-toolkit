@@ -148,6 +148,10 @@ sample-only backends like Tinker, which cannot render themselves.
 **Session model.** A session id (in the Bearer slot) keys one trajectory tree.
 `gateway.create_session(sid)` → agent turns are captured → `gateway.finish_session(sid)`
 drains the tree into `list[TraceRecord]`.
+The opt-in `require_registered_sessions=True` flag refuses turns for any sid not
+registered via `create_session` with a `401` (recommended when the gateway port is
+reachable from outside a trusted network); it defaults off, leaving the open-on-first-turn
+behaviour unchanged.
 
 **Multi-API & sub-agents.**
 - *Multi-API* (works today): OpenAI- and Anthropic-protocol turns for the same session id
