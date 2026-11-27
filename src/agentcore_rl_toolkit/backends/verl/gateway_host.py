@@ -86,8 +86,13 @@ def get_or_start_gateway(
     history_mode: str = "linear",
     chat_template_kwargs: dict | None = None,
     linear_on_nonlinear: str = "reset",
+    require_registered_sessions: bool = False,
 ) -> GatewayHandle:
-    """Lazily create or return this process's gateway singleton."""
+    """Lazily create or return this process's gateway singleton.
+
+    ``require_registered_sessions`` is process-shared like ``port``: the first
+    caller's value wins and later callers' values are ignored.
+    """
     global _HANDLE
     with _LOCK:
         if _HANDLE is not None:
@@ -103,6 +108,7 @@ def get_or_start_gateway(
             max_turns_per_sid=max_turns_per_sid,
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
+            require_registered_sessions=require_registered_sessions,
         )
         server = ThreadedGatewayServer(
             gateway,

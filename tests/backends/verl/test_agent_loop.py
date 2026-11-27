@@ -165,6 +165,25 @@ async def test_invalid_reward_mode_rejected():
         _make_loop(reward_mode="nope")
 
 
+async def test_require_registered_sessions_guards_gateway():
+    """The loop forwards the flag to its gateway; its own registered rollout still
+    runs, while a turn under an unregistered key is refused with 401."""
+    loop = _make_loop(require_registered_sessions=True)
+    assert all(a.require_registered_sessions for a in loop._gateway.gateway.adapters)
+
+    async with aiohttp.ClientSession() as http:
+        resp = await http.post(
+            f"{loop._gateway.base_url}/v1/chat/completions",
+            json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer stranger"},
+        )
+        assert resp.status == 401
+
+    _wire_result(loop, {"reward": 1.0})
+    outputs = await loop.run({}, raw_prompt=[{"role": "user", "content": "hi"}], payload={"prompt": "hi"})
+    assert outputs and outputs[0].reward_score == 1.0
+
+
 async def test_multi_turn_merges_to_one_record():
     loop = _make_loop()
     _wire_result(loop, {"reward": 1.0}, drive_turns=3)

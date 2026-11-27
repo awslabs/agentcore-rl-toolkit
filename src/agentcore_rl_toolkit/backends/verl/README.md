@@ -102,6 +102,12 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
   dispatches session operations to the gateway's event loop.
   **ACR containers must be able to reach that port.** Set `gateway_public_host`
   if the Ray node IP is not reachable from ACR.
+- By default the gateway opens a capture session on the first turn for any key.
+  If the port is reachable from outside a trusted network, set
+  `require_registered_sessions: true` on `AgentCoreAgentLoop`: turns whose key the
+  loop did not register via `create_session` get `401`, while `/healthz` and
+  `/v1/models` stay unauthenticated. Like `gateway_port`, it is process-shared
+  (the first agent loop's value wins).
 - A trajectory tree can fork; each leaf becomes a training row.
   `run()` returns `list[AgentLoopOutput]`, requiring `trainer.use_v1=true`.
 
