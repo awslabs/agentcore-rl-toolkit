@@ -77,6 +77,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
         max_turns_per_sid: int | None = None,
         history_mode: str = "linear",
         linear_on_nonlinear: str = "reset",
+        require_registered_sessions: bool = False,
+        override_client_sampling: bool = False,
         reward_mode: str = "built_in",
         reward_extra_info_defaults: dict | None = None,
         # {name: threshold} -> emit reward_extra_info[name] = 1.0 if reward >= threshold.
@@ -144,6 +146,8 @@ class AgentCoreAgentLoop(AgentLoopBase):
             chat_template_kwargs=dict(self.apply_chat_template_kwargs or {}),
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
+            require_registered_sessions=require_registered_sessions,
+            override_client_sampling=override_client_sampling,
         )
         self._rollout_semaphore = RayPrioritySemaphore(ray.get_actor("rollout_concurrency_semaphore"))
         self._session_rate_limiter = RayRateLimiter(ray.get_actor("session_create_rate_limiter"))

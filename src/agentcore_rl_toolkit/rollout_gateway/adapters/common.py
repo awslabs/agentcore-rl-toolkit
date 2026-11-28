@@ -154,6 +154,8 @@ class BaseAdapter:
         debug_callback: Callable[..., None] | None = None,
         manager: TrajectoryManager | None = None,
         app: web.Application | None = None,
+        require_registered_sessions: bool = False,
+        override_client_sampling: bool = False,
     ) -> None:
         self.backend = backend
         self.renderer = renderer
@@ -163,6 +165,13 @@ class BaseAdapter:
         self.store: dict[str, Any] = {}
         self.inflight: dict[str, set[asyncio.Task]] = {}
         self.closed: set[str] = set()
+        # Opt-in auth guard: when True, only sids registered via open_session
+        # (<- RolloutGateway.create_session) may drive a turn; an unknown Bearer is
+        # refused with 401 instead of implicitly opening a session. Default False
+        # keeps the open-session-on-first-turn behaviour (local runs, tests).
+        self.require_registered_sessions = require_registered_sessions
+        # See RolloutGateway: session sampling defaults win over the request's.
+        self.override_client_sampling = override_client_sampling
 
         # one manager shared across all sids (and across co-mounted adapters, when
         # passed in); per-sid trees live inside it.
@@ -377,6 +386,11 @@ class BaseAdapter:
         if sid in self.closed:  # session drained; refuse stragglers
             self.logger.debug("[%s] sid=%s request after session closed", self.log_prefix, sid)
             return web.Response(status=503, text="session closed")
+        # open_session populates self.store, so an unregistered sid is one absent from
+        # it. Debug-level log so a scanner hammering the port does not flood the logs.
+        if self.require_registered_sessions and sid not in self.store:
+            self.logger.debug("[%s] sid=%s rejected: unregistered session", self.log_prefix, sid)
+            return web.Response(status=401, text="unknown session")
         capped = self._check_turn_cap(sid)
         if capped is not None:
             return capped
@@ -400,7 +414,13 @@ class BaseAdapter:
 
             if sid in self.closed:
                 return web.Response(status=503, text="session closed")
-            sampling_params = _sampling_params(s, body, max_token_keys=self.max_token_keys, stop_keys=self.stop_keys)
+            sampling_params = _sampling_params(
+                s,
+                body,
+                max_token_keys=self.max_token_keys,
+                stop_keys=self.stop_keys,
+                override_client_sampling=self.override_client_sampling,
+            )
             if s.validate_sampling_params is not None:
                 try:
                     s.validate_sampling_params(dict(sampling_params))
@@ -509,7 +529,14 @@ def sid_from_body(body: dict | None) -> str | None:
     return None
 
 
-def _sampling_params(session: Any, body: dict, *, max_token_keys: tuple[str, ...], stop_keys: tuple[str, ...]) -> dict:
+def _sampling_params(
+    session: Any,
+    body: dict,
+    *,
+    max_token_keys: tuple[str, ...],
+    stop_keys: tuple[str, ...],
+    override_client_sampling: bool,
+) -> dict:
     """Map a wire request body to the canonical sampling-params dict handed to the
     backend. Backend-neutral: each backend translates keys like ``max_new_tokens`` to
     its own wire names."""
@@ -527,7 +554,7 @@ def _sampling_params(session: Any, body: dict, *, max_token_keys: tuple[str, ...
             break
 
     for src_k, dst_k in (("temperature", "temperature"), ("top_p", "top_p"), ("top_k", "top_k")):
-        if src_k in body:
+        if src_k in body and not override_client_sampling:
             sp[dst_k] = body[src_k]
 
     for key in stop_keys:

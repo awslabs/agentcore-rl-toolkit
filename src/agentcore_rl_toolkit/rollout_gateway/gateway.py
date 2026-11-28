@@ -49,6 +49,18 @@ class RolloutGateway:
         linear_on_nonlinear: ``"reset"`` (default) | ``"error"`` | ``"passthrough"`` —
             behaviour when a request does not extend the session's latest turn (linear
             mode only).
+        require_registered_sessions: opt-in auth guard (default ``False``). When ``True``,
+            only sids registered via ``create_session`` may drive a turn; any other
+            Bearer is refused with ``401`` instead of implicitly opening a session.
+            Health and ``/v1/models`` probes stay unauthenticated. Enable it whenever
+            the gateway port is reachable from outside a trusted network, so a caller
+            cannot POST an arbitrary Bearer for free inference and pollute the
+            trajectory trees.
+        override_client_sampling: opt-in (default ``False``). When ``True``, a request's
+            ``temperature`` / ``top_p`` / ``top_k`` are ignored and each session's
+            ``sampling_defaults`` apply, so a harness that sends its own sampling
+            parameters still samples from the policy the trainer recomputes logprobs
+            under. ``max_tokens`` keeps the min(trainer, client) rule.
     """
 
     def __init__(
@@ -62,6 +74,8 @@ class RolloutGateway:
         linear_on_nonlinear: str = "reset",
         max_turns_per_sid: int | None = None,
         debug_callback: Any = None,
+        require_registered_sessions: bool = False,
+        override_client_sampling: bool = False,
     ) -> None:
         self.backend = backend
         self.renderer = renderer
@@ -93,6 +107,8 @@ class RolloutGateway:
                 manager=self.manager,  # SHARED across adapters -> one tree per sid
                 healer=self.healer,  # SHARED across adapters -> one set of per-session counters
                 app=self.app,  # SHARED app -> all routes on one server
+                require_registered_sessions=require_registered_sessions,
+                override_client_sampling=override_client_sampling,
             )
             self.adapters.append(adapter)
 
