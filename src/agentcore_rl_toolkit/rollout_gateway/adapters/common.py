@@ -170,9 +170,7 @@ class BaseAdapter:
         # refused with 401 instead of implicitly opening a session. Default False
         # keeps the open-session-on-first-turn behaviour (local runs, tests).
         self.require_registered_sessions = require_registered_sessions
-        # Opt-in: when True, a request's temperature / top_p / top_k are ignored and the
-        # session's sampling_defaults (the trainer's) are used, so an unmodified harness
-        # cannot sample under a policy the trainer does not recompute logprobs for.
+        # See RolloutGateway: session sampling defaults win over the request's.
         self.override_client_sampling = override_client_sampling
 
         # one manager shared across all sids (and across co-mounted adapters, when
@@ -537,7 +535,7 @@ def _sampling_params(
     *,
     max_token_keys: tuple[str, ...],
     stop_keys: tuple[str, ...],
-    override_client_sampling: bool = False,
+    override_client_sampling: bool,
 ) -> dict:
     """Map a wire request body to the canonical sampling-params dict handed to the
     backend. Backend-neutral: each backend translates keys like ``max_new_tokens`` to

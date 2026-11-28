@@ -29,9 +29,7 @@
   #                                # gateway_port. Enable whenever the gateway port is
   #                                # reachable from outside a trusted network.
   # override_client_sampling: false
-  #                                # when true, the gateway ignores an agent's own
-  #                                # temperature/top_p/top_k and samples with the
-  #                                # rollout's values. Process-shared like gateway_port.
+  #                                # see RolloutGateway; process-shared like gateway_port
   # gateway_public_host: <ip>      # host advertised to agents for gateway callbacks.
   #                                # Default: the node IP Ray reports (fine when ACR
   #                                # containers can route to the trainer nodes, as in

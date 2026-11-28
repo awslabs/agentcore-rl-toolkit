@@ -108,11 +108,9 @@ verl main_ppo (v1) ──> AgentLoopWorker ──> AgentCoreAgentLoop.run()
   loop did not register via `create_session` get `401`, while `/healthz` and
   `/v1/models` stay unauthenticated. Like `gateway_port`, it is process-shared
   (the first agent loop's value wins).
-- Agents may send their own `temperature` / `top_p` / `top_k`; by default those win
-  over the rollout's sampling parameters. For unmodified third-party harnesses, set
-  `override_client_sampling: true` so every turn samples with the trainer's values and
-  the recorded logprobs match the policy the trainer recomputes. `max_tokens` keeps
-  the min(trainer, client) rule. Process-shared like `gateway_port`.
+- For unmodified third-party harnesses that send their own sampling parameters, set
+  `override_client_sampling: true` (semantics: `RolloutGateway`). Process-shared like
+  `gateway_port`.
 - A trajectory tree can fork; each leaf becomes a training row.
   `run()` returns `list[AgentLoopOutput]`, requiring `trainer.use_v1=true`.
 
