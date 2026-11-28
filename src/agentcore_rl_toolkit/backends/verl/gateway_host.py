@@ -87,11 +87,12 @@ def get_or_start_gateway(
     chat_template_kwargs: dict | None = None,
     linear_on_nonlinear: str = "reset",
     require_registered_sessions: bool = False,
+    override_client_sampling: bool = False,
 ) -> GatewayHandle:
     """Lazily create or return this process's gateway singleton.
 
-    ``require_registered_sessions`` is process-shared like ``port``: the first
-    caller's value wins and later callers' values are ignored.
+    ``require_registered_sessions`` and ``override_client_sampling`` are process-shared
+    like ``port``: the first caller's value wins and later callers' values are ignored.
     """
     global _HANDLE
     with _LOCK:
@@ -109,6 +110,7 @@ def get_or_start_gateway(
             history_mode=history_mode,
             linear_on_nonlinear=linear_on_nonlinear,
             require_registered_sessions=require_registered_sessions,
+            override_client_sampling=override_client_sampling,
         )
         server = ThreadedGatewayServer(
             gateway,

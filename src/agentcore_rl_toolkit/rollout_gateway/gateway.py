@@ -56,6 +56,11 @@ class RolloutGateway:
             the gateway port is reachable from outside a trusted network, so a caller
             cannot POST an arbitrary Bearer for free inference and pollute the
             trajectory trees.
+        override_client_sampling: opt-in (default ``False``). When ``True``, a request's
+            ``temperature`` / ``top_p`` / ``top_k`` are ignored and each session's
+            ``sampling_defaults`` apply, so a harness that sends its own sampling
+            parameters still samples from the policy the trainer recomputes logprobs
+            under. ``max_tokens`` keeps the min(trainer, client) rule.
     """
 
     def __init__(
@@ -70,6 +75,7 @@ class RolloutGateway:
         max_turns_per_sid: int | None = None,
         debug_callback: Any = None,
         require_registered_sessions: bool = False,
+        override_client_sampling: bool = False,
     ) -> None:
         self.backend = backend
         self.renderer = renderer
@@ -102,6 +108,7 @@ class RolloutGateway:
                 healer=self.healer,  # SHARED across adapters -> one set of per-session counters
                 app=self.app,  # SHARED app -> all routes on one server
                 require_registered_sessions=require_registered_sessions,
+                override_client_sampling=override_client_sampling,
             )
             self.adapters.append(adapter)
 

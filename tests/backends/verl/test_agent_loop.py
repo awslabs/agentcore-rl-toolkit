@@ -184,6 +184,11 @@ async def test_require_registered_sessions_guards_gateway():
     assert outputs and outputs[0].reward_score == 1.0
 
 
+async def test_override_client_sampling_reaches_every_adapter():
+    loop = _make_loop(override_client_sampling=True)
+    assert all(a.override_client_sampling for a in loop._gateway.gateway.adapters)
+
+
 async def test_multi_turn_merges_to_one_record():
     loop = _make_loop()
     _wire_result(loop, {"reward": 1.0}, drive_turns=3)

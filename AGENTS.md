@@ -152,6 +152,9 @@ The opt-in `require_registered_sessions=True` flag refuses turns for any sid not
 registered via `create_session` with a `401` (recommended when the gateway port is
 reachable from outside a trusted network); it defaults off, leaving the open-on-first-turn
 behaviour unchanged.
+The opt-in `override_client_sampling=True` flag ignores a request's `temperature` / `top_p` /
+`top_k` and applies the session's `sampling_defaults`, for harnesses that send their own
+sampling parameters; `max_tokens` keeps the min(trainer, client) rule.
 
 **Multi-API & sub-agents.**
 - *Multi-API* (works today): OpenAI- and Anthropic-protocol turns for the same session id
